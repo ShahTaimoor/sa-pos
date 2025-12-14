@@ -1,0 +1,468 @@
+const crypto = require('crypto');
+const Payment = require('../models/Payment');
+const Transaction = require('../models/Transaction');
+const Sales = require('../models/Sales');
+
+class PaymentService {
+  constructor() {
+    this.gateways = new Map();
+    this.initializeGateways();
+  }
+
+  // Initialize payment gateways
+  initializeGateways() {
+    // Stripe integration
+    if (process.env.STRIPE_SECRET_KEY) {
+      this.gateways.set('stripe', require('./gateways/stripeGateway'));
+    }
+    
+    // PayPal integration
+    if (process.env.PAYPAL_CLIENT_ID) {
+      this.gateways.set('paypal', require('./gateways/paypalGateway'));
+    }
+    
+    // Square integration
+    if (process.env.SQUARE_APPLICATION_ID) {
+      this.gateways.set('square', require('./gateways/squareGateway'));
+    }
+    
+    // Manual/Offline processing
+    this.gateways.set('manual', require('./gateways/manualGateway'));
+  }
+
+  // Generate unique payment ID
+  generatePaymentId() {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substr(2, 9);
+    return `PAY_${timestamp}_${random}`.toUpperCase();
+  }
+
+  // Generate unique transaction ID
+  generateTransactionId() {
+    const timestamp = Date.now().toString(36);
+    const random = Math.random().toString(36).substr(2, 9);
+    return `TXN_${timestamp}_${random}`.toUpperCase();
+  }
+
+  // Process payment
+  async processPayment(paymentData, user) {
+    try {
+      const {
+        orderId,
+        paymentMethod,
+        amount,
+        currency = 'USD',
+        gateway = 'manual',
+        cardDetails,
+        walletDetails,
+        metadata = {}
+      } = paymentData;
+
+      // Validate order exists and get details
+      const order = await Sales.findById(orderId);
+      if (!order) {
+        throw new Error('Order not found');
+      }
+
+      // Validate payment amount
+      if (amount <= 0) {
+        throw new Error('Invalid payment amount');
+      }
+
+      // Check if order is already paid
+      const existingPayments = await Payment.find({ orderId });
+      const totalPaid = existingPayments.reduce((sum, payment) => {
+        return sum + (payment.status === 'completed' ? payment.amount : 0);
+      }, 0);
+
+      if (totalPaid >= order.total) {
+        throw new Error('Order is already fully paid');
+      }
+
+      // Create payment record
+      const payment = new Payment({
+        paymentId: this.generatePaymentId(),
+        orderId,
+        paymentMethod,
+        amount,
+        currency,
+        status: 'pending',
+        gateway: {
+          name: gateway
+        },
+        cardDetails: cardDetails ? this.sanitizeCardDetails(cardDetails) : undefined,
+        walletDetails,
+        metadata: {
+          ...metadata,
+          customerId: order.customer,
+          terminalId: metadata.terminalId || 'POS_001'
+        },
+        security: {
+          ipAddress: metadata.ipAddress,
+          userAgent: metadata.userAgent,
+          riskScore: await this.calculateRiskScore(paymentData, order)
+        }
+      });
+
+      await payment.save();
+
+      // Process payment through gateway
+      const gatewayService = this.gateways.get(gateway);
+      if (!gatewayService) {
+        throw new Error(`Payment gateway '${gateway}' not available`);
+      }
+
+      // Create transaction record
+      const transaction = new Transaction({
+        transactionId: this.generateTransactionId(),
+        orderId,
+        paymentId: payment._id,
+        type: 'sale',
+        amount,
+        currency,
+        status: 'pending',
+        paymentMethod,
+        gateway: {
+          name: gateway
+        },
+        cardDetails: payment.cardDetails,
+        walletDetails: payment.walletDetails,
+        customer: {
+          id: order.customer,
+          email: metadata.customerEmail,
+          phone: metadata.customerPhone
+        },
+        terminal: {
+          id: metadata.terminalId || 'POS_001',
+          location: metadata.location || 'Main Store',
+          version: process.env.APP_VERSION || '1.0.0'
+        },
+        security: payment.security,
+        metadata: {
+          receiptNumber: metadata.receiptNumber,
+          reference: payment.paymentId
+        },
+        processing: {
+          initiatedAt: new Date(),
+          processedBy: user._id
+        }
+      });
+
+      await transaction.save();
+
+      // Process through gateway
+      const gatewayResult = await gatewayService.processPayment({
+        amount,
+        currency,
+        paymentMethod,
+        cardDetails: payment.cardDetails,
+        walletDetails: payment.walletDetails,
+        metadata: {
+          orderId: order._id,
+          paymentId: payment.paymentId,
+          transactionId: transaction.transactionId
+        }
+      });
+
+      // Update transaction with gateway response
+      transaction.gateway.transactionId = gatewayResult.transactionId;
+      transaction.gateway.gatewayResponse = gatewayResult.response;
+      transaction.gateway.processingFee = gatewayResult.fees || 0;
+      transaction.status = gatewayResult.status;
+      transaction.processing.processedAt = new Date();
+      transaction.processing.errorCode = gatewayResult.errorCode;
+      transaction.processing.errorMessage = gatewayResult.errorMessage;
+
+      await transaction.save();
+
+      // Update payment with gateway response
+      payment.gateway.transactionId = gatewayResult.transactionId;
+      payment.gateway.gatewayResponse = gatewayResult.response;
+      payment.fees.gatewayFee = gatewayResult.fees || 0;
+      payment.status = gatewayResult.status;
+      payment.processing.processedAt = new Date();
+      payment.processing.processedBy = user._id;
+
+      await payment.save();
+
+      // Update order status if payment is successful
+      if (gatewayResult.status === 'completed') {
+        await this.updateOrderPaymentStatus(orderId);
+      }
+
+      return {
+        success: true,
+        payment,
+        transaction,
+        gatewayResult
+      };
+
+    } catch (error) {
+      console.error('Payment processing error:', error);
+      throw error;
+    }
+  }
+
+  // Process refund
+  async processRefund(paymentId, refundData, user) {
+    try {
+      const { amount, reason } = refundData;
+
+      const payment = await Payment.findById(paymentId);
+      if (!payment) {
+        throw new Error('Payment not found');
+      }
+
+      if (!payment.canRefund()) {
+        throw new Error('Payment cannot be refunded');
+      }
+
+      if (amount > payment.remainingAmount) {
+        throw new Error('Refund amount exceeds remaining amount');
+      }
+
+      // Process refund through gateway
+      const gatewayService = this.gateways.get(payment.gateway.name);
+      if (!gatewayService) {
+        throw new Error(`Payment gateway '${payment.gateway.name}' not available`);
+      }
+
+      const gatewayResult = await gatewayService.processRefund({
+        transactionId: payment.gateway.transactionId,
+        amount,
+        reason,
+        metadata: {
+          paymentId: payment.paymentId,
+          orderId: payment.orderId
+        }
+      });
+
+      // Create refund record
+      const refund = payment.processRefund(amount, reason, user._id);
+      refund.status = gatewayResult.status;
+      refund.gatewayResponse = gatewayResult.response;
+
+      await payment.save();
+
+      // Create refund transaction
+      const refundTransaction = new Transaction({
+        transactionId: this.generateTransactionId(),
+        orderId: payment.orderId,
+        paymentId: payment._id,
+        type: 'refund',
+        amount: -amount, // Negative amount for refund
+        currency: payment.currency,
+        status: gatewayResult.status,
+        paymentMethod: payment.paymentMethod,
+        gateway: {
+          name: payment.gateway.name,
+          transactionId: gatewayResult.transactionId,
+          gatewayResponse: gatewayResult.response,
+          processingFee: gatewayResult.fees || 0
+        },
+        processing: {
+          initiatedAt: new Date(),
+          processedAt: new Date(),
+          processedBy: user._id
+        },
+        metadata: {
+          refundId: refund.refundId,
+          reason,
+          reference: payment.paymentId
+        }
+      });
+
+      await refundTransaction.save();
+
+      return {
+        success: true,
+        payment,
+        refund,
+        refundTransaction,
+        gatewayResult
+      };
+
+    } catch (error) {
+      console.error('Refund processing error:', error);
+      throw error;
+    }
+  }
+
+  // Void transaction
+  async voidTransaction(transactionId, user, reason) {
+    try {
+      const transaction = await Transaction.findOne({ transactionId });
+      if (!transaction) {
+        throw new Error('Transaction not found');
+      }
+
+      if (!transaction.canVoid()) {
+        throw new Error('Transaction cannot be voided');
+      }
+
+      // Process void through gateway
+      const gatewayService = this.gateways.get(transaction.gateway.name);
+      if (gatewayService && gatewayService.processVoid) {
+        const gatewayResult = await gatewayService.processVoid({
+          transactionId: transaction.gateway.transactionId,
+          metadata: {
+            originalTransactionId: transaction.transactionId
+          }
+        });
+
+        transaction.gateway.gatewayResponse = gatewayResult.response;
+      }
+
+      // Void the transaction
+      await transaction.void(user._id, reason);
+
+      // Update payment status
+      const payment = await Payment.findById(transaction.paymentId);
+      if (payment) {
+        payment.status = 'cancelled';
+        await payment.save();
+      }
+
+      return {
+        success: true,
+        transaction,
+        payment
+      };
+
+    } catch (error) {
+      console.error('Void transaction error:', error);
+      throw error;
+    }
+  }
+
+  // Get payment history
+  async getPaymentHistory(filters = {}) {
+    try {
+      const {
+        orderId,
+        paymentId,
+        status,
+        paymentMethod,
+        startDate,
+        endDate,
+        page = 1,
+        limit = 20
+      } = filters;
+
+      const query = {};
+      
+      if (orderId) query.orderId = orderId;
+      if (paymentId) query.paymentId = paymentId;
+      if (status) query.status = status;
+      if (paymentMethod) query.paymentMethod = paymentMethod;
+      
+      if (startDate || endDate) {
+        query.createdAt = {};
+        if (startDate) query.createdAt.$gte = new Date(startDate);
+        if (endDate) query.createdAt.$lte = new Date(endDate);
+      }
+
+      const payments = await Payment.find(query)
+        .populate('orderId', 'orderNumber total customer')
+        .populate('processing.processedBy', 'firstName lastName email')
+        .sort({ createdAt: -1 })
+        .limit(limit * 1)
+        .skip((page - 1) * limit);
+
+      const total = await Payment.countDocuments(query);
+
+      return {
+        payments,
+        pagination: {
+          current: page,
+          pages: Math.ceil(total / limit),
+          total,
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1
+        }
+      };
+
+    } catch (error) {
+      console.error('Get payment history error:', error);
+      throw error;
+    }
+  }
+
+  // Get payment statistics
+  async getPaymentStats(startDate, endDate) {
+    try {
+      const stats = await Payment.getPaymentStats(startDate, endDate);
+      const transactionStats = await Transaction.getTransactionStats(startDate, endDate);
+      
+      return {
+        paymentStats: stats,
+        transactionStats
+      };
+    } catch (error) {
+      console.error('Get payment stats error:', error);
+      throw error;
+    }
+  }
+
+  // Update order payment status
+  async updateOrderPaymentStatus(orderId) {
+    try {
+      const order = await Sales.findById(orderId);
+      if (!order) return;
+
+      const payments = await Payment.find({ orderId, status: 'completed' });
+      const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);
+
+      if (totalPaid >= order.total) {
+        order.status = 'paid';
+        await order.save();
+      }
+    } catch (error) {
+      console.error('Update order payment status error:', error);
+    }
+  }
+
+  // Sanitize card details
+  sanitizeCardDetails(cardDetails) {
+    if (!cardDetails) return undefined;
+
+    return {
+      last4: cardDetails.number ? cardDetails.number.slice(-4) : undefined,
+      brand: cardDetails.brand,
+      expiryMonth: cardDetails.expiryMonth,
+      expiryYear: cardDetails.expiryYear,
+      holderName: cardDetails.holderName
+    };
+  }
+
+  // Calculate risk score
+  async calculateRiskScore(paymentData, order) {
+    let riskScore = 0;
+
+    // Amount-based risk
+    if (paymentData.amount > 1000) riskScore += 20;
+    if (paymentData.amount > 5000) riskScore += 30;
+
+    // Payment method risk
+    if (paymentData.paymentMethod === 'cash') riskScore -= 10;
+    if (paymentData.paymentMethod === 'credit_card') riskScore += 5;
+
+    // Customer history (if available)
+    if (order.customer) {
+      const customerPayments = await Payment.find({ 
+        'metadata.customerId': order.customer,
+        status: 'completed'
+      });
+      
+      if (customerPayments.length === 0) riskScore += 15; // New customer
+    }
+
+    // Time-based risk
+    const hour = new Date().getHours();
+    if (hour < 6 || hour > 22) riskScore += 10; // Unusual hours
+
+    return Math.max(0, Math.min(100, riskScore));
+  }
+}
+
+module.exports = new PaymentService();

@@ -1,0 +1,1064 @@
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { 
+  Search, 
+  Filter, 
+  Plus, 
+  Edit, 
+  Trash2, 
+  Eye,
+  Download,
+  RefreshCw,
+  ArrowUpDown,
+  Calendar,
+  Save,
+  RotateCcw,
+  Printer
+} from 'lucide-react';
+import { showSuccessToast, showErrorToast, handleApiError } from '../utils/errorHandler';
+import { formatDate } from '../utils/formatters';
+import { customersAPI, suppliersAPI, banksAPI } from '../services/api';
+
+// API functions
+const fetchBankReceipts = async (params = {}) => {
+  const queryParams = new URLSearchParams();
+  
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      queryParams.append(key, value);
+    }
+  });
+
+  const response = await fetch(`/api/bank-receipts?${queryParams}`, {
+    headers: {
+      'Authorization': `Bearer ${localStorage.getItem('token')}`
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch bank receipts');
+  }
+
+  return response.json();
+};
+
+const createBankReceipt = async (data) => {
+  const response = await fetch('/api/bank-receipts', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${localStorage.getItem('token')}`
+    },
+    body: JSON.stringify(data)
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message || 'Failed to create bank receipt');
+  }
+
+  return response.json();
+};
+
+const BankReceipts = () => {
+  const queryClient = useQueryClient();
+  
+  // State for filters and pagination
+  const [filters, setFilters] = useState({
+    fromDate: new Date().toISOString().split('T')[0],
+    toDate: new Date().toISOString().split('T')[0],
+    voucherCode: '',
+    amount: '',
+    particular: ''
+  });
+  
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 50
+  });
+
+  const [sortConfig, setSortConfig] = useState({
+    key: 'date',
+    direction: 'desc'
+  });
+
+  // State for modals
+
+  // Form state
+  const [formData, setFormData] = useState({
+    date: new Date().toISOString().split('T')[0],
+    amount: '',
+    particular: '',
+    bank: '',
+    transactionReference: '',
+    customer: '',
+    supplier: '',
+    notes: ''
+  });
+
+  // Customer selection state
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [selectedSupplier, setSelectedSupplier] = useState(null);
+  const [customerSearchTerm, setCustomerSearchTerm] = useState('');
+  const [supplierSearchTerm, setSupplierSearchTerm] = useState('');
+  const [paymentType, setPaymentType] = useState('customer'); // 'customer' or 'supplier'
+
+  // Fetch bank receipts
+  const { 
+    data: bankReceiptsData, 
+    isLoading, 
+    error, 
+    refetch 
+  } = useQuery(
+    ['bankReceipts', { ...filters, ...pagination, sortConfig }],
+    () => fetchBankReceipts({ ...filters, ...pagination, sortConfig }),
+    {
+      keepPreviousData: true,
+      onError: (error) => {
+        showErrorToast(handleApiError(error));
+      }
+    }
+  );
+
+  // Fetch customers for dropdown
+  const { data: customersData, isLoading: customersLoading, error: customersError } = useQuery(
+    ['customers', { search: '', limit: 100 }],
+    () => customersAPI.getCustomers({ search: '', limit: 100 }),
+    {
+      select: (data) => data?.data?.customers || data?.customers || [],
+      onError: (error) => {
+        console.error('Error fetching customers:', error);
+      }
+    }
+  );
+
+  // Fetch suppliers for dropdown
+  const { data: suppliersData, isLoading: suppliersLoading, error: suppliersError } = useQuery(
+    ['suppliers', { search: '', limit: 100 }],
+    () => suppliersAPI.getSuppliers({ search: '', limit: 100 }),
+    {
+      select: (data) => data?.data?.suppliers || data?.suppliers || [],
+      onError: (error) => {
+        console.error('Error fetching suppliers:', error);
+      }
+    }
+  );
+
+  // Fetch banks for dropdown
+  const { data: banksData, isLoading: banksLoading, error: banksError } = useQuery(
+    ['banks', { isActive: true }],
+    () => banksAPI.getBanks({ isActive: true }),
+    {
+      select: (data) => data?.data?.banks || data?.banks || [],
+      onError: (error) => {
+        console.error('Error fetching banks:', error);
+      }
+    }
+  );
+
+  // Mutations
+  const createMutation = useMutation(createBankReceipt, {
+    onSuccess: () => {
+      queryClient.invalidateQueries('bankReceipts');
+      queryClient.invalidateQueries('customers'); // Refresh customer balances
+      queryClient.invalidateQueries('suppliers'); // Refresh supplier balances
+      resetForm();
+      showSuccessToast('Bank receipt created successfully');
+    },
+    onError: (error) => {
+      showErrorToast(handleApiError(error));
+    }
+  });
+
+  // Helper functions
+  const resetForm = () => {
+    setFormData({
+      date: new Date().toISOString().split('T')[0],
+      amount: '',
+      particular: '',
+      bank: '',
+      transactionReference: '',
+      customer: '',
+      supplier: '',
+      notes: ''
+    });
+    setSelectedCustomer(null);
+    setSelectedSupplier(null);
+    setCustomerSearchTerm('');
+    setSupplierSearchTerm('');
+    setPaymentType('customer');
+  };
+
+  const handleCustomerSelect = (customerId) => {
+    const customer = customersData?.find(c => c._id === customerId);
+    setSelectedCustomer(customer);
+    setFormData(prev => ({ ...prev, customer: customerId }));
+  };
+
+  const handleCustomerSearch = (searchTerm) => {
+    setCustomerSearchTerm(searchTerm);
+    if (searchTerm === '') {
+      setSelectedCustomer(null);
+      setFormData(prev => ({ ...prev, customer: '' }));
+    }
+  };
+
+  const handleSupplierSelect = (supplierId) => {
+    const supplier = suppliersData?.find(s => s._id === supplierId);
+    setSelectedSupplier(supplier);
+    setFormData(prev => ({ ...prev, supplier: supplierId, customer: '' }));
+    setSelectedCustomer(null);
+    setCustomerSearchTerm('');
+  };
+
+  const handleSupplierSearch = (searchTerm) => {
+    setSupplierSearchTerm(searchTerm);
+    if (searchTerm === '') {
+      setSelectedSupplier(null);
+      setFormData(prev => ({ ...prev, supplier: '' }));
+    }
+  };
+
+  const handleFilterChange = (key, value) => {
+    setFilters(prev => ({ ...prev, [key]: value }));
+    setPagination(prev => ({ ...prev, page: 1 }));
+  };
+
+  const handleSort = (key) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const handleCreate = () => {
+    createMutation.mutate(formData);
+  };
+
+  const handleExport = () => {
+    showSuccessToast('Export functionality coming soon');
+  };
+
+  const bankReceipts = bankReceiptsData?.data?.bankReceipts || [];
+  const paginationInfo = bankReceiptsData?.data?.pagination || {};
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Bank Receipts</h1>
+          <p className="text-gray-600">Manage and view all bank receipt transactions</p>
+        </div>
+        <div className="flex space-x-3">
+          <button
+            onClick={handleExport}
+            className="btn btn-secondary flex items-center space-x-2"
+          >
+            <Download className="h-4 w-4" />
+            <span>Export</span>
+          </button>
+          <button
+            onClick={resetForm}
+            className="btn btn-primary btn-md"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New Receipt
+          </button>
+        </div>
+      </div>
+
+      {/* Bank Receipt Form */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="text-lg font-medium text-gray-900">Receipt Details</h3>
+        </div>
+        <div className="card-content">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left Column */}
+            <div className="space-y-4">
+              {/* Payment Type Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Receipt Type
+                </label>
+                <div className="flex space-x-4">
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      value="customer"
+                      checked={paymentType === 'customer'}
+                      onChange={(e) => {
+                        setPaymentType(e.target.value);
+                        setSelectedSupplier(null);
+                        setSupplierSearchTerm('');
+                        setFormData(prev => ({ ...prev, supplier: '' }));
+                      }}
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700">Customer</span>
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      value="supplier"
+                      checked={paymentType === 'supplier'}
+                      onChange={(e) => {
+                        setPaymentType(e.target.value);
+                        setSelectedCustomer(null);
+                        setCustomerSearchTerm('');
+                        setFormData(prev => ({ ...prev, customer: '' }));
+                      }}
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700">Supplier</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Customer Selection */}
+              {paymentType === 'customer' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Customer
+                  </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={customerSearchTerm}
+                    onChange={(e) => handleCustomerSearch(e.target.value)}
+                    className="input w-full pr-10"
+                    placeholder="Search or select customer..."
+                  />
+                  <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                </div>
+                {customerSearchTerm && (
+                  <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
+                    {customersData?.filter(customer => 
+                      (customer.businessName || customer.name || '').toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
+                      (customer.phone || '').includes(customerSearchTerm)
+                    ).map((customer) => {
+                      const receivables = customer.pendingBalance || 0;
+                      const advance = customer.advanceBalance || 0;
+                      const netBalance = receivables - advance;
+                      const isPayable = netBalance < 0;
+                      const isReceivable = netBalance > 0;
+                      const hasBalance = receivables > 0 || advance > 0;
+                      
+                      return (
+                        <div
+                          key={customer._id}
+                          onClick={() => {
+                            handleCustomerSelect(customer._id);
+                            setCustomerSearchTerm(customer.businessName || customer.name || '');
+                          }}
+                          className="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                        >
+                          <div className="font-medium text-gray-900">{customer.businessName || customer.name || 'Unknown'}</div>
+                          {hasBalance && (
+                            <div className={`text-sm ${isPayable ? 'text-red-600' : 'text-green-600'}`}>
+                              {isPayable ? 'Payables:' : 'Receivables:'} ${Math.abs(netBalance).toFixed(2)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                </div>
+              )}
+
+              {/* Balance Display */}
+              {selectedCustomer && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Balance
+                  </label>
+                  <div className="space-y-1">
+{(() => {
+                      const receivables = selectedCustomer.pendingBalance || 0;
+                      const advance = selectedCustomer.advanceBalance || 0;
+                      const netBalance = receivables - advance;
+                      const isPayable = netBalance < 0;
+                      const isReceivable = netBalance > 0;
+                      const hasBalance = receivables > 0 || advance > 0;
+                      
+                      return hasBalance ? (
+                        <div className={`flex items-center justify-between px-3 py-2 rounded ${isPayable ? 'bg-red-50 border border-red-200' : isReceivable ? 'bg-green-50 border border-green-200' : 'bg-gray-50 border border-gray-200'}`}>
+                          <span className={`text-sm font-medium ${isPayable ? 'text-red-700' : isReceivable ? 'text-green-700' : 'text-gray-700'}`}>
+                            {isPayable ? 'Payables:' : isReceivable ? 'Receivables:' : 'Balance:'}
+                          </span>
+                          <span className={`text-sm font-bold ${isPayable ? 'text-red-700' : isReceivable ? 'text-green-700' : 'text-gray-700'}`}>
+                            {Math.abs(netBalance).toFixed(2)}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded text-sm text-gray-600 text-center">
+                          No balance
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* Supplier Selection */}
+              {paymentType === 'supplier' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Supplier
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={supplierSearchTerm}
+                      onChange={(e) => handleSupplierSearch(e.target.value)}
+                      className="input w-full pr-10"
+                      placeholder="Search or select supplier..."
+                    />
+                    <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  </div>
+                  {supplierSearchTerm && (
+                    <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
+                      {suppliersData?.filter(supplier => 
+                        (supplier.companyName || supplier.name || '').toLowerCase().includes(supplierSearchTerm.toLowerCase()) ||
+                        (supplier.phone || '').includes(supplierSearchTerm)
+                      ).map((supplier) => (
+                        <div
+                          key={supplier._id}
+                          onClick={() => {
+                            handleSupplierSelect(supplier._id);
+                            setSupplierSearchTerm(supplier.companyName || supplier.name || '');
+                          }}
+                          className="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                        >
+                          <div className="font-medium text-gray-900">{supplier.companyName || supplier.name || 'Unknown'}</div>
+                          {supplier.phone && (
+                            <div className="text-sm text-gray-500">Phone: {supplier.phone}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Supplier Balance Display */}
+              {paymentType === 'supplier' && selectedSupplier && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Balance
+                  </label>
+                  <div className="space-y-1">
+                    {selectedSupplier.pendingBalance > 0 && (
+                      <div className="flex items-center justify-between px-3 py-2 bg-red-50 border border-red-200 rounded">
+                        <span className="text-sm font-medium text-red-700">Payables:</span>
+                        <span className="text-sm font-bold text-red-700">{selectedSupplier.pendingBalance.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {selectedSupplier.advanceBalance > 0 && (
+                      <div className="flex items-center justify-between px-3 py-2 bg-green-50 border border-green-200 rounded">
+                        <span className="text-sm font-medium text-green-700">Advance:</span>
+                        <span className="text-sm font-bold text-green-700">{selectedSupplier.advanceBalance.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {selectedSupplier.pendingBalance === 0 && selectedSupplier.advanceBalance === 0 && (
+                      <div className="px-3 py-2 bg-gray-50 border border-gray-200 rounded text-sm text-gray-600 text-center">
+                        No balance
+                      </div>
+                    )}
+                    {selectedSupplier.pendingBalance > 0 && selectedSupplier.advanceBalance > 0 && (
+                      <div className="flex items-center justify-between px-3 py-2 bg-blue-50 border-2 border-blue-300 rounded">
+                        <span className="text-sm font-bold text-blue-700">Net Balance:</span>
+                        <span className={`text-sm font-bold ${(selectedSupplier.pendingBalance - selectedSupplier.advanceBalance) > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                          {(selectedSupplier.pendingBalance - selectedSupplier.advanceBalance).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Amount */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Amount *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.amount}
+                  onChange={(e) => setFormData(prev => ({ ...prev, amount: e.target.value }))}
+                  className="input w-full"
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Right Column */}
+            <div className="space-y-4">
+              {/* Receipt Date */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Receipt Date
+                </label>
+                <div className="relative">
+                  <input
+                    type="date"
+                    value={formData.date}
+                    onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
+                    className="input w-full pr-10"
+                  />
+                  <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                </div>
+              </div>
+
+              {/* Bank Account */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Bank Account *
+                </label>
+                <select
+                  value={formData.bank}
+                  onChange={(e) => setFormData(prev => ({ ...prev, bank: e.target.value }))}
+                  className="input w-full"
+                  required
+                >
+                  <option value="">Select bank account...</option>
+                  {banksData?.map((bank) => (
+                    <option key={bank._id} value={bank._id}>
+                      {bank.bankName} - {bank.accountNumber} {bank.accountName ? `(${bank.accountName})` : ''}
+                    </option>
+                  ))}
+                </select>
+                {banksLoading && (
+                  <p className="text-sm text-gray-500 mt-1">Loading banks...</p>
+                )}
+                {banksError && (
+                  <p className="text-sm text-red-500 mt-1">Error loading banks</p>
+                )}
+              </div>
+
+              {/* Transaction Reference */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Transaction Reference
+                </label>
+                <input
+                  type="text"
+                  value={formData.transactionReference}
+                  onChange={(e) => setFormData(prev => ({ ...prev, transactionReference: e.target.value }))}
+                  className="input w-full"
+                  placeholder="Enter transaction reference..."
+                />
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Description
+                </label>
+                <input
+                  type="text"
+                  value={formData.particular}
+                  onChange={(e) => setFormData(prev => ({ ...prev, particular: e.target.value }))}
+                  className="input w-full"
+                  placeholder="Enter receipt description or notes..."
+                />
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Notes (Optional)
+                </label>
+                <textarea
+                  value={formData.notes}
+                  onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                  className="input w-full h-20 resize-none"
+                  placeholder="Additional notes..."
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex justify-end space-x-3 mt-6 pt-4 border-t border-gray-200">
+            <button
+              onClick={resetForm}
+              className="btn btn-secondary flex items-center space-x-2"
+            >
+              <RotateCcw className="h-4 w-4" />
+              <span>Reset</span>
+            </button>
+            <button
+              onClick={handleCreate}
+              disabled={createMutation.isLoading}
+              className="btn btn-primary flex items-center space-x-2"
+            >
+              <Save className="h-4 w-4" />
+              <span>{createMutation.isLoading ? 'Saving...' : 'Save Receipt'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="card">
+        <div className="card-header">
+          <div className="flex items-center space-x-2">
+            <Filter className="h-5 w-5 text-gray-400" />
+            <h3 className="text-lg font-medium text-gray-900">Filters</h3>
+          </div>
+        </div>
+        <div className="card-content">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            {/* Date Range */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                From Date
+              </label>
+              <input
+                type="date"
+                value={filters.fromDate}
+                onChange={(e) => handleFilterChange('fromDate', e.target.value)}
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                To Date
+              </label>
+              <input
+                type="date"
+                value={filters.toDate}
+                onChange={(e) => handleFilterChange('toDate', e.target.value)}
+                className="input"
+              />
+            </div>
+
+            {/* Voucher Code Filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Voucher Code
+              </label>
+              <input
+                type="text"
+                placeholder="Contains..."
+                value={filters.voucherCode}
+                onChange={(e) => handleFilterChange('voucherCode', e.target.value)}
+                className="input"
+              />
+            </div>
+
+            {/* Amount Filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Amount
+              </label>
+              <input
+                type="number"
+                placeholder="Equals..."
+                value={filters.amount}
+                onChange={(e) => handleFilterChange('amount', e.target.value)}
+                className="input"
+              />
+            </div>
+
+            {/* Particular Filter */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Particular
+              </label>
+              <input
+                type="text"
+                placeholder="Contains..."
+                value={filters.particular}
+                onChange={(e) => handleFilterChange('particular', e.target.value)}
+                className="input"
+              />
+            </div>
+
+            {/* Search Button */}
+            <div className="flex items-end">
+              <button
+                onClick={() => refetch()}
+                className="btn btn-primary w-full flex items-center justify-center space-x-2"
+              >
+                <Search className="h-4 w-4" />
+                <span>Search</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Results */}
+      <div className="card">
+        <div className="card-header">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-medium text-gray-900">
+              Bank Receipts From: {formatDate(filters.fromDate)} To: {formatDate(filters.toDate)}
+            </h3>
+            <div className="flex items-center space-x-2">
+              <span className="text-sm text-gray-500">
+                {paginationInfo.totalItems || 0} records
+              </span>
+              <button
+                onClick={() => refetch()}
+                className="p-2 text-gray-400 hover:text-gray-600"
+                title="Refresh"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+        <div className="card-content p-0">
+          {isLoading ? (
+            <div className="p-8 text-center">
+              <RefreshCw className="h-8 w-8 animate-spin mx-auto text-gray-400" />
+              <p className="mt-2 text-gray-500">Loading bank receipts...</p>
+            </div>
+          ) : error ? (
+            <div className="p-8 text-center text-red-600">
+              <p>Error loading bank receipts: {handleApiError(error).message}</p>
+            </div>
+          ) : bankReceipts.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">
+              <p>No bank receipts found for the selected criteria.</p>
+            </div>
+          ) : (
+            <>
+              {/* Table */}
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th 
+                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                        onClick={() => handleSort('date')}
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Date</span>
+                          <ArrowUpDown className="h-3 w-3" />
+                        </div>
+                      </th>
+                      <th 
+                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                        onClick={() => handleSort('voucherCode')}
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Voucher Code</span>
+                          <ArrowUpDown className="h-3 w-3" />
+                        </div>
+                      </th>
+                      <th 
+                        className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                        onClick={() => handleSort('amount')}
+                      >
+                        <div className="flex items-center space-x-1">
+                          <span>Amount</span>
+                          <ArrowUpDown className="h-3 w-3" />
+                        </div>
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Particular
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Bank Account
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Customer
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {bankReceipts.map((receipt, index) => (
+                      <tr 
+                        key={receipt._id} 
+                        className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {formatDate(receipt.date)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                          {receipt.voucherCode}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {Math.round(receipt.amount)}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">
+                          {receipt.particular}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {receipt.bank ? (
+                            <div>
+                              <div className="font-medium">{receipt.bank.bankName}</div>
+                              <div className="text-gray-500 text-xs">{receipt.bank.accountNumber}</div>
+                            </div>
+                          ) : (
+                            receipt.bankAccount || 'N/A'
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {receipt.customer ? (
+                            <div>
+                              <div className="font-medium">{receipt.customer.name}</div>
+                              <div className="text-gray-500 text-xs">{receipt.customer.email}</div>
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <div className="flex space-x-2">
+                            <button
+                              className="text-blue-600 hover:text-blue-900"
+                              title="View"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                            <button
+                              className="text-indigo-600 hover:text-indigo-900"
+                              title="Edit"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              className="text-red-600 hover:text-red-900"
+                              title="Delete"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Create Modal - Removed */}
+      {false && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-10 mx-auto p-6 border w-4/5 max-w-4xl shadow-lg rounded-lg bg-white">
+            <div className="mb-6 flex justify-between items-center">
+              <h3 className="text-xl font-semibold text-gray-900">Bank Receipt Details</h3>
+              <button
+                onClick={() => {
+                  resetForm();
+                }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Left Column */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Customer
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={customerSearchTerm}
+                      onChange={(e) => handleCustomerSearch(e.target.value)}
+                      className="input w-full pr-10"
+                      placeholder="Search or select customer..."
+                    />
+                    <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  </div>
+                  {customerSearchTerm && (
+                    <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
+                      {customersData?.filter(customer => 
+                        (customer.businessName || customer.name || '').toLowerCase().includes(customerSearchTerm.toLowerCase()) ||
+                        (customer.phone || '').includes(customerSearchTerm)
+                      ).map((customer) => {
+                        const receivables = customer.pendingBalance || 0;
+                        const advance = customer.advanceBalance || 0;
+                        const netBalance = receivables - advance;
+                        const isPayable = netBalance < 0;
+                        const isReceivable = netBalance > 0;
+                        const hasBalance = receivables > 0 || advance > 0;
+                        
+                        return (
+                          <div
+                            key={customer._id}
+                            onClick={() => {
+                              handleCustomerSelect(customer._id);
+                              setCustomerSearchTerm(customer.businessName || customer.name || '');
+                            }}
+                            className="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                          >
+                            <div className="font-medium text-gray-900">{customer.businessName || customer.name || 'Unknown'}</div>
+                            {hasBalance && (
+                              <div className={`text-sm ${isPayable ? 'text-red-600' : 'text-green-600'}`}>
+                                {isPayable ? 'Payables:' : 'Receivables:'} ${Math.abs(netBalance).toFixed(2)}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Receivables
+                  </label>
+                  <input
+                    type="text"
+                    value={selectedCustomer?.pendingBalance ? `${selectedCustomer.pendingBalance}` : 'No pending balance'}
+                    className="input w-full bg-gray-50"
+                    readOnly
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Bank Account <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={formData.bank}
+                    onChange={(e) => setFormData(prev => ({ ...prev, bank: e.target.value }))}
+                    className="input w-full"
+                    required
+                  >
+                    <option value="">Select bank account...</option>
+                    {banksData?.map((bank) => (
+                      <option key={bank._id} value={bank._id}>
+                        {bank.bankName} - {bank.accountNumber} {bank.accountName ? `(${bank.accountName})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {banksLoading && (
+                    <p className="text-sm text-gray-500 mt-1">Loading banks...</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Description
+                  </label>
+                  <textarea
+                    value={formData.particular}
+                    onChange={(e) => setFormData(prev => ({ ...prev, particular: e.target.value }))}
+                    className="input w-full resize-none"
+                    rows="4"
+                    placeholder="Enter bank receipt description or notes..."
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Right Column */}
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Receipt Date
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="date"
+                      value={formData.date}
+                      onChange={(e) => setFormData(prev => ({ ...prev, date: e.target.value }))}
+                      className="input w-full pr-10"
+                    />
+                    <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Amount <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={formData.amount}
+                    onChange={(e) => setFormData(prev => ({ ...prev, amount: e.target.value }))}
+                    className="input w-full"
+                    placeholder="0.00"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Transaction Reference
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.transactionReference}
+                    onChange={(e) => setFormData(prev => ({ ...prev, transactionReference: e.target.value }))}
+                    className="input w-full"
+                    placeholder="Enter transaction reference (optional)"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Notes (Optional)
+                  </label>
+                  <textarea
+                    value={formData.notes}
+                    onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                    className="input w-full resize-none"
+                    rows="3"
+                    placeholder="Additional notes..."
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-between items-center mt-8 pt-6 border-t border-gray-200">
+              <button
+                onClick={resetForm}
+                className="flex items-center space-x-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+              >
+                <RotateCcw className="h-4 w-4" />
+                <span>Reset</span>
+              </button>
+              
+              <div className="flex space-x-3">
+                <button
+                  className="flex items-center space-x-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 transition-colors"
+                >
+                  <Printer className="h-4 w-4" />
+                  <span>Print Preview</span>
+                </button>
+                <button
+                  onClick={handleCreate}
+                  disabled={createMutation.isLoading}
+                  className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  <span>{createMutation.isLoading ? 'Saving...' : 'Save Receipt'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default BankReceipts;

@@ -1,0 +1,712 @@
+import React, { useMemo, useState } from 'react';
+import { useQuery, useMutation } from 'react-query';
+import {
+  Plus,
+  Wallet,
+  DollarSign,
+  Calendar,
+  ClipboardList,
+  RefreshCw,
+  ArrowLeftRight,
+  Eye,
+  Printer,
+  Pencil,
+  Trash2
+} from 'lucide-react';
+import {
+  chartOfAccountsAPI,
+  banksAPI,
+  cashPaymentsAPI,
+  bankPaymentsAPI
+} from '../services/api';
+import { showSuccessToast, showErrorToast, handleApiError } from '../utils/errorHandler';
+import { formatCurrency, formatDate } from '../utils/formatters';
+import RecurringExpensesPanel from '../components/RecurringExpensesPanel';
+
+const today = new Date().toISOString().split('T')[0];
+
+const defaultFormState = {
+  date: today,
+  expenseAccount: '',
+  amount: '',
+  notes: '',
+  bank: '',
+  particular: ''
+};
+
+const Expenses = () => {
+  const [formData, setFormData] = useState(defaultFormState);
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [recentExpenses, setRecentExpenses] = useState([]);
+  const [editingExpense, setEditingExpense] = useState(null);
+
+  const { data: expenseAccountsData, isLoading: expenseAccountsLoading } = useQuery(
+    ['expenseAccounts', { accountType: 'expense', isActive: 'true' }],
+    () => chartOfAccountsAPI.getAccounts({ accountType: 'expense', isActive: 'true' }),
+    {
+      select: (data) => data?.data || data?.accounts || [],
+      onError: (error) => {
+        console.error('Error fetching expense accounts:', error);
+      }
+    }
+  );
+
+  const { data: banksData, isLoading: banksLoading } = useQuery(
+    ['banks', { isActive: true }],
+    () => banksAPI.getBanks({ isActive: true }),
+    {
+      select: (data) => data?.data?.banks || data?.banks || [],
+      onError: (error) => {
+        console.error('Error fetching banks:', error);
+      }
+    }
+  );
+
+  const { data: cashPaymentsData, isFetching: cashExpensesLoading } = useQuery(
+    ['cashExpensesPreview'],
+    () => cashPaymentsAPI.getCashPayments({ limit: 20 }),
+    {
+      select: (response) => {
+        const items = response?.data?.cashPayments || response?.cashPayments || response?.data?.data?.cashPayments || [];
+        return items.filter((payment) => !payment?.supplier && !payment?.customer);
+      },
+      onError: (error) => {
+        console.error('Error fetching recent cash expenses:', error);
+      }
+    }
+  );
+
+  const { data: bankPaymentsData, isFetching: bankExpensesLoading } = useQuery(
+    ['bankExpensesPreview'],
+    () => bankPaymentsAPI.getBankPayments({ limit: 20 }),
+    {
+      select: (response) => {
+        const items = response?.data?.bankPayments || response?.bankPayments || response?.data?.data?.bankPayments || [];
+        return items.filter((payment) => !payment?.supplier && !payment?.customer);
+      },
+      onError: (error) => {
+        console.error('Error fetching recent bank expenses:', error);
+      }
+    }
+  );
+
+  const expenseAccounts = useMemo(
+    () => expenseAccountsData || [],
+    [expenseAccountsData]
+  );
+
+  const banks = useMemo(
+    () => banksData || [],
+    [banksData]
+  );
+
+  const combinedRecentExpenses = useMemo(() => {
+    const apiResults = [
+      ...(cashPaymentsData || []).map((item) => ({ ...item, source: 'cash' })),
+      ...(bankPaymentsData || []).map((item) => ({ ...item, source: 'bank' })),
+      ...recentExpenses
+    ];
+
+    return apiResults
+      .filter((item, index, self) => item?._id && index === self.findIndex((s) => s._id === item._id))
+      .sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt))
+      .slice(0, 25);
+  }, [cashPaymentsData, bankPaymentsData, recentExpenses]);
+
+  const valueToDisplayString = (value) => {
+    if (value == null) return '';
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number') return `${value}`;
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+
+    if (Array.isArray(value)) {
+      const first = value.find((item) => item != null);
+      return valueToDisplayString(first);
+    }
+
+    if (typeof value === 'object') {
+      const candidateFields = [
+        'label',
+        'name',
+        'accountName',
+        'bankName',
+        'displayName',
+        'companyName',
+        'businessName',
+        'type',
+        'title',
+        'code',
+        'id',
+        '_id',
+      ];
+
+      for (const field of candidateFields) {
+        if (field in value) {
+          const result = valueToDisplayString(value[field]);
+          if (result) return result;
+        }
+      }
+    }
+
+    return '';
+  };
+
+  const resolvePaymentMethodLabel = (expense) => {
+    if (!expense) return 'cash';
+    const { source, bank } = expense;
+
+    const sourceLabel = valueToDisplayString(source);
+    if (sourceLabel) return sourceLabel;
+
+    if (bank) {
+      const bankLabel = valueToDisplayString(bank);
+      if (bankLabel) return bankLabel;
+      return 'bank';
+    }
+
+    return 'cash';
+  };
+
+  const createCashExpenseMutation = useMutation(
+    async (payload) => {
+      if (editingExpense?.source === 'cash') {
+        const response = await cashPaymentsAPI.updateCashPayment(editingExpense._id, payload);
+        return response.data;
+      }
+      const response = await cashPaymentsAPI.createCashPayment(payload);
+      return response.data;
+    },
+    {
+      onSuccess: (data) => {
+        const payment = data?.data || data;
+        if (payment) {
+          const enhanced = { ...payment, source: 'cash' };
+          setRecentExpenses((prev) => {
+            const filtered = prev.filter((item) => item._id !== enhanced._id);
+            return [enhanced, ...filtered].slice(0, 10);
+          });
+        }
+        showSuccessToast(editingExpense ? 'Cash expense updated successfully' : 'Cash expense recorded successfully');
+        resetForm();
+      },
+      onError: (error) => {
+        showErrorToast(handleApiError(error));
+      }
+    }
+  );
+
+  const createBankExpenseMutation = useMutation(
+    async (payload) => {
+      if (editingExpense?.source === 'bank') {
+        const response = await bankPaymentsAPI.updateBankPayment(editingExpense._id, payload);
+        return response.data;
+      }
+      const response = await bankPaymentsAPI.createBankPayment(payload);
+      return response.data;
+    },
+    {
+      onSuccess: (data) => {
+        const payment = data?.data || data;
+        if (payment) {
+          const enhanced = { ...payment, source: 'bank' };
+          setRecentExpenses((prev) => {
+            const filtered = prev.filter((item) => item._id !== enhanced._id);
+            return [enhanced, ...filtered].slice(0, 10);
+          });
+        }
+        showSuccessToast(editingExpense ? 'Bank expense updated successfully' : 'Bank expense recorded successfully');
+        resetForm();
+      },
+      onError: (error) => {
+        showErrorToast(handleApiError(error));
+      }
+    }
+  );
+
+  const selectedAccount = useMemo(
+    () => expenseAccounts.find((account) => account._id === formData.expenseAccount),
+    [expenseAccounts, formData.expenseAccount]
+  );
+
+  const handleExpenseAccountChange = (accountId) => {
+    setFormData((prev) => ({
+      ...prev,
+      expenseAccount: accountId,
+      particular: prev.particular || (() => {
+        const account = expenseAccounts.find((acc) => acc._id === accountId);
+        return account ? account.accountName : '';
+      })()
+    }));
+  };
+
+  const resetForm = () => {
+    setFormData(defaultFormState);
+    setPaymentMethod('cash');
+    setEditingExpense(null);
+  };
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+
+    if (!formData.expenseAccount) {
+      showErrorToast('Please choose an expense account');
+      return;
+    }
+
+    if (!formData.amount || Number(formData.amount) <= 0) {
+      showErrorToast('Amount must be greater than zero');
+      return;
+    }
+
+    const basePayload = {
+      date: formData.date,
+      amount: parseFloat(formData.amount),
+      particular: formData.particular?.trim() || selectedAccount?.accountName || 'Expense',
+      expenseAccount: formData.expenseAccount,
+      notes: formData.notes?.trim() || undefined
+    };
+
+    if (paymentMethod === 'bank') {
+      if (!formData.bank) {
+        showErrorToast('Please select a bank account for this expense');
+        return;
+      }
+
+      createBankExpenseMutation.mutate({
+        ...basePayload,
+        bank: formData.bank
+      });
+    } else {
+      createCashExpenseMutation.mutate(basePayload);
+    }
+  };
+
+  const handleEditExpense = (expense) => {
+    setEditingExpense(expense);
+    setPaymentMethod(expense.source === 'bank' ? 'bank' : 'cash');
+    setFormData({
+      date: expense.date ? expense.date.split('T')[0] : today,
+      expenseAccount: expense.expenseAccount?._id || expense.expenseAccount || '',
+      amount: expense.amount?.toString() || '',
+      notes: expense.notes || '',
+      bank: expense.bank?._id || expense.bank || '',
+      particular: expense.particular || ''
+    });
+  };
+
+  const handleDeleteExpense = async (expense) => {
+    const confirmed = window.confirm('Are you sure you want to delete this expense entry?');
+    if (!confirmed) return;
+
+    try {
+      if (expense.source === 'bank') {
+        await bankPaymentsAPI.deleteBankPayment(expense._id);
+      } else {
+        await cashPaymentsAPI.deleteCashPayment(expense._id);
+      }
+      setRecentExpenses((prev) => prev.filter((item) => item._id !== expense._id));
+      showSuccessToast('Expense deleted successfully');
+      if (editingExpense?._id === expense._id) {
+        resetForm();
+      }
+    } catch (error) {
+      showErrorToast(handleApiError(error));
+    }
+  };
+
+  const openExpenseDocument = (expense, { print = false } = {}) => {
+    const accountLabel = expense.expenseAccount?.accountName
+      ? `${expense.expenseAccount.accountName} (${expense.expenseAccount.accountCode || ''})`
+      : 'Expense Account';
+    const methodLabel = expense.source === 'bank' ? 'Bank' : 'Cash';
+    const printWindow = window.open('', '_blank', 'width=800,height=600');
+    if (!printWindow) return;
+
+    const htmlContent = `
+      <html>
+        <head>
+          <title>Expense Voucher</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 24px; color: #1f2937; }
+            h1 { font-size: 20px; margin-bottom: 16px; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 24px; }
+            td { padding: 8px 12px; border: 1px solid #e5e7eb; vertical-align: top; font-size: 14px; }
+            .label { font-weight: 600; background: #f3f4f6; width: 35%; }
+            .footer { text-align: center; font-size: 12px; color: #6b7280; }
+          </style>
+        </head>
+        <body>
+          <h1>Expense Voucher</h1>
+          <table>
+            <tr>
+              <td class="label">Voucher ID</td>
+              <td>${expense.voucherCode || expense._id}</td>
+            </tr>
+            <tr>
+              <td class="label">Date</td>
+              <td>${formatDate(expense.date || expense.createdAt)}</td>
+            </tr>
+            <tr>
+              <td class="label">Payment Method</td>
+              <td>${methodLabel}</td>
+            </tr>
+            <tr>
+              <td class="label">Expense Account</td>
+              <td>${accountLabel}</td>
+            </tr>
+            <tr>
+              <td class="label">Amount</td>
+              <td>${formatCurrency(expense.amount || 0)}</td>
+            </tr>
+            <tr>
+              <td class="label">Description</td>
+              <td>${expense.particular || '-'}</td>
+            </tr>
+            <tr>
+              <td class="label">Notes</td>
+              <td>${expense.notes || '-'}</td>
+            </tr>
+          </table>
+          <div class="footer">Generated on ${formatDate(new Date().toISOString())}</div>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    printWindow.focus();
+    if (print) {
+      printWindow.print();
+      printWindow.close();
+    }
+  };
+
+  const handleViewExpense = (expense) => {
+    openExpenseDocument(expense, { print: false });
+  };
+
+  const handlePrintExpense = (expense) => {
+    openExpenseDocument(expense, { print: true });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900 flex items-center space-x-2">
+          <Wallet className="h-6 w-6 text-primary-600" />
+          <span>Record Expense</span>
+        </h1>
+        <div className="mt-1 lg:mt-0 grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.45fr)] gap-3 lg:gap-6 lg:items-start lg:mt-1">
+          <p className="text-gray-600 lg:mt-1">
+            Log operating expenses directly from cash or bank while posting to the right expense account.
+          </p>
+          <div className="border border-gray-200 rounded-lg p-4 bg-gray-50 w-full">
+            <p className="text-sm font-semibold text-gray-700 mb-3">Payment Method</p>
+            <div className="flex items-center gap-3 mt-1">
+              {[
+                { value: 'cash', label: 'Cash', helper: 'Use cash on hand' },
+                { value: 'bank', label: 'Bank', helper: 'Use a bank account' }
+              ].map((option) => {
+                const isActive = paymentMethod === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      setPaymentMethod(option.value);
+                      if (option.value === 'cash') {
+                        setFormData((prev) => ({ ...prev, bank: '' }));
+                      }
+                    }}
+                    className={`flex-1 px-4 py-3 rounded-xl border-2 text-left transition-all duration-200 ${
+                      isActive
+                        ? 'border-primary-500 bg-primary-50 text-primary-700 shadow-sm'
+                        : 'border-gray-200 text-gray-600 hover:border-primary-300 hover:bg-primary-50/40'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2">
+                      <div
+                        className={`h-4 w-4 rounded-full border ${
+                          isActive ? 'border-primary-500 bg-primary-500' : 'border-gray-300 bg-white'
+                        }`}
+                      />
+                      <span className="text-sm font-semibold">{option.label}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">{option.helper}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card relative">
+        <div className="card-content pt-4">
+          <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div>
+                <label className="form-label flex items-center justify-between">
+                  <span>Expense Account</span>
+                  <button
+                    type="button"
+                    onClick={resetForm}
+                    className="text-sm text-primary-600 hover:text-primary-700 flex items-center space-x-1"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    <span>Reset</span>
+                  </button>
+                </label>
+                <select
+                  className="input"
+                  value={formData.expenseAccount}
+                  onChange={(e) => handleExpenseAccountChange(e.target.value)}
+                  required
+                  disabled={expenseAccountsLoading}
+                >
+                  <option value="">Select expense account</option>
+                  {expenseAccounts.map((account) => (
+                    <option key={account._id} value={account._id}>
+                      {account.accountName} ({account.accountCode})
+                    </option>
+                  ))}
+                </select>
+                {selectedAccount && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    Selected account will be debited when this expense is posted.
+                  </p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="form-label">Amount</label>
+                  <div className="relative">
+                    <DollarSign className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      className="input pl-9"
+                      value={formData.amount}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, amount: e.target.value }))}
+                      required
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="form-label">Date</label>
+                  <div className="relative">
+                    <Calendar className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <input
+                      type="date"
+                      className="input pl-9"
+                      value={formData.date}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, date: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="form-label">Description (optional)</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder={selectedAccount ? selectedAccount.accountName : 'e.g., Rent for November'}
+                  value={formData.particular}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, particular: e.target.value }))}
+                />
+              </div>
+
+              {paymentMethod === 'bank' && (
+                <div>
+                  <label className="form-label">Bank Account</label>
+                  <select
+                    className="input"
+                    value={formData.bank}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, bank: e.target.value }))}
+                    required
+                    disabled={banksLoading}
+                  >
+                    <option value="">Select bank account</option>
+                    {banks.map((bank) => (
+                      <option key={bank._id} value={bank._id}>
+                        {bank.bankName} • {bank.accountNumber}
+                        {bank.accountName ? ` (${bank.accountName})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="form-label">Notes</label>
+                <textarea
+                  className="input"
+                  rows={6}
+                  placeholder="Optional internal notes..."
+                  value={formData.notes}
+                  onChange={(e) => setFormData((prev) => ({ ...prev, notes: e.target.value }))}
+                />
+              </div>
+
+              <div className="border rounded-lg bg-primary-50/40 p-4">
+                <h3 className="text-sm font-semibold text-primary-700 mb-2">Posting Preview</h3>
+                <div className="space-y-2 text-sm text-gray-700">
+                  <div className="flex items-center justify-between">
+                    <span>Debit</span>
+                    <span>{selectedAccount ? `${selectedAccount.accountName} (${selectedAccount.accountCode})` : 'Select expense account'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Credit</span>
+                    <span>{paymentMethod === 'cash' ? 'Cash on Hand' : 'Bank Account'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Amount</span>
+                    <span>
+                      {formData.amount
+                        ? formatCurrency(parseFloat(formData.amount) || 0)
+                        : formatCurrency(0)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  className="btn btn-primary flex items-center space-x-2"
+                  disabled={
+                    createCashExpenseMutation.isLoading ||
+                    createBankExpenseMutation.isLoading
+                  }
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>{editingExpense ? 'Update Expense' : 'Save Expense'}</span>
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div className="card">
+          <div className="card-header flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center space-x-2">
+              <ArrowLeftRight className="h-5 w-5 text-primary-600" />
+              <span>Recent Expense Entries</span>
+            </h2>
+            {(cashExpensesLoading || bankExpensesLoading) && (
+              <span className="text-xs text-gray-500">Refreshing...</span>
+            )}
+          </div>
+          <div className="card-content">
+            {combinedRecentExpenses.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                Expenses recorded here will appear in this list for quick reference.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Date</th>
+                      <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Voucher</th>
+                      <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Expense Account</th>
+                      <th className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Description</th>
+                      <th className="px-4 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Amount</th>
+                      <th className="px-4 py-2 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Method</th>
+                      <th className="px-4 py-2 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {combinedRecentExpenses.map((expense) => (
+                      <tr key={expense._id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
+                          {formatDate(expense.date || expense.createdAt)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">
+                          {expense.voucherCode || expense._id}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700">
+                          {expense.expenseAccount?.accountName
+                            ? `${expense.expenseAccount.accountName} (${expense.expenseAccount.accountCode})`
+                            : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {expense.particular || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right whitespace-nowrap">
+                          {formatCurrency(expense.amount || 0)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 text-center capitalize whitespace-nowrap">
+                          {resolvePaymentMethodLabel(expense)}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleViewExpense(expense)}
+                              className="p-2 rounded-md text-blue-600 hover:bg-blue-50 transition-colors"
+                              title="View Expense"
+                            >
+                              <Eye className="h-4 w-4" />
+                              <span className="sr-only">View</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handlePrintExpense(expense)}
+                              className="p-2 rounded-md text-green-600 hover:bg-green-50 transition-colors"
+                              title="Print Expense"
+                            >
+                              <Printer className="h-4 w-4" />
+                              <span className="sr-only">Print</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleEditExpense(expense)}
+                              className="p-2 rounded-md text-blue-600 hover:bg-blue-50 transition-colors"
+                              title="Edit Expense"
+                            >
+                              <Pencil className="h-4 w-4" />
+                              <span className="sr-only">Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteExpense(expense)}
+                              className="p-2 rounded-md text-red-600 hover:bg-red-50 transition-colors"
+                              title="Delete Expense"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              <span className="sr-only">Delete</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <RecurringExpensesPanel
+          expenseAccounts={expenseAccounts}
+          onPaymentRecorded={(payload) => {
+            if (payload?.payment) {
+              setRecentExpenses((prev) => [{ ...payload.payment, source: payload.payment.bank ? 'bank' : 'cash' }, ...prev].slice(0, 25));
+            }
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
+export default Expenses;

@@ -1,0 +1,402 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@layer base {
+  * {
+    @apply border-gray-200;
+  }
+  
+  body {
+    @apply bg-gray-50 text-gray-900 font-sans;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
+  }
+  
+  .btn-primary {
+    @apply bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800;
+  }
+  
+  .btn-secondary {
+    @apply bg-gray-200 text-gray-900 hover:bg-gray-300 active:bg-gray-400;
+  }
+  
+  .btn-success {
+    @apply bg-success-600 text-white hover:bg-success-700 active:bg-success-800;
+  }
+  
+  .btn-danger {
+    @apply bg-danger-600 text-white hover:bg-danger-700 active:bg-danger-800;
+  }
+  
+  .btn-sm {
+    @apply h-8 px-3 text-xs;
+  }
+  
+  .btn-md {
+    @apply h-10 px-4 py-2;
+  }
+  
+  .btn-lg {
+    @apply h-12 px-8 text-base;
+  }
+  
+  .input {
+    @apply flex h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  
+  .card {
+    @apply rounded-lg border border-gray-200 bg-white shadow-soft;
+  }
+  
+  .card-header {
+    @apply flex flex-col space-y-1.5 p-6;
+  }
+  
+  .card-content {
+    @apply p-6 pt-0;
+  }
+  
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+  
+  .badge-success {
+    @apply bg-success-100 text-success-800;
+  }
+  
+  .badge-warning {
+    @apply bg-warning-100 text-warning-800;
+  }
+  
+  .badge-danger {
+    @apply bg-danger-100 text-danger-800;
+  }
+  
+  .badge-info {
+    @apply bg-primary-100 text-primary-800;
+  }
+  
+  .badge-gray {
+    @apply bg-gray-100 text-gray-800;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Loading animation */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Fade in animation */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.print-preview-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: calc(92vh - 40px);
+}
+
+.print-preview-scale {
+  transform: scale(1.5);
+  transform-origin: top center;
+  transition: transform 0.2s ease;
+}
+
+@media (max-width: 1024px) {
+  .print-preview-scale {
+    transform: scale(1.05);
+  }
+}
+
+@media print {
+  .print-preview-scale {
+    transform: none !important;
+  }
+}
+
+.print-document {
+  width: 900px;
+  background: #fff;
+  border-radius: 18px;
+  padding: 32px 36px 28px;
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.18);
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  color: #111827;
+}
+
+.print-document__title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+  margin-bottom: 12px;
+}
+
+.print-document__company {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.print-document__company-name {
+  font-size: 30px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.print-document__company-subtitle {
+  font-size: 16px;
+  color: #6b7280;
+}
+
+.print-document__toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.print-document__heading {
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.print-document__info-block {
+  position: relative;
+  padding-bottom: 12px;
+}
+
+.print-document__info-grid {
+  display: grid;
+.print-document__info-block::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background-color: #e5e7eb;
+}
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.print-document__info-section {
+  border-top: 2px solid #e5e7eb;
+  padding-top: 12px;
+}
+
+.print-document__info-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.print-document__info-row {
+  font-size: 13px;
+  color: #111827;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.print-document__info-line--stack {
+  justify-content: flex-start;
+}
+
+.print-document__info-label {
+  font-weight: 500;
+  color: #374151;
+  margin-right: 12px;
+}
+
+.print-document__info-value {
+  text-align: right;
+  max-width: 65%;
+}
+
+.print-document__table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 10px;
+}
+
+.print-document__table th {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  text-align: left;
+  padding: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.print-document__table td {
+  border: 1px solid #e5e7eb;
+  padding: 10px;
+  font-size: 13px;
+  color: #374151;
+}
+
+.print-document__summary {
+  margin-top: 24px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.print-document__summary-table {
+  width: 260px;
+}
+
+.print-document__summary-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  margin-bottom: 6px;
+  color: #111827;
+}
+
+.print-document__summary-row--total {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 8px;
+  margin-top: 6px;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.print-document__section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.print-document__footer {
+  margin-top: 24px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.print-document__footer span {
+  display: block;
+}
+
+.print-document__generated {
+  text-align: center;
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 20px;
+}
+
+@media print {
+  .print-document__toolbar {
+    display: none;
+  }
+  
+  /* Print-friendly ledger styles */
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-only {
+    display: block;
+  }
+  
+  /* Show only ledger table in print */
+  .account-ledger-print {
+    page-break-inside: avoid;
+  }
+  
+  .account-ledger-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  
+  .account-ledger-table th,
+  .account-ledger-table td {
+    border: 1px solid #000;
+    padding: 4px 6px;
+    text-align: left;
+  }
+  
+  .account-ledger-table th {
+    background-color: #f0f0f0;
+    font-weight: bold;
+  }
+  
+  /* Hide non-essential elements when printing */
+  button,
+  .btn,
+  nav,
+  .sidebar,
+  .filters,
+  .search {
+    display: none !important;
+  }
+  
+  /* Ensure proper page breaks */
+  .ledger-entry-row {
+    page-break-inside: avoid;
+  }
+  
+  /* Print headers on each page */
+  thead {
+    display: table-header-group;
+  }
+  
+  tfoot {
+    display: table-footer-group;
+  }
+}

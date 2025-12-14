@@ -1,0 +1,2584 @@
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useQuery, useMutation, useQueryClient } from 'react-query';
+import { 
+  ShoppingCart, 
+  Search, 
+  Plus, 
+  Minus, 
+  Trash2, 
+  User, 
+  CreditCard, 
+  DollarSign, 
+  Calculator, 
+  Receipt, 
+  Printer,
+  History,
+  RotateCcw,
+  CheckCircle,
+  AlertCircle,
+  Info,
+  Eye,
+  EyeOff,
+  Download,
+  XCircle,
+  ArrowUpDown
+} from 'lucide-react';
+import { productsAPI, customersAPI, salesAPI, paymentAPI, banksAPI } from '../services/api';
+import { useFuzzySearch } from '../hooks/useFuzzySearch';
+import { SearchableDropdown } from '../components/SearchableDropdown';
+import { handleApiError, showSuccessToast, showErrorToast } from '../utils/errorHandler';
+import toast from 'react-hot-toast';
+import { LoadingSpinner, LoadingButton, LoadingCard, LoadingGrid, LoadingPage, LoadingInline } from '../components/LoadingSpinner';
+import AsyncErrorBoundary from '../components/AsyncErrorBoundary';
+import { ClearConfirmationDialog } from '../components/ConfirmationDialog';
+import { useClearConfirmation } from '../hooks/useConfirmation';
+import PaymentModal from '../components/PaymentModal';
+import PrintModal from '../components/PrintModal';
+import { useResponsive, ResponsiveGrid } from '../components/ResponsiveContainer';
+import RecommendationSection from '../components/RecommendationSection';
+import useBehaviorTracking from '../hooks/useBehaviorTracking';
+import { useTab } from '../contexts/TabContext';
+import { getComponentInfo } from '../components/ComponentRegistry';
+import { useAuth } from '../contexts/AuthContext';
+import BarcodeScanner from '../components/BarcodeScanner';
+import { Camera } from 'lucide-react';
+
+// ProductSearch Component
+const ProductSearch = ({ onAddProduct, selectedCustomer, showCostPrice, onLastPurchasePriceFetched, hasCostPricePermission, priceType }) => {
+  const [productSearchTerm, setProductSearchTerm] = useState('');
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [quantity, setQuantity] = useState(1);
+  const [customRate, setCustomRate] = useState('');
+  const [calculatedRate, setCalculatedRate] = useState(0);
+  const [isAddingProduct, setIsAddingProduct] = useState(false);
+  const [searchKey, setSearchKey] = useState(0); // Key to force re-render
+  const [lastPurchasePrice, setLastPurchasePrice] = useState(null);
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState(false);
+  const productSearchRef = useRef(null);
+
+  // Fetch all products (or a larger set) for client-side fuzzy search
+  const { data: productsData, isLoading: productsLoading, error: productsError } = useQuery(
+    ['products', 'all-active'],
+    () => productsAPI.getProducts({ limit: 100, status: 'active' }),
+    {
+      keepPreviousData: true,
+      staleTime: 30000, // Cache for 30 seconds
+    }
+  );
+
+  // Apply fuzzy search on client side
+  const allProducts = productsData?.data?.products || [];
+  const products = useFuzzySearch(
+    allProducts,
+    productSearchTerm,
+    ['name', 'description', 'brand'],
+    {
+      threshold: 0.4,
+      minScore: 0.3,
+      limit: 10 // Limit results for dropdown
+    }
+  );
+
+  const calculatePrice = (product, priceType) => {
+    if (!product) return 0;
+    
+    if (priceType === 'wholesale') {
+      return product.pricing.wholesale || product.pricing.retail;
+    } else if (priceType === 'retail') {
+      return product.pricing.retail;
+    } else {
+      // Custom - keep current rate or default to wholesale
+      return product.pricing.wholesale || product.pricing.retail;
+    }
+  };
+
+  const handleProductSelect = async (product) => {
+    setSelectedProduct(product);
+    setQuantity(1);
+    setIsAddingProduct(true);
+    
+    // Show selected product name in search field
+    setProductSearchTerm(product.name);
+    
+    // Fetch last purchase price (always, for loss alerts)
+    if (product._id) {
+      try {
+        const response = await productsAPI.getLastPurchasePrice(product._id);
+        if (response.data && response.data.lastPurchasePrice !== null) {
+          setLastPurchasePrice(response.data.lastPurchasePrice);
+          if (onLastPurchasePriceFetched) {
+            onLastPurchasePriceFetched(product._id, response.data.lastPurchasePrice);
+          }
+        } else {
+          setLastPurchasePrice(null);
+        }
+      } catch (error) {
+        console.error('Error fetching last purchase price:', error);
+        setLastPurchasePrice(null);
+      }
+    } else {
+      setLastPurchasePrice(null);
+    }
+    
+    // Calculate the rate based on selected price type
+    const calculatedPrice = calculatePrice(product, priceType);
+    
+    setCalculatedRate(calculatedPrice);
+    setCustomRate(calculatedPrice.toString());
+  };
+
+  // Update rate when price type changes
+  useEffect(() => {
+    if (selectedProduct) {
+      const calculatedPrice = calculatePrice(selectedProduct, priceType);
+      setCalculatedRate(calculatedPrice);
+      // Only update customRate if it matches the previous calculated rate (user hasn't manually changed it)
+      const previousCalculated = calculatePrice(selectedProduct, priceType === 'wholesale' ? 'retail' : 'wholesale');
+      if (!customRate || customRate === previousCalculated.toString() || customRate === calculatedRate.toString()) {
+        setCustomRate(calculatedPrice.toString());
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceType, selectedProduct]);
+
+  const handleAddToCart = async () => {
+    if (!selectedProduct) return;
+    
+    // Validate that rate is filled
+    if (!customRate || parseInt(customRate) <= 0) {
+      toast.error('Please enter a valid rate');
+      return;
+    }
+    
+    // Check if product is out of stock
+    if (selectedProduct.inventory.currentStock === 0) {
+      toast.error(`${selectedProduct.name} is out of stock and cannot be added to the invoice.`);
+      return;
+    }
+    
+    // Check if requested quantity exceeds available stock
+    if (quantity > selectedProduct.inventory.currentStock) {
+      toast.error(`Cannot add ${quantity} units. Only ${selectedProduct.inventory.currentStock} units available in stock.`);
+      return;
+    }
+    
+    try {
+      // Use the rate from the input field
+      const unitPrice = parseInt(customRate) || Math.round(calculatedRate);
+      
+      // Check if sale price is less than cost price (always check, regardless of showCostPrice)
+      if (lastPurchasePrice !== null && unitPrice < lastPurchasePrice) {
+        const loss = lastPurchasePrice - unitPrice;
+        const lossPercent = ((loss / lastPurchasePrice) * 100).toFixed(1);
+        const shouldProceed = window.confirm(
+          `⚠️ WARNING: Sale price ($${unitPrice}) is below cost price ($${Math.round(lastPurchasePrice)}).\n\n` +
+          `Loss per unit: $${Math.round(loss)} (${lossPercent}%)\n` +
+          `Total loss for ${quantity} unit(s): $${Math.round(loss * quantity)}\n\n` +
+          `Do you want to proceed?`
+        );
+        if (!shouldProceed) {
+          return;
+        }
+        // Show warning toast even if proceeding
+        toast.warning(
+          `Product added with loss: $${Math.round(loss)} per unit (${lossPercent}%)`,
+          { duration: 6000 }
+        );
+      }
+      
+      onAddProduct({
+        product: selectedProduct,
+        quantity: quantity,
+        unitPrice: unitPrice
+      });
+      
+      // Reset form
+      setSelectedProduct(null);
+      setQuantity(1);
+      setCustomRate('');
+      setCalculatedRate(0);
+      setIsAddingProduct(false);
+      
+      // Clear search term and force re-render
+      setProductSearchTerm('');
+      setSearchKey(prev => prev + 1);
+      
+      // Focus back to product search input
+      setTimeout(() => {
+        if (productSearchRef.current) {
+          productSearchRef.current.focus();
+        }
+      }, 100);
+      
+      // Show success message
+      const priceLabel = selectedCustomer?.businessType === 'wholesale' ? 'wholesale' :
+                         selectedCustomer?.businessType === 'distributor' ? 'distributor' : 'retail';
+      toast.success(`${selectedProduct.name} added to cart at ${priceLabel} price: ${Math.round(unitPrice)}`);
+    } catch (error) {
+      handleApiError(error, 'Product Price Check');
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && isAddingProduct) {
+      e.preventDefault();
+      handleAddToCart();
+    } else if (e.key === 'Escape' && isAddingProduct) {
+      e.preventDefault();
+      setSelectedProduct(null);
+      setQuantity(1);
+      setCustomRate('');
+      setCalculatedRate(0);
+      setIsAddingProduct(false);
+    }
+  };
+
+  const productDisplayKey = (product) => {
+    const isLowStock = product.inventory.currentStock <= product.inventory.reorderPoint;
+    const isOutOfStock = product.inventory.currentStock === 0;
+    
+    // Get pricing based on selected price type
+    let unitPrice = product.pricing.wholesale || product.pricing.retail;
+    let priceLabel = 'Wholesale';
+    
+    if (priceType === 'wholesale') {
+      unitPrice = product.pricing.wholesale || product.pricing.retail;
+      priceLabel = 'Wholesale';
+    } else if (priceType === 'retail') {
+      unitPrice = product.pricing.retail;
+      priceLabel = 'Retail';
+    }
+    
+    const purchasePrice = product.pricing?.cost || 0;
+    
+    return (
+      <div className="flex items-center justify-between w-full">
+        <div className="font-medium">{product.name}</div>
+          <div className="flex items-center space-x-4">
+          <div className="text-sm text-gray-600">Stock: {product.inventory.currentStock}</div>
+          {showCostPrice && hasCostPricePermission && <div className="text-sm text-red-600 font-medium">Cost: ${Math.round(purchasePrice)}</div>}
+          <div className="text-sm text-gray-600">Price: ${Math.round(unitPrice)}</div>
+        </div>
+      </div>
+    );
+  };
+
+  const searchColClass = showCostPrice && hasCostPricePermission ? 'col-span-6' : 'col-span-7';
+
+  return (
+    <div className="space-y-4">
+      {/* Product Selection - Horizontal Layout */}
+      <div>
+        {/* Product Search and Input Fields Row */}
+        <div className="grid grid-cols-12 gap-4 items-end">
+          {/* Product Search - 7 columns */}
+          <div className={searchColClass}>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Product Search
+            </label>
+            <div className="relative flex space-x-2">
+              <div className="flex-1">
+                <SearchableDropdown
+                  key={searchKey}
+                  ref={productSearchRef}
+                  placeholder="Search or select product..."
+                  items={products || []}
+                  onSelect={handleProductSelect}
+                  onSearch={setProductSearchTerm}
+                  displayKey={productDisplayKey}
+                  selectedItem={selectedProduct}
+                  loading={productsLoading}
+                  emptyMessage={productSearchTerm.length > 0 ? "No products found" : "Start typing to search products..."}
+                  value={productSearchTerm}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBarcodeScanner(true)}
+                className="px-3 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center justify-center"
+                title="Scan barcode to search product"
+              >
+                <Camera className="h-5 w-5 text-gray-600" />
+              </button>
+            </div>
+          </div>
+          
+          {/* Stock - 1 column */}
+          <div className="col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Stock
+            </label>
+            <span className="text-sm font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 block text-center h-10 flex items-center justify-center">
+              {selectedProduct ? selectedProduct.inventory.currentStock : '0'}
+            </span>
+          </div>
+          
+          {/* Quantity - 1 column */}
+          <div className="col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Quantity
+            </label>
+            <input
+              type="number"
+              min="1"
+              max={selectedProduct?.inventory.currentStock}
+              value={quantity}
+              onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
+              onKeyDown={handleKeyDown}
+              onFocus={(e) => e.target.select()}
+              className="input text-center"
+              placeholder="1 (Enter to add & focus search)"
+              autoFocus={isAddingProduct}
+            />
+          </div>
+          
+          {/* Purchase Price - 1 column (conditional) - Between Quantity and Rate */}
+          {showCostPrice && hasCostPricePermission && (
+            <div className="col-span-1">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Cost
+              </label>
+              <span className="text-sm font-semibold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 block text-center h-10 flex items-center justify-center" title="Last Purchase Price">
+                {lastPurchasePrice !== null ? `$${Math.round(lastPurchasePrice)}` : selectedProduct ? 'N/A' : '$0'}
+              </span>
+            </div>
+          )}
+          
+          {/* Rate - 1 column (reduced from 2) */}
+          <div className="col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Rate
+            </label>
+            <input
+              type="number"
+              step="1"
+              value={customRate}
+              onChange={(e) => setCustomRate(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onFocus={(e) => e.target.select()}
+              className="input text-center"
+              placeholder="0 (Enter to add & focus search)"
+              required
+            />
+          </div>
+          
+          {/* Amount - 1 column */}
+          <div className="col-span-1">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Amount
+            </label>
+            <span className="text-sm font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 block text-center h-10 flex items-center justify-center">
+              {isAddingProduct ? Math.round(quantity * parseInt(customRate || 0)) : 0}
+            </span>
+          </div>
+          
+          {/* Add Button - 1 column */}
+          <div className="col-span-1 flex items-end">
+            <button
+              type="button"
+              onClick={handleAddToCart}
+              className="w-full btn btn-primary flex items-center justify-center px-3 py-2"
+              disabled={!selectedProduct}
+              title="Add to cart (or press Enter in Quantity/Rate fields - focus returns to search)"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Barcode Scanner Modal */}
+      <BarcodeScanner
+        isOpen={showBarcodeScanner}
+        onClose={() => setShowBarcodeScanner(false)}
+        onScan={(barcodeValue) => {
+          // Search for product by barcode
+          const foundProduct = allProducts.find(p => 
+            p.barcode === barcodeValue || p.sku === barcodeValue
+          );
+          
+          if (foundProduct) {
+            handleProductSelect(foundProduct);
+            toast.success(`Product found: ${foundProduct.name}`);
+          } else {
+            // If not found by barcode, search by name/description
+            setProductSearchTerm(barcodeValue);
+            toast.info(`Searching for: ${barcodeValue}`);
+          }
+          setShowBarcodeScanner(false);
+        }}
+        scanMode="both"
+      />
+    </div>
+  );
+};
+
+export const Sales = ({ tabId, editData }) => {
+  const [cart, setCart] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customerSearchTerm, setCustomerSearchTerm] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [selectedBankAccount, setSelectedBankAccount] = useState('');
+  const [amountPaid, setAmountPaid] = useState(0);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [currentOrder, setCurrentOrder] = useState(null);
+  const [appliedDiscounts, setAppliedDiscounts] = useState([]);
+  const [isTaxExempt, setIsTaxExempt] = useState(true);
+  const [directDiscount, setDirectDiscount] = useState({ type: 'amount', value: 0 });
+  const [isAdvancePayment, setIsAdvancePayment] = useState(false);
+  const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [autoGenerateInvoice, setAutoGenerateInvoice] = useState(true);
+  const [notes, setNotes] = useState('');
+  const [isLoadingLastPrices, setIsLoadingLastPrices] = useState(false);
+  const [originalPrices, setOriginalPrices] = useState({}); // Store original prices before applying last prices
+  const [isLastPricesApplied, setIsLastPricesApplied] = useState(false);
+  const [priceStatus, setPriceStatus] = useState({}); // Track price change status: 'updated', 'not-found', 'unchanged'
+  const [showCostPrice, setShowCostPrice] = useState(false); // Toggle to show/hide cost prices
+  const [lastPurchasePrices, setLastPurchasePrices] = useState({}); // Store last purchase prices for products
+  const [priceType, setPriceType] = useState('wholesale'); // Price type: 'retail' or 'wholesale' or 'custom'
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFormat, setExportFormat] = useState('pdf');
+  const [isExporting, setIsExporting] = useState(false);
+  
+  // Calculate default date range (one month ago to today)
+  const getDefaultDateRange = () => {
+    const today = new Date();
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(today.getMonth() - 1);
+    
+    const formatDate = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+    
+    return {
+      from: formatDate(oneMonthAgo),
+      to: formatDate(today)
+    };
+  };
+  
+  const defaultDateRange = getDefaultDateRange();
+  const [exportDateFrom, setExportDateFrom] = useState(defaultDateRange.from);
+  const [exportDateTo, setExportDateTo] = useState(defaultDateRange.to);
+  const { isMobile, isTablet } = useResponsive();
+  const queryClient = useQueryClient();
+  const { trackAddToCart, trackProductView, trackPageView } = useBehaviorTracking();
+  const { updateTabTitle, getActiveTab, openTab } = useTab();
+  const { hasPermission, user } = useAuth();
+  const [showProfit, setShowProfit] = useState(false);
+  const totalProfit = useMemo(() => {
+    if (!Array.isArray(cart) || cart.length === 0) return 0;
+
+    return cart.reduce((sum, item) => {
+      if (!item?.product) return sum;
+
+      const productId = item.product._id;
+      const quantity = Number(item.quantity) || 0;
+      const salePrice = Number(item.unitPrice) || 0;
+
+      const lastPurchaseCost =
+        productId && lastPurchasePrices[productId] !== undefined
+          ? Number(lastPurchasePrices[productId])
+          : null;
+
+      const fallbackCost =
+        lastPurchaseCost ??
+        Number(item.product.pricing?.cost) ??
+        Number(item.product.pricing?.purchasePrice) ??
+        Number(item.product.pricing?.wholesaleCost) ??
+        0;
+
+      const profitPerUnit = salePrice - (Number.isFinite(fallbackCost) ? fallbackCost : 0);
+      const lineProfit = profitPerUnit * quantity;
+
+      return sum + (Number.isFinite(lineProfit) ? lineProfit : 0);
+    }, 0);
+  }, [cart, lastPurchasePrices]);
+
+  // Generate invoice number
+  const generateInvoiceNumber = (customer) => {
+    if (!customer) return '';
+    
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const time = String(now.getTime()).slice(-4); // Last 4 digits of timestamp
+    
+    // Format: CUSTOMER-INITIALS-YYYYMMDD-XXXX
+    const customerInitials = customer.displayName
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase())
+      .join('')
+      .substring(0, 3);
+    
+    return `INV-${customerInitials}-${year}${month}${day}-${time}`;
+  };
+
+  // Handle edit data when component is opened for editing
+  useEffect(() => {
+    if (editData && editData.isEditMode && editData.orderId) {
+      // Set the customer
+      if (editData.customer) {
+        setSelectedCustomer(editData.customer);
+      }
+      
+      // Set the invoice number
+      if (editData.orderNumber) {
+        setInvoiceNumber(editData.orderNumber);
+        setAutoGenerateInvoice(false); // Don't auto-generate when editing
+      }
+      
+      // Set the notes
+      if (editData.notes) {
+        setNotes(editData.notes);
+      }
+      
+      // Set the cart items
+      if (editData.items && editData.items.length > 0) {
+        const formattedItems = editData.items.map(item => ({
+          product: item.product,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice || item.price || (item.product?.pricing?.retail || 0),
+          totalPrice: item.totalPrice || (item.quantity * (item.unitPrice || item.price || (item.product?.pricing?.retail || 0)))
+        }));
+        setCart(formattedItems);
+      }
+      
+      // Set tax exempt status
+      if (editData.isTaxExempt !== undefined) {
+        setIsTaxExempt(editData.isTaxExempt);
+      }
+      
+      // Set payment method and amount paid if available
+      if (editData.payment) {
+        setPaymentMethod(editData.payment.method || 'cash');
+        setAmountPaid(editData.payment.amount || 0);
+        if (editData.payment.method === 'bank') {
+          setSelectedBankAccount(editData.payment.bankAccount || '');
+        } else {
+          setSelectedBankAccount('');
+        }
+      }
+      
+      // Set order type
+      if (editData.orderType) {
+        // Order type is handled by customer selection
+      }
+      
+      // Data loaded successfully (no toast needed as Orders already shows opening message)
+    }
+  }, [editData?.orderId]); // Only depend on orderId to prevent multiple executions
+
+  const { data: customers, isLoading: customersLoading, error: customersError } = useQuery(
+    ['customers', { search: customerSearchTerm }],
+    () => customersAPI.searchCustomers(customerSearchTerm),
+    {
+      enabled: customerSearchTerm.length > 0,
+      keepPreviousData: true,
+    }
+  );
+
+  const { data: banksData, isLoading: banksLoading } = useQuery(
+    ['banks', { isActive: true }],
+    () => banksAPI.getBanks({ isActive: true }),
+    {
+      select: (data) => data?.data?.banks || data?.banks || [],
+      onError: (error) => {
+        console.error('Error fetching banks:', error);
+      }
+    }
+  );
+
+  const activeBanks = useMemo(
+    () => (banksData || []).filter((bank) => bank.isActive !== false),
+    [banksData]
+  );
+
+  useEffect(() => {
+    if (paymentMethod === 'bank' && !selectedBankAccount) {
+      const defaultBank = activeBanks.find((bank) => bank?.isDefault) || activeBanks[0];
+      if (defaultBank?._id) {
+        setSelectedBankAccount(defaultBank._id);
+      }
+    }
+  }, [paymentMethod, selectedBankAccount, activeBanks]);
+
+  // Update selected customer when customers data changes (e.g., after cash receipt updates balance)
+  useEffect(() => {
+    if (selectedCustomer && customers?.data?.customers) {
+      const updatedCustomer = customers.data.customers.find(
+        c => c._id === selectedCustomer._id
+      );
+      if (updatedCustomer && (
+        updatedCustomer.pendingBalance !== selectedCustomer.pendingBalance ||
+        updatedCustomer.advanceBalance !== selectedCustomer.advanceBalance ||
+        updatedCustomer.currentBalance !== selectedCustomer.currentBalance
+      )) {
+        setSelectedCustomer(updatedCustomer);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customers?.data?.customers]);
+
+  const createOrderMutation = useMutation(salesAPI.createOrder, {
+    onSuccess: (response) => {
+      queryClient.invalidateQueries('orders');
+      queryClient.invalidateQueries('todaySummary'); // Refresh dashboard
+      queryClient.invalidateQueries('salesOrdersToday'); // Refresh dashboard sales
+      queryClient.invalidateQueries('salesInvoicesToday'); // Refresh dashboard sales invoices
+      queryClient.invalidateQueries('customers'); // Refresh customer balances
+      toast.success('Sales invoice created successfully!');
+      setCurrentOrder(response.order);
+      setShowPrintModal(true);
+      setCart([]);
+      setSelectedCustomer(null);
+      setPaymentMethod('cash');
+      setAmountPaid(0);
+      setSelectedBankAccount('');
+      setAppliedDiscounts([]);
+      
+      // Reset tab title to default
+      const activeTab = getActiveTab();
+      if (activeTab) {
+        updateTabTitle(activeTab.id, 'Sales');
+      }
+    },
+    onError: (error) => {
+      // Handle credit limit error specifically
+      if (error.response?.data?.error === 'CREDIT_LIMIT_EXCEEDED') {
+        const details = error.response.data.details;
+        const message = `Credit limit exceeded for customer. ` +
+          `Current balance: $${details.totalOutstanding.toFixed(2)}, ` +
+          `Unpaid amount: $${details.unpaidAmount.toFixed(2)}, ` +
+          `Credit limit: $${details.creditLimit.toFixed(2)}, ` +
+          `Available credit: $${details.availableCredit.toFixed(2)}. ` +
+          `Please collect payment or reduce the order amount.`;
+        
+        toast.error(message, {
+          duration: 8000,
+          position: 'top-center'
+        });
+      } else {
+        handleApiError(error, 'Order Creation');
+      }
+    },
+  });
+
+  const updateOrderMutation = useMutation(
+    ({ id, data }) => salesAPI.updateOrder(id, data),
+    {
+      onSuccess: (response) => {
+        queryClient.invalidateQueries('orders');
+        queryClient.invalidateQueries('todaySummary'); // Refresh dashboard
+        queryClient.invalidateQueries('salesOrdersToday'); // Refresh dashboard sales
+        queryClient.invalidateQueries('salesInvoicesToday'); // Refresh dashboard sales invoices
+        queryClient.invalidateQueries('customers'); // Refresh customer balances
+        toast.success('Sales invoice updated successfully!');
+        setCurrentOrder(response.order);
+        setShowPrintModal(true);
+      },
+      onError: (error) => {
+        // Handle credit limit error specifically
+        if (error.response?.data?.error === 'CREDIT_LIMIT_EXCEEDED') {
+          const details = error.response.data.details;
+          const message = `Credit limit exceeded for customer. ` +
+            `Current balance: $${details.totalOutstanding.toFixed(2)}, ` +
+            `Unpaid amount: $${details.unpaidAmount.toFixed(2)}, ` +
+            `Credit limit: $${details.creditLimit.toFixed(2)}, ` +
+            `Available credit: $${details.availableCredit.toFixed(2)}. ` +
+            `Please collect payment or reduce the order amount.`;
+          
+          toast.error(message, {
+            duration: 8000,
+            position: 'top-center'
+          });
+        } else {
+          handleApiError(error, 'Order Update');
+        }
+      },
+    }
+  );
+
+  const subtotal = cart.reduce((sum, item) => sum + (item.unitPrice * item.quantity), 0);
+  const codeDiscountAmount = appliedDiscounts.reduce((sum, discount) => sum + discount.amount, 0);
+  
+  let directDiscountAmount = 0;
+  if (directDiscount.value > 0) {
+    if (directDiscount.type === 'percentage') {
+      directDiscountAmount = (subtotal * directDiscount.value) / 100;
+    } else {
+      directDiscountAmount = Math.min(directDiscount.value, subtotal);
+    }
+  }
+  
+  const totalDiscountAmount = codeDiscountAmount + directDiscountAmount;
+  const subtotalAfterDiscount = subtotal - totalDiscountAmount;
+  const tax = isTaxExempt ? 0 : subtotalAfterDiscount * 0.08;
+  const total = subtotalAfterDiscount + tax;
+  const change = amountPaid - total;
+
+  // Map businessType to orderType
+  // businessType: ['retail', 'wholesale', 'distributor', 'individual']
+  // orderType: ['retail', 'wholesale', 'return', 'exchange']
+  const mapBusinessTypeToOrderType = (businessType) => {
+    if (!businessType) return 'retail';
+    if (businessType === 'retail' || businessType === 'wholesale') return businessType;
+    if (businessType === 'distributor') return 'wholesale'; // Distributors are wholesale customers
+    if (businessType === 'individual') return 'retail'; // Individuals are retail customers
+    return 'retail'; // Default fallback
+  };
+
+  const handleCustomerSelect = async (customer) => {
+    setSelectedCustomer(customer);
+    
+    // Reset price states when customer changes
+    setOriginalPrices({});
+    setIsLastPricesApplied(false);
+    setPriceStatus({});
+    
+    // Auto-generate invoice number if enabled
+    if (autoGenerateInvoice && customer) {
+      setInvoiceNumber(generateInvoiceNumber(customer));
+    }
+    
+    // Update tab title to show customer name
+    const activeTab = getActiveTab();
+    if (activeTab && customer) {
+      updateTabTitle(activeTab.id, `Sales - ${customer.displayName}`);
+    }
+  };
+
+  // Update product rates when price type changes
+  useEffect(() => {
+    // This will trigger ProductSearch to recalculate rates when priceType changes
+    // The ProductSearch component handles the rate update internally
+  }, [priceType]);
+
+  // Fetch last purchase prices for products in cart (always, not just when cost is visible)
+  useEffect(() => {
+    const fetchLastPurchasePrices = async () => {
+      if (cart.length === 0) return;
+      
+      const productIds = cart.map(item => item.product._id);
+      if (productIds.length === 0) return;
+      
+      try {
+        const response = await productsAPI.getLastPurchasePrices(productIds);
+        if (response.data && response.data.prices) {
+          const pricesMap = {};
+          Object.keys(response.data.prices).forEach(productId => {
+            pricesMap[productId] = response.data.prices[productId].lastPurchasePrice;
+          });
+          setLastPurchasePrices(prev => ({ ...prev, ...pricesMap }));
+        }
+      } catch (error) {
+        console.error('Error fetching last purchase prices:', error);
+        // Silently fail - don't show error to user
+      }
+    };
+    
+    fetchLastPurchasePrices();
+  }, [cart]);
+
+  const addToCart = async (newItem) => {
+    setCart(prevCart => {
+      const existingItem = prevCart.find(item => item.product._id === newItem.product._id);
+      if (existingItem) {
+        // Check if combined quantity exceeds available stock
+        const combinedQuantity = existingItem.quantity + newItem.quantity;
+        const availableStock = newItem.product.inventory?.currentStock || 0;
+        
+        if (combinedQuantity > availableStock) {
+          toast.error(`Cannot add ${newItem.quantity} more units. Only ${availableStock - existingItem.quantity} additional units available (${existingItem.quantity} already in cart).`);
+          return prevCart; // Return unchanged cart
+        }
+        
+        // If this is an existing item and we have original price stored, keep it
+        // Otherwise, if last prices were applied and original price exists, preserve it
+        const updatedCart = prevCart.map(item =>
+          item.product._id === newItem.product._id
+            ? { ...item, quantity: item.quantity + newItem.quantity, unitPrice: newItem.unitPrice }
+            : item
+        );
+        
+        return updatedCart;
+      }
+      
+      // New item added - fetch its last purchase price (always, for loss alerts)
+      if (newItem.product._id) {
+        productsAPI.getLastPurchasePrice(newItem.product._id)
+          .then(response => {
+            if (response.data && response.data.lastPurchasePrice !== null) {
+              setLastPurchasePrices(prev => ({
+                ...prev,
+                [newItem.product._id]: response.data.lastPurchasePrice
+              }));
+            }
+          })
+          .catch(error => console.error('Error fetching last purchase price:', error));
+      }
+      
+      // New item added - don't store in originalPrices since it wasn't there before
+      // applying last prices, so there's nothing to restore
+      return [...prevCart, newItem];
+    });
+  };
+
+  const updateQuantity = async (productId, newQuantity) => {
+    if (newQuantity <= 0) {
+      removeFromCart(productId);
+      return;
+    }
+    
+    setCart(prevCart => {
+      const cartItem = prevCart.find(item => item.product._id === productId);
+      if (!cartItem) return prevCart;
+      
+      // Check if new quantity exceeds available stock
+      const availableStock = cartItem.product.inventory?.currentStock || 0;
+      
+      if (newQuantity > availableStock) {
+        toast.error(`Cannot set quantity to ${newQuantity}. Only ${availableStock} units available in stock.`);
+        return prevCart; // Return unchanged cart
+      }
+      
+      return prevCart.map(item =>
+        item.product._id === productId
+          ? { ...item, quantity: newQuantity }
+          : item
+      );
+    });
+  };
+
+  const updateUnitPrice = (productId, newPrice) => {
+    if (newPrice < 0) return;
+    
+    // Check if sale price is less than cost price (always check, regardless of showCostPrice)
+    const cartItem = cart.find(item => item.product._id === productId);
+    if (cartItem) {
+      const costPrice = lastPurchasePrices[productId];
+      if (costPrice !== undefined && newPrice < costPrice) {
+        const loss = costPrice - newPrice;
+        const lossPercent = ((loss / costPrice) * 100).toFixed(1);
+        toast.error(
+          `Warning: Sale price ($${newPrice}) is below cost price ($${Math.round(costPrice)}). Loss: $${Math.round(loss)} (${lossPercent}%)`,
+          {
+            duration: 5000,
+            position: 'top-center',
+            icon: '⚠️'
+          }
+        );
+      }
+    }
+    
+    setCart(prevCart =>
+      prevCart.map(cartItem =>
+        cartItem.product._id === productId
+          ? { ...cartItem, unitPrice: newPrice }
+          : cartItem
+      )
+    );
+    // Note: We don't update originalPrices here because "Restore Current Prices"
+    // should always restore to the prices that were there BEFORE applying last prices,
+    // not the prices after manual edits
+  };
+
+  const removeFromCart = (productId) => {
+    setCart(prevCart => {
+      const newCart = prevCart.filter(item => item.product._id !== productId);
+      // If cart becomes empty or if this was the last item with original price, reset states
+      if (newCart.length === 0) {
+        setOriginalPrices({});
+        setIsLastPricesApplied(false);
+        setPriceStatus({});
+      } else {
+        // Remove the product's original price and status if they exist
+        setOriginalPrices(prev => {
+          const updated = { ...prev };
+          delete updated[productId.toString()];
+          // If no more original prices, reset the flag
+          if (Object.keys(updated).length === 0) {
+            setIsLastPricesApplied(false);
+            setPriceStatus({});
+          }
+          return updated;
+        });
+        setPriceStatus(prev => {
+          const updated = { ...prev };
+          delete updated[productId.toString()];
+          return updated;
+        });
+      }
+      return newCart;
+    });
+  };
+
+  const handleSortCartItems = () => {
+    setCart(prevCart => {
+      if (!prevCart || prevCart.length < 2) {
+        return prevCart;
+      }
+
+      const getProductName = (item) => {
+        const productData = item.product;
+
+        if (!productData) return '';
+
+        if (typeof productData === 'string') {
+          return productData;
+        }
+
+        return (
+          productData.name ||
+          productData.title ||
+          productData.displayName ||
+          productData.businessName ||
+          productData.fullName ||
+          ''
+        );
+      };
+
+      const sortedCart = [...prevCart].sort((a, b) => {
+        const nameA = getProductName(a).toString().toLowerCase();
+        const nameB = getProductName(b).toString().toLowerCase();
+
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        return 0;
+      });
+
+      return sortedCart;
+    });
+  };
+
+  const handleApplyLastPrices = async () => {
+    if (!selectedCustomer) {
+      showErrorToast('Please select a customer first');
+      return;
+    }
+
+    if (cart.length === 0) {
+      showErrorToast('Please add products to cart first');
+      return;
+    }
+
+    setIsLoadingLastPrices(true);
+    try {
+      const response = await salesAPI.getLastPrices(selectedCustomer._id);
+      const { prices, orderNumber, orderDate } = response.data;
+
+      if (!prices || Object.keys(prices).length === 0) {
+        showErrorToast('No previous order found for this customer');
+        setIsLoadingLastPrices(false);
+        return;
+      }
+
+      // Store original prices before applying last prices
+      const originalPricesMap = {};
+      const priceStatusMap = {};
+      cart.forEach(cartItem => {
+        const productId = cartItem.product._id.toString();
+        originalPricesMap[productId] = cartItem.unitPrice;
+      });
+      setOriginalPrices(originalPricesMap);
+
+      // Apply last prices to matching products in cart
+      let updatedCount = 0;
+      let unchangedCount = 0;
+      let notFoundCount = 0;
+      const updatedCart = cart.map(cartItem => {
+        const productId = cartItem.product._id.toString();
+        if (prices[productId]) {
+          const lastPrice = prices[productId].unitPrice;
+          const currentPrice = cartItem.unitPrice;
+          
+          if (lastPrice !== currentPrice) {
+            // Price changed
+            updatedCount++;
+            priceStatusMap[productId] = 'updated';
+            return {
+              ...cartItem,
+              unitPrice: lastPrice
+            };
+          } else {
+            // Price is the same
+            unchangedCount++;
+            priceStatusMap[productId] = 'unchanged';
+            return cartItem;
+          }
+        } else {
+          // Product not found in last order
+          notFoundCount++;
+          priceStatusMap[productId] = 'not-found';
+          return cartItem;
+        }
+      });
+
+      setCart(updatedCart);
+      setPriceStatus(priceStatusMap);
+      setIsLastPricesApplied(true);
+
+      const orderDateStr = orderDate ? new Date(orderDate).toLocaleDateString() : 'previous order';
+      if (updatedCount > 0) {
+        let message = `Applied prices from ${orderNumber || 'previous order'} (${orderDateStr}). Updated ${updatedCount} product(s).`;
+        if (unchangedCount > 0) {
+          message += ` ${unchangedCount} product(s) had same price.`;
+        }
+        if (notFoundCount > 0) {
+          message += ` ${notFoundCount} product(s) not found in previous order.`;
+        }
+        showSuccessToast(message);
+      } else if (unchangedCount > 0) {
+        showSuccessToast(`All products already have the same prices as in ${orderNumber || 'previous order'} (${orderDateStr}).`);
+      } else {
+        showErrorToast('No matching products found in previous order');
+      }
+    } catch (error) {
+      handleApiError(error, 'Apply Last Prices');
+    } finally {
+      setIsLoadingLastPrices(false);
+    }
+  };
+
+  const handleRestoreCurrentPrices = () => {
+    if (Object.keys(originalPrices).length === 0) {
+      showErrorToast('No original prices to restore');
+      return;
+    }
+
+    // Restore original prices
+    let restoredCount = 0;
+    const restoredCart = cart.map(cartItem => {
+      const productId = cartItem.product._id.toString();
+      if (originalPrices[productId] !== undefined) {
+        restoredCount++;
+        return {
+          ...cartItem,
+          unitPrice: originalPrices[productId]
+        };
+      }
+      return cartItem;
+    });
+
+      setCart(restoredCart);
+      setIsLastPricesApplied(false);
+      setOriginalPrices({});
+      setPriceStatus({});
+
+      if (restoredCount > 0) {
+        showSuccessToast(`Restored original prices for ${restoredCount} product(s).`);
+      } else {
+        showErrorToast('No matching products found to restore');
+      }
+  };
+
+  const { confirmation: clearConfirmation, confirmClear, handleConfirm: handleClearConfirm, handleCancel: handleClearCancel } = useClearConfirmation();
+  
+  const handleClearCart = () => {
+    if (cart.length > 0) {
+      confirmClear(cart.length, 'items', async () => {
+        setCart([]);
+        setSelectedCustomer(null);
+        setCustomerSearchTerm('');
+        setAppliedDiscounts([]);
+        setIsTaxExempt(true);
+        setDirectDiscount({ type: 'amount', value: 0 });
+        setIsAdvancePayment(false);
+        setInvoiceNumber('');
+        setPaymentMethod('cash');
+        setSelectedBankAccount('');
+        setAmountPaid(0);
+        setOriginalPrices({});
+        setIsLastPricesApplied(false);
+        setPriceStatus({});
+        setPriceType('wholesale');
+        
+        // Reset tab title to default
+        const activeTab = getActiveTab();
+        if (activeTab) {
+          updateTabTitle(activeTab.id, 'Sales');
+        }
+        
+        toast.success('Cart cleared');
+      });
+    }
+  };
+
+  const handleExport = () => {
+    setShowExportModal(true);
+  };
+
+  const handleExportConfirm = async () => {
+    setIsExporting(true);
+    try {
+      // Build filters based on current view (if any filters exist)
+      const filters = {
+        // Include customer filter if a customer is selected
+        ...(selectedCustomer?._id && { customer: selectedCustomer._id }),
+        // Include date range if selected
+        ...(exportDateFrom && { dateFrom: exportDateFrom }),
+        ...(exportDateTo && { dateTo: exportDateTo }),
+      };
+
+      let response;
+      if (exportFormat === 'excel') {
+        response = await salesAPI.exportExcel(filters);
+      } else if (exportFormat === 'csv') {
+        response = await salesAPI.exportCSV(filters);
+      } else if (exportFormat === 'json') {
+        response = await salesAPI.exportJSON(filters);
+      } else if (exportFormat === 'pdf') {
+        response = await salesAPI.exportPDF(filters);
+      }
+
+      if (response?.data?.filename) {
+        const filename = response.data.filename;
+        
+        try {
+          // Add a small delay to ensure file is written (PDF generation is async)
+          if (exportFormat === 'pdf') {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+          
+          // Download the file
+          let downloadResponse;
+          try {
+            downloadResponse = await salesAPI.downloadFile(filename);
+          } catch (downloadErr) {
+            // Handle axios errors
+            if (downloadErr.response) {
+              // Server returned an error status
+              const errorData = downloadErr.response.data;
+              if (errorData instanceof Blob) {
+                // Error response is a blob, try to read it
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const text = reader.result;
+                  try {
+                    const parsedError = JSON.parse(text);
+                    showErrorToast(parsedError.message || `Download failed: ${downloadErr.response.status}`);
+                  } catch {
+                    showErrorToast(`Download failed: ${downloadErr.response.status}`);
+                  }
+                };
+                reader.readAsText(errorData);
+              } else if (typeof errorData === 'object' && errorData !== null) {
+                showErrorToast(errorData.message || `Download failed: ${downloadErr.response.status}`);
+              } else {
+                showErrorToast(`Download failed: ${downloadErr.response.status}`);
+              }
+            } else {
+              showErrorToast('Download failed: ' + (downloadErr.message || 'Network error'));
+            }
+            return;
+          }
+          
+          // Check if response is successful
+          if (!downloadResponse) {
+            showErrorToast('Download failed: No response received');
+            return;
+          }
+          
+          if (downloadResponse.status !== 200) {
+            showErrorToast(`Download failed with status ${downloadResponse.status}`);
+            return;
+          }
+          
+          // Check if data exists
+          if (!downloadResponse.data) {
+            showErrorToast('Download failed: No data received from server');
+            return;
+          }
+          
+          // Check content type from headers
+          const contentType = downloadResponse.headers?.['content-type'] || downloadResponse.headers?.['Content-Type'] || '';
+          
+          if (exportFormat === 'pdf') {
+            // For PDF, open in new tab for preview
+            const blob = downloadResponse.data;
+            
+            // Debug logging
+            console.log('PDF download response:', {
+              status: downloadResponse.status,
+              contentType,
+              blobType: typeof blob,
+              isBlob: blob instanceof Blob,
+              blobSize: blob instanceof Blob ? blob.size : 'N/A',
+              blobKeys: blob && typeof blob === 'object' ? Object.keys(blob) : 'N/A'
+            });
+            
+            // Check if blob is valid
+            if (!blob || !(blob instanceof Blob)) {
+              // Handle different response types
+              if (typeof blob === 'string') {
+                showErrorToast(`Server error: ${blob.substring(0, 100)}`);
+              } else if (blob && typeof blob === 'object') {
+                // Try to extract error message from object
+                let errorMsg = blob.message || blob.error;
+                
+                // If no message property, try to stringify but check if it's meaningful
+                if (!errorMsg) {
+                  try {
+                    const stringified = JSON.stringify(blob);
+                    // If stringified is just "{}" or empty, try to get more info
+                    if (stringified === '{}' || stringified === 'null' || stringified === '') {
+                      // Check if it's an error object with other properties
+                      errorMsg = blob.statusText || blob.status || 'Unknown server error';
+                      // Log for debugging
+                      console.error('Download response error - empty object:', {
+                        blob,
+                        contentType,
+                        responseStatus: downloadResponse?.status,
+                        responseHeaders: downloadResponse?.headers
+                      });
+                    } else {
+                      errorMsg = stringified.substring(0, 150);
+                    }
+                  } catch (e) {
+                    errorMsg = 'Invalid response format';
+                  }
+                }
+                
+                showErrorToast(`Server error: ${errorMsg || 'Unknown error'}`);
+              } else {
+                showErrorToast('Invalid PDF file received - expected Blob. Response type: ' + typeof blob);
+              }
+              return;
+            }
+            
+            // Check if content type indicates an error (JSON error response)
+            if (contentType.includes('application/json') || contentType.includes('text/html')) {
+              // Read the blob to see the error message
+              const reader = new FileReader();
+              reader.onload = () => {
+                const text = reader.result;
+                try {
+                  const errorData = JSON.parse(text);
+                  showErrorToast(errorData.message || 'File not found or generation failed');
+                } catch {
+                  showErrorToast('Server returned error instead of PDF. Please try again.');
+                }
+              };
+              reader.readAsText(blob);
+              return;
+            }
+          
+          // Check if blob has content
+          if (blob.size === 0) {
+            showErrorToast('PDF file is empty');
+            return;
+          }
+          
+          // Check if blob type is PDF (or at least not HTML/JSON error)
+          if (blob.type && !blob.type.includes('pdf') && !blob.type.includes('application/octet-stream')) {
+            // Might be an error response, try to read it
+            const reader = new FileReader();
+            reader.onload = () => {
+              const text = reader.result;
+              if (text.includes('<!DOCTYPE') || text.includes('{"error"') || text.includes('{"message"')) {
+                showErrorToast('Server returned an error instead of PDF file');
+              } else {
+                // Try to open anyway
+                const url = URL.createObjectURL(blob);
+                const newWindow = window.open(url, '_blank');
+                if (!newWindow) {
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.download = filename;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                  showSuccessToast('PDF downloaded (popup was blocked)');
+                } else {
+                  showSuccessToast('PDF opened in new tab');
+                }
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+              }
+            };
+            reader.readAsText(blob.slice(0, 100)); // Read first 100 bytes to check
+            return;
+          }
+          
+          // Valid PDF blob, proceed with opening
+          const url = URL.createObjectURL(blob);
+          const newWindow = window.open(url, '_blank');
+          
+          if (!newWindow) {
+            // Popup blocked, fallback to download
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showSuccessToast('PDF downloaded (popup was blocked)');
+          } else {
+            showSuccessToast('PDF opened in new tab');
+          }
+          
+          // Revoke URL after a delay to ensure it loads
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+        } else {
+          // For other formats, download directly
+          const blob = new Blob([downloadResponse.data], { 
+            type: exportFormat === 'excel' 
+              ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+              : exportFormat === 'csv'
+              ? 'text/csv'
+              : 'application/json'
+          });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          
+          showSuccessToast(`${exportFormat.toUpperCase()} file downloaded successfully`);
+        }
+        } catch (downloadError) {
+          // Handle download errors
+          if (downloadError.response) {
+            // Server returned an error status
+            if (downloadError.response.data instanceof Blob) {
+              // Error response is a blob, try to read it
+              const reader = new FileReader();
+              reader.onload = () => {
+                const text = reader.result;
+                try {
+                  const errorData = JSON.parse(text);
+                  showErrorToast(errorData.message || 'Download failed');
+                } catch {
+                  showErrorToast('Download failed: ' + text.substring(0, 100));
+                }
+              };
+              reader.readAsText(downloadError.response.data);
+            } else {
+              showErrorToast(downloadError.response.data?.message || `Download failed: ${downloadError.response.status}`);
+            }
+          } else {
+            showErrorToast('Download failed: ' + (downloadError.message || 'Unknown error'));
+          }
+          return;
+        }
+      }
+
+      setShowExportModal(false);
+    } catch (error) {
+      handleApiError(error, 'Export');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleCheckout = () => {
+    if (cart.length === 0) {
+      showErrorToast({ message: 'Cart is empty' });
+      return;
+    }
+    
+    // Check credit limit before proceeding
+    if (selectedCustomer && selectedCustomer.creditLimit > 0) {
+      const currentPaymentMethod = paymentMethod || 'cash';
+      const currentAmountPaid = amountPaid || 0;
+      const unpaidAmount = total - currentAmountPaid;
+      
+      // For account payments or partial payments, check credit limit
+      if (currentPaymentMethod === 'account' || unpaidAmount > 0) {
+        const currentBalance = selectedCustomer.currentBalance || 0;
+        const pendingBalance = selectedCustomer.pendingBalance || 0;
+        const totalOutstanding = currentBalance + pendingBalance;
+        const newBalanceAfterOrder = totalOutstanding + unpaidAmount;
+        const availableCredit = selectedCustomer.creditLimit - totalOutstanding;
+        
+        if (newBalanceAfterOrder > selectedCustomer.creditLimit) {
+          const message = `Credit limit exceeded for ${selectedCustomer.displayName || selectedCustomer.name}. ` +
+            `Current balance: $${totalOutstanding.toFixed(2)}, ` +
+            `Unpaid amount: $${unpaidAmount.toFixed(2)}, ` +
+            `Credit limit: $${selectedCustomer.creditLimit.toFixed(2)}, ` +
+            `Available credit: $${availableCredit.toFixed(2)}. ` +
+            `Please collect payment or reduce the order amount.`;
+          
+          toast.error(message, {
+            duration: 8000,
+            position: 'top-center'
+          });
+          return;
+        } else if (availableCredit - unpaidAmount < (selectedCustomer.creditLimit * 0.1)) {
+          // Warning when credit limit is almost reached (within 10%)
+          const warningMessage = `Warning: ${selectedCustomer.displayName || selectedCustomer.name} is near credit limit. ` +
+            `Available credit: $${availableCredit.toFixed(2)}, ` +
+            `After this order: $${(availableCredit - unpaidAmount).toFixed(2)} remaining.`;
+          
+          toast.warning(warningMessage, {
+            duration: 6000,
+            position: 'top-center'
+          });
+        }
+      }
+    }
+    
+    if (paymentMethod === 'bank' && !selectedBankAccount) {
+      showErrorToast({ message: 'Please select a bank account for bank payments' });
+      return;
+    }
+
+    const orderData = {
+      orderType: mapBusinessTypeToOrderType(selectedCustomer?.businessType),
+      customer: selectedCustomer?._id,
+      items: cart.map(item => ({
+        product: item.product._id,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice
+      })),
+      appliedDiscounts: appliedDiscounts,
+      directDiscount: directDiscount,
+      subtotal: subtotal,
+      discountAmount: totalDiscountAmount,
+      tax: tax,
+      isTaxExempt: isTaxExempt,
+      total: total,
+      invoiceNumber: invoiceNumber,
+      notes: notes?.trim() || '',
+      payment: {
+        method: paymentMethod,
+        bankAccount: paymentMethod === 'bank' ? selectedBankAccount : null,
+        amount: amountPaid,
+        remainingBalance: total - amountPaid,
+        isPartialPayment: amountPaid < total,
+        isAdvancePayment: isAdvancePayment,
+        advanceAmount: isAdvancePayment ? (amountPaid - total) : 0
+      }
+    };
+    
+    // Use appropriate mutation based on edit mode
+    if (editData?.isEditMode) {
+      const orderId = editData.orderId;
+      // For updates, send items with all required fields according to orderItemSchema
+      const updateData = {
+        orderType: mapBusinessTypeToOrderType(selectedCustomer?.businessType),
+        customer: selectedCustomer?._id,
+        items: cart.map(item => {
+          const itemSubtotal = item.quantity * item.unitPrice;
+          const itemDiscountAmount = 0; // Can be calculated if needed
+          const itemTaxAmount = 0; // Can be calculated if needed
+          const itemTotal = itemSubtotal - itemDiscountAmount + itemTaxAmount;
+          
+          return {
+            product: item.product._id,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            discountPercent: 0,
+            taxRate: 0,
+            subtotal: itemSubtotal,
+            discountAmount: itemDiscountAmount,
+            taxAmount: itemTaxAmount,
+            total: itemTotal
+          };
+        }),
+        notes: notes || ''
+      };
+      updateOrderMutation.mutate({ id: orderId, data: updateData });
+    } else {
+      createOrderMutation.mutate(orderData);
+    }
+  };
+
+  const handlePaymentSuccess = async (paymentResult) => {
+    // Handle payment success
+  };
+
+  const handlePaymentError = (error) => {
+    console.error('Payment error:', error);
+    setShowPaymentModal(false);
+    setCurrentOrder(null);
+  };
+
+  return (
+    <AsyncErrorBoundary>
+      <div className="space-y-4 lg:space-y-6">
+        <div className={`flex ${isMobile ? 'flex-col space-y-4' : 'items-start justify-between'}`}>
+          <div>
+            <h1 className={`${isMobile ? 'text-xl' : 'text-2xl'} font-bold text-gray-900`}>Point of Sale</h1>
+            <p className="text-gray-600">Process sales transactions</p>
+          </div>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleExport}
+              className="btn btn-secondary btn-md"
+              title="Export Sales Report"
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Export Sales Report
+            </button>
+            <button
+              onClick={() => {
+                const componentInfo = getComponentInfo('/sales');
+                if (componentInfo) {
+                  const newTabId = `tab_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+                  openTab({
+                    title: 'Sales',
+                    path: '/sales',
+                    component: componentInfo.component,
+                    icon: componentInfo.icon,
+                    allowMultiple: true,
+                    props: { tabId: newTabId }
+                  });
+                }
+              }}
+              className="btn btn-primary btn-md"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              New Sales
+            </button>
+          </div>
+        </div>
+
+        {/* Customer Selection and Information Row */}
+        <div className={`flex ${isMobile ? 'flex-col space-y-4' : 'items-start space-x-4'}`}>
+          {/* Customer Selection */}
+          <div className={`${isMobile ? 'w-full' : 'w-[500px] flex-shrink-0'}`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Select Customer
+                </label>
+                {selectedCustomer && (
+                  <button
+                    onClick={() => {
+                      setSelectedCustomer(null);
+                      setCustomerSearchTerm('');
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800 underline"
+                    title="Change customer"
+                  >
+                    Change Customer
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center space-x-2">
+                <div className="flex items-center space-x-2">
+                  <label className="text-xs font-normal text-gray-400">Price Type:</label>
+                  <select
+                    value={priceType}
+                    onChange={(e) => setPriceType(e.target.value)}
+                    className="border border-gray-200 rounded-md px-2 py-1 text-xs text-gray-600 focus:outline-none focus:ring-1 focus:ring-primary-400 focus:border-primary-400"
+                  >
+                    <option value="wholesale">Wholesale</option>
+                    <option value="retail">Retail</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <SearchableDropdown
+              placeholder="Search customers by name, email, or business..."
+              items={customers?.data?.customers || []}
+              onSelect={handleCustomerSelect}
+              onSearch={setCustomerSearchTerm}
+              selectedItem={selectedCustomer}
+              displayKey={(customer) => {
+                const receivables = (customer.pendingBalance || 0);
+                const advance = (customer.advanceBalance || 0);
+                const netBalance = receivables - advance;
+                const isPayable = netBalance < 0;
+                const isReceivable = netBalance > 0;
+                const hasBalance = receivables > 0 || advance > 0;
+                
+                return (
+                  <div>
+                    <div className="font-medium">{customer.displayName}</div>
+                    {hasBalance ? (
+                      <div className={`text-sm ${isPayable ? 'text-red-600' : 'text-green-600'}`}>
+                        {isPayable ? 'Advance:' : 'Receivables:'} ${Math.abs(netBalance).toFixed(2)}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              }}
+              loading={customersLoading}
+              emptyMessage="No customers found"
+            />
+          </div>
+
+          {/* Customer Information - Right Side */}
+          <div className={`${isMobile ? 'w-full' : 'flex-1'}`}>
+            {selectedCustomer ? (
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                <div className="flex items-center space-x-3">
+                  <User className="h-5 w-5 text-gray-400" />
+                  <div className="flex-1">
+                    <p className="font-medium">{selectedCustomer.displayName}</p>
+                    <p className="text-sm text-gray-600 capitalize">
+                      {selectedCustomer.businessType} • {selectedCustomer.phone || 'No phone'}
+                    </p>
+                    <div className="flex items-center space-x-4 mt-2">
+                      {(() => {
+                        const receivables = (selectedCustomer.pendingBalance || 0);
+                        const advance = (selectedCustomer.advanceBalance || 0);
+                        const netBalance = receivables - advance;
+                        const isPayable = netBalance < 0;
+                        const isReceivable = netBalance > 0;
+                        const hasBalance = receivables > 0 || advance > 0;
+                        
+                        return hasBalance ? (
+                          <div className="flex items-center space-x-1">
+                            <span className="text-xs text-gray-500">{isPayable ? 'Advance:' : 'Receivables:'}</span>
+                            <span className={`text-sm font-medium ${
+                              isPayable ? 'text-red-600' : isReceivable ? 'text-green-600' : 'text-gray-600'
+                            }`}>
+                              ${Math.abs(netBalance).toFixed(2)}
+                            </span>
+                          </div>
+                        ) : null;
+                      })()}
+                      <div className="flex items-center space-x-1">
+                        <span className="text-xs text-gray-500">Credit Limit:</span>
+                        <span className={`text-sm font-medium ${
+                          selectedCustomer.creditLimit > 0 ? (
+                            ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0)) >= selectedCustomer.creditLimit * 0.9 
+                              ? 'text-red-600' 
+                              : ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0)) >= selectedCustomer.creditLimit * 0.7
+                              ? 'text-yellow-600'
+                              : 'text-blue-600'
+                          ) : 'text-gray-600'
+                        }`}>
+                          ${(selectedCustomer.creditLimit || 0).toFixed(2)}
+                        </span>
+                        {selectedCustomer.creditLimit > 0 && 
+                         ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0)) >= selectedCustomer.creditLimit * 0.9 && (
+                          <span className="text-xs text-red-600 font-bold ml-1">⚠️</span>
+                        )}
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <span className="text-xs text-gray-500">Available Credit:</span>
+                        <span className={`text-sm font-medium ${
+                          selectedCustomer.creditLimit > 0 ? (
+                            (selectedCustomer.creditLimit - ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0))) <= selectedCustomer.creditLimit * 0.1
+                              ? 'text-red-600'
+                              : (selectedCustomer.creditLimit - ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0))) <= selectedCustomer.creditLimit * 0.3
+                              ? 'text-yellow-600'
+                              : 'text-green-600'
+                          ) : 'text-gray-600'
+                        }`}>
+                          ${(selectedCustomer.creditLimit - ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0))).toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="hidden lg:block">
+                {/* Empty space to maintain layout consistency */}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Combined Product Selection and Cart Section */}
+        <div className="card">
+          <div className="card-header">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              <h3 className="text-lg font-medium text-gray-900">Product Selection & Cart</h3>
+              <div className="flex flex-wrap items-center justify-start lg:justify-end gap-2">
+                {/* Show/Hide Cost Price Toggle Button */}
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setShowCostPrice(!showCostPrice)}
+                    className="btn btn-secondary btn-sm flex items-center space-x-2"
+                    title={showCostPrice ? "Hide purchase cost prices" : "Show purchase cost prices"}
+                  >
+                    {showCostPrice ? (
+                      <>
+                        <EyeOff className="h-4 w-4" />
+                        <span>Hide Cost</span>
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="h-4 w-4" />
+                        <span>Show Cost</span>
+                      </>
+                    )}
+                  </button>
+                  {user?.role === 'admin' && (
+                    <>
+                      <button
+                        onClick={() => setShowProfit((prev) => !prev)}
+                        className="btn btn-secondary btn-sm flex items-center space-x-2"
+                        title="Show estimated profit (BP)"
+                      >
+                        <Calculator className="h-4 w-4" />
+                        <span>{showProfit ? 'Hide BP' : 'Show BP'}</span>
+                      </button>
+                      {showProfit && (
+                        <span
+                          className={`text-sm font-semibold ${
+                            totalProfit >= 0 ? 'text-green-600' : 'text-red-600'
+                          }`}
+                        >
+                          {new Intl.NumberFormat('en-US', {
+                            style: 'currency',
+                            currency: 'USD',
+                          }).format(totalProfit || 0)}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+                {selectedCustomer && cart.length > 0 && (
+                  <>
+                    {!isLastPricesApplied ? (
+                      <LoadingButton
+                        onClick={handleApplyLastPrices}
+                        isLoading={isLoadingLastPrices}
+                        className="btn btn-secondary btn-sm"
+                        title="Apply prices from last order for this customer"
+                      >
+                        <History className="h-4 w-4 mr-2" />
+                        Apply Last Prices
+                      </LoadingButton>
+                    ) : (
+                      <button
+                        onClick={handleRestoreCurrentPrices}
+                        className="btn btn-secondary btn-sm flex items-center space-x-2"
+                        title="Restore original/current prices"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        <span>Restore Current Prices</span>
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="card-content">
+            {/* Product Search */}
+            <div className="mb-6">
+              <ProductSearch 
+                onAddProduct={addToCart} 
+                selectedCustomer={selectedCustomer}
+                showCostPrice={showCostPrice}
+                hasCostPricePermission={hasPermission('view_cost_prices')}
+                priceType={priceType}
+                onLastPurchasePriceFetched={(productId, price) => {
+                  setLastPurchasePrices(prev => ({
+                    ...prev,
+                    [productId]: price
+                  }));
+                }}
+              />
+            </div>
+
+            {/* Cart Items */}
+            {cart.length === 0 ? (
+              <div className="p-8 text-center text-gray-500 border-t border-gray-200">
+                <ShoppingCart className="mx-auto h-12 w-12 text-gray-400" />
+                <p className="mt-2">No items in cart</p>
+              </div>
+            ) : (
+              <div className="space-y-4 border-t border-gray-200 pt-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-md font-medium text-gray-700">Cart Items</h4>
+                  <div className="flex items-center space-x-3">
+                    <button
+                      type="button"
+                      onClick={handleSortCartItems}
+                      className="btn btn-secondary btn-sm flex items-center space-x-2"
+                      title="Sort products alphabetically"
+                    >
+                      <ArrowUpDown className="h-4 w-4" />
+                      <span>Sort A-Z</span>
+                    </button>
+                    {isLastPricesApplied && Object.keys(priceStatus).length > 0 && (
+                      <div className="flex items-center space-x-3 text-xs">
+                        <span className="text-gray-600 font-medium">Price Status:</span>
+                        <div className="flex items-center space-x-1">
+                          <CheckCircle className="h-3 w-3 text-green-600" />
+                          <span className="text-gray-600">Updated</span>
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          <Info className="h-3 w-3 text-blue-600" />
+                          <span className="text-gray-600">Same Price</span>
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          <AlertCircle className="h-3 w-3 text-yellow-600" />
+                          <span className="text-gray-600">Not in Last Order</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {cart.map((item, index) => {
+                  const totalPrice = item.unitPrice * item.quantity;
+                  const isLowStock = item.product.inventory?.currentStock <= item.product.inventory?.reorderPoint;
+                  
+                  return (
+                    <div key={item.product._id} className={`py-1 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
+                      {/* Structured Grid Layout - Following Purchase Orders Format */}
+                      <div className="grid grid-cols-12 gap-4 items-center">
+                        {/* Serial Number - 1 column */}
+                        <div className="col-span-1">
+                          <span className="text-sm font-medium text-gray-700 bg-gray-50 px-0.5 py-1 rounded border border-gray-200 block text-center h-8 flex items-center justify-center">
+                            {index + 1}
+                          </span>
+                        </div>
+                        
+                        {/* Product Name - mirror Sales Order layout (6 columns normally, 5 when cost column shown) */}
+                        <div className={`${showCostPrice && hasPermission('view_cost_prices') ? 'col-span-5' : 'col-span-6'} flex items-center h-8`}>
+                          <span className="font-medium text-sm truncate">
+                            {item.product.name}
+                            {isLowStock && <span className="text-yellow-600 text-xs ml-2">⚠️ Low Stock</span>}
+                            {/* Warning if sale price is below cost price (always show, regardless of showCostPrice) */}
+                            {lastPurchasePrices[item.product._id] !== undefined && 
+                             item.unitPrice < lastPurchasePrices[item.product._id] && (
+                              <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold" title={`Sale price below cost! Loss: $${Math.round(lastPurchasePrices[item.product._id] - item.unitPrice)} per unit`}>
+                                ⚠️ Loss
+                              </span>
+                            )}
+                            {isLastPricesApplied && priceStatus[item.product._id] && (
+                              <span className={`text-xs ml-2 px-1.5 py-0.5 rounded ${
+                                priceStatus[item.product._id] === 'updated'
+                                  ? 'bg-green-100 text-green-700'
+                                  : priceStatus[item.product._id] === 'unchanged'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : 'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                {priceStatus[item.product._id] === 'updated'
+                                  ? 'Updated'
+                                  : priceStatus[item.product._id] === 'unchanged'
+                                  ? 'Same Price'
+                                  : 'Not in Last Order'}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        
+                        {/* Stock - 1 column */}
+                        <div className="col-span-1">
+                          <span className="text-sm font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 block text-center h-8 flex items-center justify-center">
+                            {item.product.inventory?.currentStock || 0}
+                          </span>
+                        </div>
+                        
+                        {/* Quantity - 1 column */}
+                        <div className="col-span-1">
+                          <input
+                            type="number"
+                            value={item.quantity}
+                            onChange={(e) => updateQuantity(item.product._id, parseInt(e.target.value) || 1)}
+                            className="input text-center h-8"
+                            min="1"
+                            max={item.product.inventory?.currentStock || 999999}
+                            title={`Maximum available: ${item.product.inventory?.currentStock || 0}`}
+                          />
+                        </div>
+                        
+                        {/* Purchase Price (Cost) - 1 column (conditional) - Between Quantity and Rate */}
+                        {showCostPrice && hasPermission('view_cost_prices') && (
+                          <div className="col-span-1">
+                            <span className="text-sm font-semibold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 block text-center h-8 flex items-center justify-center" title="Last Purchase Price">
+                              {lastPurchasePrices[item.product._id] !== undefined 
+                                ? `$${Math.round(lastPurchasePrices[item.product._id])}` 
+                                : 'N/A'}
+                            </span>
+                          </div>
+                        )}
+                        
+                        {/* Rate - 1 column */}
+                        <div className="col-span-1 relative">
+                          <input
+                            type="number"
+                            step="1"
+                            value={Math.round(item.unitPrice)}
+                            onChange={(e) => updateUnitPrice(item.product._id, parseInt(e.target.value) || 0)}
+                            className={`input text-center h-8 ${
+                              // Check if sale price is less than cost price - highest priority styling (always check)
+                              (lastPurchasePrices[item.product._id] !== undefined && 
+                               item.unitPrice < lastPurchasePrices[item.product._id])
+                                ? 'bg-red-50 border-red-400 ring-2 ring-red-300'
+                                : priceStatus[item.product._id] === 'updated' 
+                                ? 'bg-green-50 border-green-300 ring-1 ring-green-200' 
+                                : priceStatus[item.product._id] === 'not-found'
+                                ? 'bg-yellow-50 border-yellow-300 ring-1 ring-yellow-200'
+                                : priceStatus[item.product._id] === 'unchanged'
+                                ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-200'
+                                : ''
+                            }`}
+                            min="0"
+                            title={
+                              (lastPurchasePrices[item.product._id] !== undefined && 
+                               item.unitPrice < lastPurchasePrices[item.product._id])
+                                ? `⚠️ WARNING: Sale price ($${Math.round(item.unitPrice)}) is below cost price ($${Math.round(lastPurchasePrices[item.product._id])})`
+                                : ''
+                            }
+                          />
+                          {isLastPricesApplied && priceStatus[item.product._id] && (
+                            <div 
+                              className="absolute -right-7 top-1/2 transform -translate-y-1/2 flex items-center z-10"
+                              title={
+                                priceStatus[item.product._id] === 'updated'
+                                  ? 'Price updated from last order'
+                                  : priceStatus[item.product._id] === 'unchanged'
+                                  ? 'Price same as last order'
+                                  : 'Product not found in previous order'
+                              }
+                            >
+                              {priceStatus[item.product._id] === 'updated' && (
+                                <CheckCircle className="h-4 w-4 text-green-600 bg-white rounded-full" />
+                              )}
+                              {priceStatus[item.product._id] === 'unchanged' && (
+                                <Info className="h-4 w-4 text-blue-600 bg-white rounded-full" />
+                              )}
+                              {priceStatus[item.product._id] === 'not-found' && (
+                                <AlertCircle className="h-4 w-4 text-yellow-600 bg-white rounded-full" />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Total - 1 column */}
+                        <div className="col-span-1">
+                          <span className="text-sm font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 block text-center h-8 flex items-center justify-center">
+                            {Math.round(totalPrice)}
+                          </span>
+                        </div>
+                        
+                        {/* Delete Button - 1 column */}
+                        <div className="col-span-1">
+                          <button
+                            onClick={() => removeFromCart(item.product._id)}
+                            className="btn btn-danger btn-sm h-8 w-full"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Combined Sales Details and Order Summary */}
+        {cart.length > 0 && (
+          <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg max-w-5xl ml-auto mt-4">
+            {/* Sales Details Section */}
+            <div className="px-6 py-4 border-b border-blue-200">
+              <h3 className="text-lg font-medium text-gray-900 text-right mb-4">Sales Details</h3>
+              {/* Single Row Layout for Sales Details */}
+              <div className="flex flex-nowrap gap-3 items-end justify-end">
+                {/* Order Type */}
+                <div className="flex flex-col w-44">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Order Type
+                  </label>
+                  <select
+                    value={selectedCustomer?.businessType || 'wholesale'}
+                    className="input h-8 text-sm"
+                    disabled
+                  >
+                    <option value="retail">Retail</option>
+                    <option value="wholesale">Wholesale</option>
+                    <option value="return">Return</option>
+                    <option value="exchange">Exchange</option>
+                  </select>
+                </div>
+
+                {/* Tax Exemption Option */}
+                <div className="flex flex-col w-40">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Tax Status
+                  </label>
+                  <div className="flex items-center space-x-1 px-2 py-1 border border-gray-200 rounded h-8">
+                    <input
+                      type="checkbox"
+                      id="taxExempt"
+                      checked={isTaxExempt}
+                      onChange={(e) => setIsTaxExempt(e.target.checked)}
+                      className="h-3 w-3 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                    />
+                    <div className="flex-1">
+                      <label htmlFor="taxExempt" className="text-xs font-medium text-gray-700 cursor-pointer">
+                        Tax Exempt
+                      </label>
+                    </div>
+                    {isTaxExempt && (
+                      <div className="text-green-600 text-xs font-medium">
+                        ✓
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Invoice Number */}
+                <div className="flex flex-col w-72">
+                  <div className="flex items-center gap-3 mb-1">
+                    <label className="block text-xs font-medium text-gray-700 m-0">
+                      Invoice Number
+                    </label>
+                    <label
+                      htmlFor="autoGenerateInvoice"
+                      className="flex items-center space-x-1 text-[11px] text-gray-600 cursor-pointer select-none"
+                    >
+                      <input
+                        type="checkbox"
+                        id="autoGenerateInvoice"
+                        checked={autoGenerateInvoice}
+                        onChange={(e) => {
+                          setAutoGenerateInvoice(e.target.checked);
+                          if (e.target.checked && selectedCustomer) {
+                            setInvoiceNumber(generateInvoiceNumber(selectedCustomer));
+                          }
+                        }}
+                        className="h-3 w-3 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                      />
+                      <span>Auto-generate</span>
+                    </label>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={invoiceNumber}
+                      onChange={(e) => setInvoiceNumber(e.target.value)}
+                      className="w-full input pr-16 h-8 text-sm"
+                      placeholder={autoGenerateInvoice ? 'Auto-generated' : 'Enter invoice number'}
+                      disabled={autoGenerateInvoice}
+                    />
+                    {autoGenerateInvoice && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (selectedCustomer) {
+                            setInvoiceNumber(generateInvoiceNumber(selectedCustomer));
+                          }
+                        }}
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-[11px] text-primary-600 hover:text-primary-800 font-medium"
+                      >
+                        Regenerate
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div className="flex flex-col w-[28rem]">
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    Notes
+                  </label>
+                  <input
+                    type="text"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="input h-8 text-sm"
+                    placeholder="Additional notes..."
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Order Summary Section */}
+            <div className="bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-4">
+              <h3 className="text-lg font-semibold text-white">Order Summary</h3>
+            </div>
+            <div className="px-6 py-4">
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-800 font-semibold">Subtotal:</span>
+                  <span className="text-xl font-bold text-gray-900">{Math.round(subtotal)}</span>
+                </div>
+                {totalDiscountAmount > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-800 font-semibold">Discount:</span>
+                    <span className="text-xl font-bold text-red-600">-{Math.round(totalDiscountAmount)}</span>
+                  </div>
+                )}
+                {!isTaxExempt && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-800 font-semibold">Tax (8%):</span>
+                    <span className="text-xl font-bold text-gray-900">{Math.round(tax)}</span>
+                  </div>
+                )}
+                {selectedCustomer && (() => {
+                  const receivables = selectedCustomer.pendingBalance || 0;
+                  const advance = selectedCustomer.advanceBalance || 0;
+                  const netBalance = receivables - advance;
+                  const hasPreviousBalance = receivables > 0 || advance > 0;
+                  
+                  if (!hasPreviousBalance) return null;
+                  
+                  return (
+                    <div className="flex justify-between items-center mt-2">
+                      <span className="text-gray-800 font-semibold">
+                        {netBalance < 0 ? 'Previous Advance:' : 'Previous Receivables:'}
+                      </span>
+                      <span className={`text-xl font-bold ${netBalance < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                        {netBalance < 0 ? '-' : '+'}{Math.abs(Math.round(netBalance))}
+                      </span>
+                    </div>
+                  );
+                })()}
+                <div className="flex justify-between items-center text-xl font-bold border-t-2 border-blue-400 pt-3 mt-2">
+                  <span className="text-blue-900">Total:</span>
+                  <span className="text-blue-900 text-3xl">{Math.round(total)}</span>
+                </div>
+                {selectedCustomer && (() => {
+                  const receivables = selectedCustomer.pendingBalance || 0;
+                  const advance = selectedCustomer.advanceBalance || 0;
+                  const netBalance = receivables - advance;
+                  const hasPreviousBalance = receivables > 0 || advance > 0;
+                  
+                  if (!hasPreviousBalance) return null;
+                  
+                  const totalPayables = total + netBalance;
+                  const isPayable = totalPayables < 0;
+                  
+                  return (
+                    <div className="flex justify-between items-center text-lg font-bold border-t-2 border-red-400 pt-3 mt-2">
+                      <span className={isPayable ? 'text-red-700' : 'text-green-700'}>
+                        {isPayable ? 'Total Advance:' : 'Total Receivables:'}
+                      </span>
+                      <span className={`text-2xl ${isPayable ? 'text-red-700' : 'text-green-700'}`}>
+                        {Math.abs(Math.round(totalPayables))}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Payment and Discount Section - One Row */}
+              <div className="mt-4 bg-white rounded-lg p-4 shadow-sm">
+                <div className="grid grid-cols-1 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-4 items-start">
+                  {/* Apply Discount */}
+                  <div className="flex flex-col">
+                    <label className="block text-sm font-semibold text-gray-800 mb-2">
+                      Apply Discount
+                    </label>
+                    <div className="flex space-x-2">
+                      <select
+                        value={directDiscount.type}
+                        onChange={(e) => setDirectDiscount({ ...directDiscount, type: e.target.value })}
+                        className="px-3 py-2 border-2 border-blue-200 rounded-md bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium h-[42px]"
+                      >
+                        <option value="amount">Amount</option>
+                        <option value="percentage">%</option>
+                      </select>
+                      <input
+                        type="number"
+                        placeholder={directDiscount.type === 'amount' ? 'Enter amount...' : 'Enter percentage...'}
+                        value={directDiscount.value || ''}
+                        onChange={(e) => {
+                          const value = parseInt(e.target.value) || 0;
+                          setDirectDiscount({ ...directDiscount, value });
+                        }}
+                        className="flex-1 px-3 py-2 border-2 border-blue-200 rounded-md bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium text-gray-900 h-[42px]"
+                        min="0"
+                        step={directDiscount.type === 'percentage' ? '1' : '1'}
+                      />
+                    </div>
+                    {directDiscount.value > 0 && (
+                      <div className="text-sm text-green-700 font-semibold mt-2 bg-green-50 px-2 py-1 rounded">
+                        {directDiscount.type === 'percentage' 
+                          ? `${directDiscount.value}% = ${Math.round(directDiscountAmount)} off`
+                          : `${Math.round(directDiscount.value)} off`
+                        }
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Payment Method */}
+                  <div className="flex flex-col md:col-start-2 md:row-start-1 w-full">
+                    <label className="block text-sm font-semibold text-gray-800 mb-2">
+                      Payment Method
+                    </label>
+                    <select
+                      value={paymentMethod}
+                      onChange={(e) => {
+                        const method = e.target.value;
+                        setPaymentMethod(method);
+                        if (method !== 'bank') {
+                          setSelectedBankAccount('');
+                        }
+                      }}
+                      className="w-full px-3 py-2 border-2 border-blue-200 rounded-md bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium text-gray-900 h-[42px]"
+                    >
+                      <option value="cash">Cash</option>
+                      <option value="bank">Bank Transfer</option>
+                    <option value="credit_card">Credit Card</option>
+                    <option value="debit_card">Debit Card</option>
+                    <option value="check">Check</option>
+                    <option value="account">Account</option>
+                    <option value="split">Split Payment</option>
+                    </select>
+                    {paymentMethod === 'bank' && (
+                      <div className="mt-3">
+                        <label className="block text-xs font-medium text-gray-700 mb-1">
+                          Bank Account
+                        </label>
+                        <select
+                          value={selectedBankAccount}
+                          onChange={(e) => setSelectedBankAccount(e.target.value)}
+                          className="w-full px-3 py-2 border-2 border-blue-200 rounded-md bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium text-gray-900 h-[42px]"
+                        >
+                          <option value="">Select bank account...</option>
+                          {activeBanks.map((bank) => (
+                            <option key={bank._id} value={bank._id}>
+                              {bank.bankName} - {bank.accountNumber}
+                              {bank.accountName ? ` (${bank.accountName})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                        {banksLoading && (
+                          <p className="text-xs text-gray-500 mt-1">Loading bank accounts...</p>
+                        )}
+                        {!banksLoading && activeBanks.length === 0 && (
+                          <p className="text-xs text-red-500 mt-1">
+                            No bank accounts available. Add one in Banks.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Amount Paid */}
+                  <div className="flex flex-col">
+                    <label className="block text-sm font-semibold text-gray-800 mb-2">
+                      Amount Paid
+                    </label>
+                    <input
+                      type="number"
+                      step="1"
+                      value={Math.round(amountPaid)}
+                      onChange={(e) => setAmountPaid(parseInt(e.target.value) || 0)}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full px-3 py-2 border-2 border-blue-200 rounded-md bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-medium text-gray-900 text-lg h-[42px]"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+                
+                {/* Clear Discount Button */}
+                {directDiscount.value > 0 && (
+                  <div className="mt-2">
+                    <button
+                      onClick={() => setDirectDiscount({ type: 'amount', value: 0 })}
+                      className="px-3 py-1 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 text-sm"
+                    >
+                      Clear Discount
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex space-x-3 mt-6">
+                {cart.length > 0 && (
+                  <button
+                    onClick={handleClearCart}
+                    className="btn btn-secondary flex-1"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Clear Cart
+                  </button>
+                )}
+                {cart.length > 0 && (
+                  <button
+                    onClick={() => {
+                      const tempOrder = {
+                        orderNumber: `TEMP-${Date.now()}`,
+                        orderType: mapBusinessTypeToOrderType(selectedCustomer?.businessType),
+                        customer: selectedCustomer?._id,
+                        customerInfo: selectedCustomer ? {
+                          name: selectedCustomer.displayName,
+                          email: selectedCustomer.email,
+                          phone: selectedCustomer.phone,
+                          businessName: selectedCustomer.businessName
+                        } : null,
+                        items: cart.map(item => ({
+                          product: {
+                            name: item.product.name
+                          },
+                          quantity: item.quantity,
+                          unitPrice: item.unitPrice
+                        })),
+                        pricing: {
+                          subtotal: subtotal,
+                          discountAmount: totalDiscountAmount,
+                          taxAmount: tax,
+                          isTaxExempt: isTaxExempt,
+                          total: total
+                        },
+                        payment: {
+                          method: paymentMethod,
+                          bankAccount: paymentMethod === 'bank' ? selectedBankAccount : null,
+                          amountPaid: amountPaid,
+                          remainingBalance: total - amountPaid,
+                          isPartialPayment: amountPaid < total,
+                          isAdvancePayment: isAdvancePayment,
+                          advanceAmount: isAdvancePayment ? (amountPaid - total) : 0
+                        },
+                        customer: selectedCustomer,
+                        createdAt: new Date(),
+                        createdBy: { name: 'Current User' },
+                        invoiceNumber: invoiceNumber
+                      };
+                      setCurrentOrder(tempOrder);
+                      setShowPrintModal(true);
+                    }}
+                    className="btn btn-secondary flex-1"
+                  >
+                    <Printer className="h-4 w-4 mr-2" />
+                    Print Preview
+                  </button>
+                )}
+                <LoadingButton
+                  onClick={handleCheckout}
+                  isLoading={editData?.isEditMode ? updateOrderMutation.isLoading : createOrderMutation.isLoading}
+                  className="btn btn-primary btn-lg flex-2"
+                >
+                  <Receipt className="h-4 w-4 mr-2" />
+                  {editData?.isEditMode 
+                    ? (amountPaid === 0 ? 'Update Invoice' : 'Update Sale')
+                    : (amountPaid === 0 ? 'Create Invoice' : 'Complete Sale')
+                  }
+                </LoadingButton>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Recommendations Section */}
+        {cart.length > 0 && (
+          <div className="mt-4 max-w-5xl ml-auto">
+            <RecommendationSection
+              title="Customers Also Bought"
+              algorithm="frequently_bought"
+              context={{
+                page: 'sales',
+                currentProducts: cart.map(item => item.product._id),
+                customerTier: selectedCustomer?.customerTier,
+                businessType: selectedCustomer?.businessType,
+              }}
+              limit={4}
+              onAddToCart={addToCart}
+              onViewProduct={(product) => {
+                trackProductView(product);
+              }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Clear Cart Confirmation Dialog */}
+      <ClearConfirmationDialog
+        isOpen={clearConfirmation.isOpen}
+        onClose={handleClearCancel}
+        onConfirm={handleClearConfirm}
+        itemCount={cart.length}
+        itemType="items"
+        isLoading={false}
+      />
+
+      {/* Payment Modal */}
+      <PaymentModal
+        isOpen={showPaymentModal}
+        onClose={() => {
+          setShowPaymentModal(false);
+          setCurrentOrder(null);
+        }}
+        orderData={currentOrder}
+        onPaymentSuccess={handlePaymentSuccess}
+        onPaymentError={handlePaymentError}
+      />
+
+      {/* Print Modal */}
+      <PrintModal
+        isOpen={showPrintModal}
+        onClose={() => {
+          setShowPrintModal(false);
+          setCurrentOrder(null);
+        }}
+        orderData={currentOrder}
+        documentTitle="Sales Invoice"
+        partyLabel="Customer"
+      />
+
+      {/* Export Format Selection Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full">
+            <div className="flex justify-between items-center p-6 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-900">Export Sales Report</h2>
+              <button
+                onClick={() => {
+                  setShowExportModal(false);
+                  setExportDateFrom(defaultDateRange.from);
+                  setExportDateTo(defaultDateRange.to);
+                }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <XCircle className="h-6 w-6" />
+              </button>
+            </div>
+            
+            <div className="p-6">
+              <div className="space-y-6">
+                {/* Export Format */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Export Format
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="flex items-center p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="radio"
+                        name="format"
+                        value="pdf"
+                        checked={exportFormat === 'pdf'}
+                        onChange={(e) => setExportFormat(e.target.value)}
+                        className="mr-3"
+                      />
+                      <div>
+                        <div className="font-medium text-gray-900">PDF</div>
+                        <div className="text-sm text-gray-500">Print-ready format</div>
+                      </div>
+                    </label>
+                    
+                    <label className="flex items-center p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="radio"
+                        name="format"
+                        value="excel"
+                        checked={exportFormat === 'excel'}
+                        onChange={(e) => setExportFormat(e.target.value)}
+                        className="mr-3"
+                      />
+                      <div>
+                        <div className="font-medium text-gray-900">Excel</div>
+                        <div className="text-sm text-gray-500">Spreadsheet format</div>
+                      </div>
+                    </label>
+                    
+                    <label className="flex items-center p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="radio"
+                        name="format"
+                        value="csv"
+                        checked={exportFormat === 'csv'}
+                        onChange={(e) => setExportFormat(e.target.value)}
+                        className="mr-3"
+                      />
+                      <div>
+                        <div className="font-medium text-gray-900">CSV</div>
+                        <div className="text-sm text-gray-500">Comma-separated values</div>
+                      </div>
+                    </label>
+                    
+                    <label className="flex items-center p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
+                      <input
+                        type="radio"
+                        name="format"
+                        value="json"
+                        checked={exportFormat === 'json'}
+                        onChange={(e) => setExportFormat(e.target.value)}
+                        className="mr-3"
+                      />
+                      <div>
+                        <div className="font-medium text-gray-900">JSON</div>
+                        <div className="text-sm text-gray-500">Data format</div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                {/* Date Range Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Date Range (Optional)
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">From Date</label>
+                      <input
+                        type="date"
+                        value={exportDateFrom}
+                        onChange={(e) => setExportDateFrom(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 mb-1">To Date</label>
+                      <input
+                        type="date"
+                        value={exportDateTo}
+                        onChange={(e) => setExportDateTo(e.target.value)}
+                        min={exportDateFrom}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                      />
+                    </div>
+                  </div>
+                  {(exportDateFrom || exportDateTo) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExportDateFrom(defaultDateRange.from);
+                        setExportDateTo(defaultDateRange.to);
+                      }}
+                      className="mt-2 text-sm text-primary-600 hover:text-primary-700"
+                    >
+                      Reset to default
+                    </button>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowExportModal(false);
+                      setExportDateFrom(defaultDateRange.from);
+                      setExportDateTo(defaultDateRange.to);
+                    }}
+                    className="btn btn-secondary"
+                    disabled={isExporting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportConfirm}
+                    className="btn btn-primary"
+                    disabled={isExporting}
+                  >
+                    {isExporting ? (
+                      <>
+                        <LoadingSpinner className="h-4 w-4 mr-2" />
+                        Exporting...
+                      </>
+                    ) : (
+                      <>
+                        <Download className="h-4 w-4 mr-2" />
+                        Export
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </AsyncErrorBoundary>
+  );
+};

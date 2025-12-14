@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Settings API Test</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 4px; }
+        pre { background: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; }
+        .success { color: green; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Settings API Test Page</h1>
+    
+    <div class="test-section">
+        <h2>1. Test GET Company Settings</h2>
+        <button onclick="testGet()">Test GET /api/settings/company</button>
+        <pre id="get-result">Click button to test...</pre>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Test POST Company Settings</h2>
+        <button onclick="testPost()">Test POST /api/settings/company</button>
+        <pre id="post-result">Click button to test...</pre>
+    </div>
+
+    <div class="test-section">
+        <h2>3. MongoDB Connection Test</h2>
+        <button onclick="testHealth()">Test Backend Health</button>
+        <pre id="health-result">Click button to test...</pre>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5000/api';
+        const token = localStorage.getItem('token');
+
+        async function testGet() {
+            const result = document.getElementById('get-result');
+            result.textContent = 'Testing...';
+            
+            try {
+                const response = await fetch(`${API_URL}/settings/company`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const data = await response.json();
+                result.className = response.ok ? 'success' : 'error';
+                result.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                result.className = 'error';
+                result.textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function testPost() {
+            const result = document.getElementById('post-result');
+            result.textContent = 'Testing...';
+            
+            const testData = {
+                companyName: 'Test Company ' + Date.now(),
+                contactNumber: '555-TEST-' + Date.now(),
+                address: 'Test Address ' + Date.now(),
+                email: 'test@company.com'
+            };
+
+            try {
+                const response = await fetch(`${API_URL}/settings/company`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(testData)
+                });
+                
+                const data = await response.json();
+                result.className = response.ok ? 'success' : 'error';
+                result.textContent = JSON.stringify(data, null, 2);
+                
+                if (response.ok) {
+                    alert('✅ Settings saved! Refresh the settings page to see changes.');
+                }
+            } catch (error) {
+                result.className = 'error';
+                result.textContent = 'Error: ' + error.message;
+            }
+        }
+
+        async function testHealth() {
+            const result = document.getElementById('health-result');
+            result.textContent = 'Testing...';
+            
+            try {
+                const response = await fetch(`${API_URL}/health`);
+                const data = await response.json();
+                result.className = response.ok ? 'success' : 'error';
+                result.textContent = JSON.stringify(data, null, 2);
+            } catch (error) {
+                result.className = 'error';
+                result.textContent = 'Error: Backend is not running or not accessible.\n' + error.message;
+            }
+        }
+
+        // Auto-test on load
+        window.onload = () => {
+            if (!token) {
+                alert('⚠️ No authentication token found. Please login first in the main app, then return to this page.');
+            } else {
+                console.log('Token found:', token.substring(0, 20) + '...');
+            }
+        };
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,624 @@
+const Return = require('../models/Return');
+const Sales = require('../models/Sales');
+const Product = require('../models/Product');
+const Inventory = require('../models/Inventory');
+const Transaction = require('../models/Transaction');
+const Customer = require('../models/Customer');
+const CustomerBalanceService = require('../services/customerBalanceService');
+
+class ReturnManagementService {
+  constructor() {
+    this.returnReasons = [
+      'defective', 'wrong_item', 'not_as_described', 'damaged_shipping',
+      'changed_mind', 'duplicate_order', 'size_issue', 'quality_issue',
+      'late_delivery', 'other'
+    ];
+    
+    this.returnActions = [
+      'refund', 'exchange', 'store_credit', 'repair', 'replace'
+    ];
+  }
+
+  // Create a new return request
+  async createReturn(returnData, requestedBy) {
+    try {
+      // Validate original order
+      const originalOrder = await Sales.findById(returnData.originalOrder)
+        .populate('customer')
+        .populate('items.product');
+      
+      if (!originalOrder) {
+        throw new Error('Original order not found');
+      }
+
+      // Check if order is eligible for return
+      const eligibility = await this.checkReturnEligibility(originalOrder, returnData.items);
+      if (!eligibility.eligible) {
+        throw new Error(eligibility.reason);
+      }
+
+      // Validate return items
+      await this.validateReturnItems(originalOrder, returnData.items);
+
+      // Create return object
+      const returnRequest = new Return({
+        ...returnData,
+        customer: originalOrder.customer._id,
+        requestedBy,
+        returnDate: new Date(),
+        status: 'pending'
+      });
+
+      // Ensure policy object exists before any calculations
+      if (!returnRequest.policy) {
+        returnRequest.policy = { restockingFeePercent: 0 };
+      }
+
+      // Calculate refund amounts
+      await this.calculateRefundAmounts(returnRequest);
+      
+      console.log('Return amounts after calculation:', {
+        totalRefundAmount: returnRequest.totalRefundAmount,
+        totalRestockingFee: returnRequest.totalRestockingFee,
+        netRefundAmount: returnRequest.netRefundAmount
+      });
+
+      // Save return request
+      await returnRequest.save();
+      
+      console.log('Return amounts after save:', {
+        totalRefundAmount: returnRequest.totalRefundAmount,
+        totalRestockingFee: returnRequest.totalRestockingFee,
+        netRefundAmount: returnRequest.netRefundAmount
+      });
+
+      // Send notification to customer
+      await this.notifyCustomer(returnRequest, 'return_requested');
+
+      return returnRequest;
+    } catch (error) {
+      console.error('Error creating return:', error);
+      throw error;
+    }
+  }
+
+  // Check if order is eligible for return
+  async checkReturnEligibility(order, returnItems) {
+    const now = new Date();
+    const daysSinceOrder = Math.floor((now - order.createdAt) / (1000 * 60 * 60 * 24));
+    
+    // Check return window (default 30 days)
+    const returnWindow = 30; // This could be configurable per product/category
+    if (daysSinceOrder > returnWindow) {
+      return {
+        eligible: false,
+        reason: `Return window has expired. Order is ${daysSinceOrder} days old.`
+      };
+    }
+
+    // Check if items are returnable
+    for (const returnItem of returnItems) {
+      const orderItem = order.items.find(item => 
+        item._id.toString() === returnItem.originalOrderItem.toString()
+      );
+      
+      if (!orderItem) {
+        return {
+          eligible: false,
+          reason: 'Item not found in original order'
+        };
+      }
+
+      // Check if item is already returned
+      const existingReturn = await Return.findOne({
+        originalOrder: order._id,
+        'items.originalOrderItem': returnItem.originalOrderItem,
+        status: { $nin: ['rejected', 'cancelled'] }
+      });
+
+      if (existingReturn) {
+        return {
+          eligible: false,
+          reason: 'Item has already been returned'
+        };
+      }
+
+      // Check if return quantity exceeds order quantity
+      const alreadyReturnedQuantity = await this.getAlreadyReturnedQuantity(
+        order._id, 
+        returnItem.originalOrderItem
+      );
+      
+      if (returnItem.quantity + alreadyReturnedQuantity > orderItem.quantity) {
+        return {
+          eligible: false,
+          reason: `Cannot return ${returnItem.quantity} items. Only ${orderItem.quantity - alreadyReturnedQuantity} items available for return.`
+        };
+      }
+    }
+
+    return { eligible: true };
+  }
+
+  // Validate return items
+  async validateReturnItems(originalOrder, returnItems) {
+    for (const returnItem of returnItems) {
+      // Find the original order item
+      const orderItem = originalOrder.items.find(item => 
+        item._id.toString() === returnItem.originalOrderItem.toString()
+      );
+
+      if (!orderItem) {
+        throw new Error(`Order item not found: ${returnItem.originalOrderItem}`);
+      }
+
+      // Validate product exists
+      const product = await Product.findById(orderItem.product._id);
+      if (!product) {
+        throw new Error(`Product not found: ${orderItem.product._id}`);
+      }
+
+      // Always set original price from order (override any frontend value)
+      returnItem.originalPrice = Number(orderItem.price) || 0;
+      console.log(`Set originalPrice for item ${returnItem.product}: ${returnItem.originalPrice}`);
+      
+      // Always set default values for optional fields (override any frontend value)
+      // Handle string "undefined" or actual undefined values
+      returnItem.refundAmount = Number(returnItem.refundAmount) || 0;
+      returnItem.restockingFee = Number(returnItem.restockingFee) || 0;
+      console.log(`Set refundAmount: ${returnItem.refundAmount}, restockingFee: ${returnItem.restockingFee} for item ${returnItem.product}`);
+    }
+  }
+
+  // Calculate refund amounts for return items
+  async calculateRefundAmounts(returnRequest) {
+    console.log('Calculating refund amounts for return items...');
+    for (const item of returnRequest.items) {
+      console.log(`Processing item: ${item.product}, originalPrice: ${item.originalPrice}, quantity: ${item.quantity}`);
+      
+      // Calculate restocking fee based on condition and policy
+      const baseFee = Number(returnRequest.policy?.restockingFeePercent) || 0;
+      const restockingFeePercent = this.calculateRestockingFee(
+        item.condition,
+        item.returnReason,
+        baseFee
+      );
+      
+      console.log(`Restocking fee percent: ${restockingFeePercent}%`);
+      
+      item.restockingFee = (item.originalPrice * item.quantity * restockingFeePercent) / 100;
+      
+      // Calculate refund amount
+      item.refundAmount = (item.originalPrice * item.quantity) - item.restockingFee;
+      
+      console.log(`Calculated amounts - refundAmount: ${item.refundAmount}, restockingFee: ${item.restockingFee}`);
+    }
+    
+    console.log('All item amounts calculated. Return totals will be calculated in pre-save middleware.');
+  }
+
+  // Calculate restocking fee based on various factors
+  calculateRestockingFee(condition, returnReason, baseFeePercent) {
+    let feePercent = baseFeePercent || 0;
+    
+    // Adjust fee based on condition
+    switch (condition) {
+      case 'new':
+      case 'like_new':
+        feePercent *= 0.5; // Reduce fee for good condition
+        break;
+      case 'good':
+        break; // No adjustment
+      case 'fair':
+        feePercent *= 1.5; // Increase fee for fair condition
+        break;
+      case 'poor':
+      case 'damaged':
+        feePercent *= 2; // Double fee for poor condition
+        break;
+    }
+    
+    // Adjust fee based on return reason
+    switch (returnReason) {
+      case 'defective':
+      case 'wrong_item':
+      case 'damaged_shipping':
+        feePercent = 0; // No fee for store error
+        break;
+      case 'changed_mind':
+        feePercent *= 1.5; // Higher fee for change of mind
+        break;
+    }
+    
+    return Math.min(feePercent, 100); // Cap at 100%
+  }
+
+  // Get already returned quantity for an order item
+  async getAlreadyReturnedQuantity(orderId, orderItemId) {
+    const returns = await Return.find({
+      originalOrder: orderId,
+      'items.originalOrderItem': orderItemId,
+      status: { $nin: ['rejected', 'cancelled'] }
+    });
+
+    let totalReturned = 0;
+    returns.forEach(returnDoc => {
+      returnDoc.items.forEach(item => {
+        if (item.originalOrderItem.toString() === orderItemId.toString()) {
+          totalReturned += item.quantity;
+        }
+      });
+    });
+
+    return totalReturned;
+  }
+
+  // Approve return request
+  async approveReturn(returnId, approvedBy, notes = null) {
+    try {
+      const returnRequest = await Return.findById(returnId);
+      if (!returnRequest) {
+        throw new Error('Return request not found');
+      }
+
+      if (returnRequest.status !== 'pending') {
+        throw new Error('Return request cannot be approved in current status');
+      }
+
+      // Update status to approved
+      await returnRequest.updateStatus('approved', approvedBy, notes);
+
+      // Send approval notification
+      await this.notifyCustomer(returnRequest, 'return_approved');
+
+      return returnRequest;
+    } catch (error) {
+      console.error('Error approving return:', error);
+      throw error;
+    }
+  }
+
+  // Reject return request
+  async rejectReturn(returnId, rejectedBy, reason) {
+    try {
+      const returnRequest = await Return.findById(returnId);
+      if (!returnRequest) {
+        throw new Error('Return request not found');
+      }
+
+      if (returnRequest.status !== 'pending') {
+        throw new Error('Return request cannot be rejected in current status');
+      }
+
+      // Update status to rejected
+      await returnRequest.updateStatus('rejected', rejectedBy, `Rejected: ${reason}`);
+
+      // Send rejection notification
+      await this.notifyCustomer(returnRequest, 'return_rejected');
+
+      return returnRequest;
+    } catch (error) {
+      console.error('Error rejecting return:', error);
+      throw error;
+    }
+  }
+
+  // Process received return
+  async processReceivedReturn(returnId, receivedBy, inspectionData = {}) {
+    try {
+      const returnRequest = await Return.findById(returnId)
+        .populate('originalOrder')
+        .populate('items.product');
+      
+      if (!returnRequest) {
+        throw new Error('Return request not found');
+      }
+
+      if (!['approved', 'processing'].includes(returnRequest.status)) {
+        throw new Error('Return cannot be processed in current status');
+      }
+
+      // Update status to received
+      await returnRequest.updateStatus('received', receivedBy);
+
+      // Add inspection data
+      if (inspectionData) {
+        returnRequest.inspection = {
+          ...inspectionData,
+          inspectedBy: receivedBy,
+          inspectionDate: new Date()
+        };
+        await returnRequest.save();
+      }
+
+      // Update inventory for returned items
+      await this.updateInventoryForReturn(returnRequest);
+
+      // Process refund or exchange
+      if (returnRequest.returnType === 'return') {
+        await this.processRefund(returnRequest);
+      } else if (returnRequest.returnType === 'exchange') {
+        await this.processExchange(returnRequest);
+      }
+
+      // Update status to completed
+      await returnRequest.updateStatus('completed', receivedBy);
+
+      // Send completion notification
+      await this.notifyCustomer(returnRequest, 'return_completed');
+
+      return returnRequest;
+    } catch (error) {
+      console.error('Error processing return:', error);
+      throw error;
+    }
+  }
+
+  // Update inventory for returned items
+  async updateInventoryForReturn(returnRequest) {
+    for (const item of returnRequest.items) {
+      // Find or create inventory record
+      let inventory = await Inventory.findOne({
+        product: item.product._id
+      });
+
+      if (!inventory) {
+        inventory = new Inventory({
+          product: item.product._id,
+          currentStock: 0,
+          reservedStock: 0,
+          reorderPoint: 0,
+          reorderQuantity: 0
+        });
+      }
+
+      // Add returned quantity to inventory if item is resellable
+      if (returnRequest.inspection && returnRequest.inspection.resellable !== false) {
+        inventory.currentStock += item.quantity;
+        await inventory.save();
+
+        // Log inventory movement
+        await this.logInventoryMovement(item, 'return', item.quantity);
+      }
+    }
+  }
+
+  // Log inventory movement
+  async logInventoryMovement(item, type, quantity) {
+    // This would integrate with your existing inventory movement logging
+    console.log(`Inventory movement: ${type} - ${item.product.name} - ${quantity} units`);
+  }
+
+  // Process refund
+  async processRefund(returnRequest) {
+    try {
+      // Create refund transaction
+      const refundTransaction = new Transaction({
+        transactionId: `REF-${Date.now()}`,
+        type: 'refund',
+        amount: returnRequest.netRefundAmount,
+        status: 'completed',
+        payment: {
+          method: returnRequest.refundMethod,
+          reference: `Return ${returnRequest.returnNumber}`
+        },
+        metadata: {
+          returnId: returnRequest._id,
+          originalOrder: returnRequest.originalOrder
+        }
+      });
+
+      await refundTransaction.save();
+
+      // Update return with refund details
+      returnRequest.refundDetails = {
+        refundTransaction: refundTransaction._id,
+        refundDate: new Date(),
+        refundReference: refundTransaction.transactionId
+      };
+
+      await returnRequest.save();
+
+      // Adjust customer balance (credit note behavior)
+      try {
+        await CustomerBalanceService.recordRefund(
+          returnRequest.customer,
+          Number(returnRequest.netRefundAmount) || 0,
+          returnRequest.originalOrder
+        );
+      } catch (balanceErr) {
+        // Log but do not fail the whole return completion
+        console.error('Error updating customer balance for return refund:', balanceErr);
+      }
+
+      return refundTransaction;
+    } catch (error) {
+      console.error('Error processing refund:', error);
+      throw error;
+    }
+  }
+
+  // Process exchange
+  async processExchange(returnRequest) {
+    try {
+      // Create new order for exchange items
+      const exchangeOrder = new Sales({
+        orderNumber: `EXC-${Date.now()}`,
+        customer: returnRequest.customer,
+        items: returnRequest.exchangeDetails.exchangeItems,
+        orderType: 'exchange',
+        status: 'completed',
+        metadata: {
+          originalReturn: returnRequest._id,
+          exchangeType: 'return_exchange'
+        }
+      });
+
+      await exchangeOrder.save();
+
+      // Update return with exchange details
+      returnRequest.exchangeDetails.exchangeOrder = exchangeOrder._id;
+      await returnRequest.save();
+
+      return exchangeOrder;
+    } catch (error) {
+      console.error('Error processing exchange:', error);
+      throw error;
+    }
+  }
+
+  // Notify customer about return status
+  async notifyCustomer(returnRequest, notificationType) {
+    try {
+      const customer = await Customer.findById(returnRequest.customer);
+      if (!customer) return;
+
+      const messages = {
+        return_requested: `Your return request ${returnRequest.returnNumber} has been submitted and is under review.`,
+        return_approved: `Your return request ${returnRequest.returnNumber} has been approved. Please ship items back.`,
+        return_rejected: `Your return request ${returnRequest.returnNumber} has been rejected. Contact support for details.`,
+        return_completed: `Your return request ${returnRequest.returnNumber} has been completed. Refund processed.`
+      };
+
+      const message = messages[notificationType];
+      if (message) {
+        await returnRequest.addCommunication(
+          'email',
+          message,
+          null, // System generated
+          customer.email
+        );
+      }
+    } catch (error) {
+      console.error('Error notifying customer:', error);
+    }
+  }
+
+  // Get return statistics
+  async getReturnStats(period = {}) {
+    try {
+      const stats = await Return.getReturnStats(period);
+      
+      // Get additional metrics
+      const totalReturns = await Return.countDocuments(
+        period.startDate && period.endDate ? {
+          returnDate: {
+            $gte: period.startDate,
+            $lte: period.endDate
+          }
+        } : {}
+      );
+
+      const pendingReturns = await Return.countDocuments({
+        status: 'pending',
+        ...(period.startDate && period.endDate ? {
+          returnDate: {
+            $gte: period.startDate,
+            $lte: period.endDate
+          }
+        } : {})
+      });
+
+      const averageProcessingTime = await this.calculateAverageProcessingTime(period);
+
+      return {
+        ...stats,
+        totalReturns,
+        pendingReturns,
+        averageProcessingTime,
+        returnRate: await this.calculateReturnRate(period)
+      };
+    } catch (error) {
+      console.error('Error getting return stats:', error);
+      throw error;
+    }
+  }
+
+  // Calculate average processing time
+  async calculateAverageProcessingTime(period = {}) {
+    const match = {
+      status: 'completed',
+      ...(period.startDate && period.endDate ? {
+        returnDate: {
+          $gte: period.startDate,
+          $lte: period.endDate
+        }
+      } : {})
+    };
+
+    const result = await Return.aggregate([
+      { $match: match },
+      {
+        $project: {
+          processingTime: {
+            $divide: [
+              { $subtract: ['$completionDate', '$returnDate'] },
+              1000 * 60 * 60 * 24 // Convert to days
+            ]
+          }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          averageProcessingTime: { $avg: '$processingTime' }
+        }
+      }
+    ]);
+
+    return result[0]?.averageProcessingTime || 0;
+  }
+
+  // Calculate return rate
+  async calculateReturnRate(period = {}) {
+    const match = period.startDate && period.endDate ? {
+      createdAt: {
+        $gte: period.startDate,
+        $lte: period.endDate
+      }
+    } : {};
+
+    const totalOrders = await Sales.countDocuments(match);
+    const totalReturns = await Return.countDocuments({
+      ...match,
+      status: { $nin: ['rejected', 'cancelled'] }
+    });
+
+    return totalOrders > 0 ? (totalReturns / totalOrders) * 100 : 0;
+  }
+
+  // Get return trends
+  async getReturnTrends(periods = 12) {
+    try {
+      const trends = [];
+      const now = new Date();
+      
+      for (let i = periods - 1; i >= 0; i--) {
+        const startDate = new Date(now);
+        startDate.setMonth(now.getMonth() - i);
+        startDate.setDate(1);
+        
+        const endDate = new Date(startDate);
+        endDate.setMonth(endDate.getMonth() + 1);
+        endDate.setDate(0);
+        
+        const stats = await this.getReturnStats({ startDate, endDate });
+        
+        trends.push({
+          period: startDate.toISOString().split('T')[0],
+          totalReturns: stats.totalReturns,
+          totalRefundAmount: stats.totalRefundAmount,
+          averageRefundAmount: stats.averageRefundAmount,
+          returnRate: stats.returnRate
+        });
+      }
+      
+      return trends;
+    } catch (error) {
+      console.error('Error getting return trends:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = new ReturnManagementService();
