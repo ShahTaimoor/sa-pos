@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { useForm } from 'react-hook-form';
 import { 
@@ -22,7 +22,7 @@ import { useDeleteConfirmation } from '../hooks/useConfirmation';
 
 const BankFormModal = ({ bank, onSave, onCancel, isSubmitting }) => {
   const { register, handleSubmit, formState: { errors }, reset } = useForm({
-    defaultValues: bank || {
+    defaultValues: {
       accountName: '',
       accountNumber: '',
       bankName: '',
@@ -44,9 +44,55 @@ const BankFormModal = ({ bank, onSave, onCancel, isSubmitting }) => {
     }
   });
 
+  // Reset form when bank prop changes (for editing)
+  useEffect(() => {
+    if (bank) {
+      reset({
+        accountName: bank.accountName || '',
+        accountNumber: bank.accountNumber || '',
+        bankName: bank.bankName || '',
+        branchName: bank.branchName || '',
+        branchAddress: bank.branchAddress || {
+          street: '',
+          city: '',
+          state: '',
+          zipCode: '',
+          country: 'US'
+        },
+        accountType: bank.accountType || 'checking',
+        routingNumber: bank.routingNumber || '',
+        swiftCode: bank.swiftCode || '',
+        iban: bank.iban || '',
+        openingBalance: bank.openingBalance || 0,
+        isActive: bank.isActive !== undefined ? bank.isActive : true,
+        notes: bank.notes || ''
+      });
+    } else {
+      reset({
+        accountName: '',
+        accountNumber: '',
+        bankName: '',
+        branchName: '',
+        branchAddress: {
+          street: '',
+          city: '',
+          state: '',
+          zipCode: '',
+          country: 'US'
+        },
+        accountType: 'checking',
+        routingNumber: '',
+        swiftCode: '',
+        iban: '',
+        openingBalance: 0,
+        isActive: true,
+        notes: ''
+      });
+    }
+  }, [bank, reset]);
+
   const onSubmit = (data) => {
     onSave(data);
-    reset();
   };
 
   return (
@@ -306,7 +352,7 @@ const Banks = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingBank, setEditingBank] = useState(null);
-  const { confirmDelete, deleteDialog } = useDeleteConfirmation();
+  const { confirmation, confirmDelete, handleConfirm, handleCancel } = useDeleteConfirmation();
 
   // Fetch banks - fetch all banks
   const { data, isLoading, error, refetch } = useQuery(
@@ -394,11 +440,11 @@ const Banks = () => {
     }
   };
 
-  const handleDelete = async (bank) => {
-    const confirmed = await confirmDelete(`Are you sure you want to delete "${bank.bankName} - ${bank.accountNumber}"?`);
-    if (confirmed) {
+  const handleDelete = (bank) => {
+    const bankName = `${bank.bankName} - ${bank.accountNumber}`;
+    confirmDelete(bankName, 'Bank Account', async () => {
       deleteMutation.mutate(bank._id);
-    }
+    });
   };
 
   // Get banks from query data - data is already an array from the query
@@ -601,7 +647,14 @@ const Banks = () => {
       )}
 
       {/* Delete Confirmation Dialog */}
-      {deleteDialog}
+      <DeleteConfirmationDialog
+        isOpen={confirmation.isOpen}
+        onClose={handleCancel}
+        onConfirm={handleConfirm}
+        itemName={confirmation.message?.match(/"([^"]*)"/)?.[1] || ''}
+        itemType="Bank Account"
+        isLoading={deleteMutation.isLoading}
+      />
     </div>
   );
 };
