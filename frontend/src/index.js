@@ -21,8 +21,8 @@ const queryClient = new QueryClient({
 if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js')
-      .then((registration) => {
-        console.log('Service Worker registered successfully:', registration.scope);
+      .then(() => {
+        // Service Worker registered successfully
       })
       .catch((error) => {
         console.log('Service Worker registration failed:', error);
