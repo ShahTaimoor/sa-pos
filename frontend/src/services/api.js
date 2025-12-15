@@ -289,6 +289,21 @@ export const suppliersAPI = {
   updateSupplier: (id, data) => api.put(`/suppliers/${id}`, data),
   deleteSupplier: (id) => api.delete(`/suppliers/${id}`),
   searchSuppliers: (query) => api.get(`/suppliers/search/${query}`),
+  checkEmail: (email, excludeId) => {
+    const url = `/suppliers/check-email/${encodeURIComponent(email)}`;
+    const params = excludeId ? { excludeId } : {};
+    return api.get(url, { params });
+  },
+  checkCompanyName: (companyName, excludeId) => {
+    const url = `/suppliers/check-company-name/${encodeURIComponent(companyName)}`;
+    const params = excludeId ? { excludeId } : {};
+    return api.get(url, { params });
+  },
+  checkContactName: (contactName, excludeId) => {
+    const url = `/suppliers/check-contact-name/${encodeURIComponent(contactName)}`;
+    const params = excludeId ? { excludeId } : {};
+    return api.get(url, { params });
+  },
   getActiveSuppliers: () => api.get('/suppliers/active/list'),
   
   // Import/Export functions

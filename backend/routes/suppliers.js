@@ -13,6 +13,8 @@ const ledgerAccountService = require('../services/ledgerAccountService');
 
 const router = express.Router();
 
+const isValidObjectId = (value) => mongoose.Types.ObjectId.isValid(value);
+
 // Helper function to transform supplier names to uppercase
 const transformSupplierToUppercase = (supplier) => {
   if (!supplier) return supplier;
@@ -462,6 +464,99 @@ router.get('/search/:query', auth, async (req, res) => {
     res.json({ suppliers: transformedSuppliers });
   } catch (error) {
     console.error('Search suppliers error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/suppliers/check-email/:email
+// @desc    Check if email already exists
+// @access  Private
+router.get('/check-email/:email', auth, async (req, res) => {
+  try {
+    const email = req.params.email;
+    const excludeId = req.query.excludeId; // Optional: exclude current supplier when editing
+    
+    if (!email || email.trim() === '') {
+      return res.json({ exists: false });
+    }
+    
+    // Use case-insensitive search to match how emails are stored (lowercase)
+    const emailLower = email.trim().toLowerCase();
+    const query = { email: emailLower };
+    if (excludeId && isValidObjectId(excludeId)) {
+      query._id = { $ne: excludeId };
+    }
+    
+    const existingSupplier = await Supplier.findOne(query);
+    
+    res.json({ 
+      exists: !!existingSupplier,
+      email: emailLower
+    });
+  } catch (error) {
+    console.error('Check email error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/suppliers/check-company-name/:companyName
+// @desc    Check if company name already exists
+// @access  Private
+router.get('/check-company-name/:companyName', auth, async (req, res) => {
+  try {
+    const companyName = req.params.companyName;
+    const excludeId = req.query.excludeId; // Optional: exclude current supplier when editing
+    
+    if (!companyName || companyName.trim() === '') {
+      return res.json({ exists: false });
+    }
+    
+    // Use case-insensitive search (company names are stored in uppercase via transform)
+    const companyNameTrimmed = companyName.trim();
+    const query = { companyName: { $regex: new RegExp(`^${companyNameTrimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } };
+    if (excludeId && isValidObjectId(excludeId)) {
+      query._id = { $ne: excludeId };
+    }
+    
+    const existingSupplier = await Supplier.findOne(query);
+    
+    res.json({ 
+      exists: !!existingSupplier,
+      companyName: companyNameTrimmed
+    });
+  } catch (error) {
+    console.error('Check company name error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/suppliers/check-contact-name/:contactName
+// @desc    Check if contact person name already exists
+// @access  Private
+router.get('/check-contact-name/:contactName', auth, async (req, res) => {
+  try {
+    const contactName = req.params.contactName;
+    const excludeId = req.query.excludeId; // Optional: exclude current supplier when editing
+    
+    if (!contactName || contactName.trim() === '') {
+      return res.json({ exists: false });
+    }
+    
+    // Use case-insensitive search (contact names are stored in uppercase via transform)
+    const contactNameTrimmed = contactName.trim();
+    const query = { 'contactPerson.name': { $regex: new RegExp(`^${contactNameTrimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } };
+    if (excludeId && isValidObjectId(excludeId)) {
+      query._id = { $ne: excludeId };
+    }
+    
+    const existingSupplier = await Supplier.findOne(query);
+    
+    res.json({ 
+      exists: !!existingSupplier,
+      contactName: contactNameTrimmed
+    });
+  } catch (error) {
+    console.error('Check contact name error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

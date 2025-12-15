@@ -59,6 +59,12 @@ const supplierDefaultValues = {
 
 const SupplierForm = ({ supplier, onSave, onCancel, isOpen }) => {
   const [formData, setFormData] = useState(() => ({ ...supplierDefaultValues }));
+  const [emailChecking, setEmailChecking] = useState(false);
+  const [emailExists, setEmailExists] = useState(false);
+  const [companyNameChecking, setCompanyNameChecking] = useState(false);
+  const [companyNameExists, setCompanyNameExists] = useState(false);
+  const [contactNameChecking, setContactNameChecking] = useState(false);
+  const [contactNameExists, setContactNameExists] = useState(false);
 
   const { data: ledgerAccounts = [], isLoading: ledgerAccountsLoading } = useQuery(
     ['supplier-ledger-accounts'],
@@ -175,6 +181,131 @@ const SupplierForm = ({ supplier, onSave, onCancel, isOpen }) => {
     }
   }, [supplier, ledgerOptions]);
 
+  // Email validation effect
+  useEffect(() => {
+    // Skip validation if email is empty or invalid format
+    if (!formData.email || formData.email.trim() === '') {
+      setEmailExists(false);
+      return;
+    }
+
+    // Basic email format validation
+    const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+    if (!emailRegex.test(formData.email)) {
+      setEmailExists(false);
+      return;
+    }
+
+    // Skip check if editing and email hasn't changed
+    if (supplier && supplier.email && supplier.email.toLowerCase() === formData.email.toLowerCase()) {
+      setEmailExists(false);
+      return;
+    }
+
+    // Debounce email check
+    const timeoutId = setTimeout(async () => {
+      try {
+        setEmailChecking(true);
+        const excludeId = supplier?._id || null;
+        const response = await suppliersAPI.checkEmail(formData.email, excludeId);
+        
+        if (response.data?.exists) {
+          setEmailExists(true);
+        } else {
+          setEmailExists(false);
+        }
+      } catch (error) {
+        console.error('Error checking email:', error);
+        setEmailExists(false);
+      } finally {
+        setEmailChecking(false);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [formData.email, supplier]);
+
+  // Company name validation effect
+  useEffect(() => {
+    // Skip validation if company name is empty
+    if (!formData.companyName || formData.companyName.trim() === '') {
+      setCompanyNameExists(false);
+      return;
+    }
+
+    // Skip check if editing and company name hasn't changed
+    if (supplier && supplier.companyName && supplier.companyName.trim().toLowerCase() === formData.companyName.trim().toLowerCase()) {
+      setCompanyNameExists(false);
+      return;
+    }
+
+    // Debounce company name check
+    const timeoutId = setTimeout(async () => {
+      try {
+        setCompanyNameChecking(true);
+        const excludeId = supplier?._id || null;
+        const response = await suppliersAPI.checkCompanyName(formData.companyName, excludeId);
+        
+        if (response.data?.exists) {
+          setCompanyNameExists(true);
+        } else {
+          setCompanyNameExists(false);
+        }
+      } catch (error) {
+        console.error('Error checking company name:', error);
+        setCompanyNameExists(false);
+      } finally {
+        setCompanyNameChecking(false);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [formData.companyName, supplier]);
+
+  // Contact name validation effect
+  useEffect(() => {
+    // Skip validation if contact name is empty
+    if (!formData.contactPerson?.name || formData.contactPerson.name.trim() === '') {
+      setContactNameExists(false);
+      return;
+    }
+
+    // Skip check if editing and contact name hasn't changed
+    if (supplier && supplier.contactPerson?.name && supplier.contactPerson.name.trim().toLowerCase() === formData.contactPerson.name.trim().toLowerCase()) {
+      setContactNameExists(false);
+      return;
+    }
+
+    // Debounce contact name check
+    const timeoutId = setTimeout(async () => {
+      try {
+        setContactNameChecking(true);
+        const excludeId = supplier?._id || null;
+        const response = await suppliersAPI.checkContactName(formData.contactPerson.name, excludeId);
+        
+        if (response.data?.exists) {
+          setContactNameExists(true);
+        } else {
+          setContactNameExists(false);
+        }
+      } catch (error) {
+        console.error('Error checking contact name:', error);
+        setContactNameExists(false);
+      } finally {
+        setContactNameChecking(false);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [formData.contactPerson?.name, supplier]);
+
+  // Reset validation states when supplier changes
+  useEffect(() => {
+    setEmailExists(false);
+    setCompanyNameExists(false);
+    setContactNameExists(false);
+  }, [supplier]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     
@@ -185,6 +316,20 @@ const SupplierForm = ({ supplier, onSave, onCancel, isOpen }) => {
     }
     if (!formData.contactPerson?.name?.trim()) {
       toast.error('Contact name is required');
+      return;
+    }
+    
+    // Prevent submission if duplicates exist
+    if (emailExists) {
+      toast.error('Please use a different email address');
+      return;
+    }
+    if (companyNameExists) {
+      toast.error('Please use a different company name');
+      return;
+    }
+    if (contactNameExists) {
+      toast.error('Please use a different contact name');
       return;
     }
     
@@ -228,14 +373,24 @@ const SupplierForm = ({ supplier, onSave, onCancel, isOpen }) => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Company Name *
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.companyName}
-                    onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
-                    className="input"
-                    placeholder="Enter company name"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      value={formData.companyName}
+                      onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
+                      className={`input ${companyNameExists ? 'border-red-500' : ''}`}
+                      placeholder="Enter company name"
+                    />
+                    {companyNameChecking && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        <LoadingInline size="sm" />
+                      </div>
+                    )}
+                  </div>
+                  {companyNameExists && (
+                    <p className="text-red-500 text-sm mt-1">Company name already exists</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -305,17 +460,27 @@ const SupplierForm = ({ supplier, onSave, onCancel, isOpen }) => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Name *
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.contactPerson.name}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      contactPerson: { ...formData.contactPerson, name: e.target.value }
-                    })}
-                    className="input"
-                    placeholder="Enter full name"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      value={formData.contactPerson.name}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        contactPerson: { ...formData.contactPerson, name: e.target.value }
+                      })}
+                      className={`input ${contactNameExists ? 'border-red-500' : ''}`}
+                      placeholder="Enter full name"
+                    />
+                    {contactNameChecking && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        <LoadingInline size="sm" />
+                      </div>
+                    )}
+                  </div>
+                  {contactNameExists && (
+                    <p className="text-red-500 text-sm mt-1">Contact name already exists</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -343,13 +508,23 @@ const SupplierForm = ({ supplier, onSave, onCancel, isOpen }) => {
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Email
                   </label>
-                  <input
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="input"
-                    placeholder="email@company.com (optional)"
-                  />
+                  <div className="relative">
+                    <input
+                      type="email"
+                      value={formData.email}
+                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                      className={`input ${emailExists ? 'border-red-500' : ''}`}
+                      placeholder="email@company.com (optional)"
+                    />
+                    {emailChecking && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        <LoadingInline size="sm" />
+                      </div>
+                    )}
+                  </div>
+                  {emailExists && (
+                    <p className="text-red-500 text-sm mt-1">Email already exists</p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
