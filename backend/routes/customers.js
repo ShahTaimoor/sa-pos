@@ -414,6 +414,68 @@ router.get('/search/:query', auth, async (req, res) => {
   }
 });
 
+// @route   GET /api/customers/check-email/:email
+// @desc    Check if email already exists
+// @access  Private
+router.get('/check-email/:email', auth, async (req, res) => {
+  try {
+    const email = req.params.email;
+    const excludeId = req.query.excludeId; // Optional: exclude current customer when editing
+    
+    if (!email || email.trim() === '') {
+      return res.json({ exists: false });
+    }
+    
+    // Use case-insensitive search to match how emails are stored (lowercase)
+    const emailLower = email.trim().toLowerCase();
+    const query = { email: emailLower };
+    if (excludeId && isValidObjectId(excludeId)) {
+      query._id = { $ne: excludeId };
+    }
+    
+    const existingCustomer = await Customer.findOne(query);
+    
+    res.json({ 
+      exists: !!existingCustomer,
+      email: emailLower
+    });
+  } catch (error) {
+    console.error('Check email error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/customers/check-business-name/:businessName
+// @desc    Check if business name already exists
+// @access  Private
+router.get('/check-business-name/:businessName', auth, async (req, res) => {
+  try {
+    const businessName = req.params.businessName;
+    const excludeId = req.query.excludeId; // Optional: exclude current customer when editing
+    
+    if (!businessName || businessName.trim() === '') {
+      return res.json({ exists: false });
+    }
+    
+    // Use case-insensitive search (business names are stored in uppercase via transform)
+    const businessNameTrimmed = businessName.trim();
+    const query = { businessName: { $regex: new RegExp(`^${businessNameTrimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } };
+    if (excludeId && isValidObjectId(excludeId)) {
+      query._id = { $ne: excludeId };
+    }
+    
+    const existingCustomer = await Customer.findOne(query);
+    
+    res.json({ 
+      exists: !!existingCustomer,
+      businessName: businessNameTrimmed
+    });
+  } catch (error) {
+    console.error('Check business name error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // @route   POST /api/customers/:id/address
 // @desc    Add address to customer
 // @access  Private

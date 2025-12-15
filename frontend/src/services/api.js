@@ -240,6 +240,16 @@ export const customersAPI = {
   updateCustomer: (id, data) => api.put(`/customers/${id}`, data),
   deleteCustomer: (id) => api.delete(`/customers/${id}`),
   searchCustomers: (query) => api.get(`/customers/search/${query}`),
+  checkEmail: (email, excludeId) => {
+    const url = `/customers/check-email/${encodeURIComponent(email)}`;
+    const params = excludeId ? { excludeId } : {};
+    return api.get(url, { params });
+  },
+  checkBusinessName: (businessName, excludeId) => {
+    const url = `/customers/check-business-name/${encodeURIComponent(businessName)}`;
+    const params = excludeId ? { excludeId } : {};
+    return api.get(url, { params });
+  },
   addAddress: (id, data) => api.post(`/customers/${id}/address`, data),
   updateCreditLimit: (id, creditLimit) => 
     api.put(`/customers/${id}/credit-limit`, { creditLimit }),

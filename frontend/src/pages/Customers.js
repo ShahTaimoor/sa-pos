@@ -49,7 +49,7 @@ const defaultCustomerValues = {
 };
 
 const CustomerFormModal = ({ customer, onSave, onCancel, isSubmitting }) => {
-  const { register, handleSubmit, formState: { errors }, reset, setValue, watch } = useForm({
+  const { register, handleSubmit, formState: { errors }, reset, setValue, watch, setError, clearErrors } = useForm({
     defaultValues: defaultCustomerValues
   });
 
@@ -61,9 +61,112 @@ const CustomerFormModal = ({ customer, onSave, onCancel, isSubmitting }) => {
     description: '',
     isActive: true
   });
+  const [emailChecking, setEmailChecking] = useState(false);
+  const [emailExists, setEmailExists] = useState(false);
+  const [businessNameChecking, setBusinessNameChecking] = useState(false);
+  const [businessNameExists, setBusinessNameExists] = useState(false);
   const queryClient = useQueryClient();
 
   const addresses = watch('addresses') || defaultCustomerValues.addresses;
+  const emailValue = watch('email');
+  const businessNameValue = watch('businessName');
+
+  // Email validation effect
+  useEffect(() => {
+    // Skip validation if email is empty or invalid format
+    if (!emailValue || emailValue.trim() === '') {
+      setEmailExists(false);
+      clearErrors('email');
+      return;
+    }
+
+    // Basic email format validation
+    const emailRegex = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+    if (!emailRegex.test(emailValue)) {
+      setEmailExists(false);
+      return;
+    }
+
+    // Skip check if editing and email hasn't changed
+    if (customer && customer.email && customer.email.toLowerCase() === emailValue.toLowerCase()) {
+      setEmailExists(false);
+      clearErrors('email');
+      return;
+    }
+
+    // Debounce email check
+    const timeoutId = setTimeout(async () => {
+      try {
+        setEmailChecking(true);
+        const excludeId = customer?._id || null;
+        const response = await customersAPI.checkEmail(emailValue, excludeId);
+        
+        if (response.data?.exists) {
+          setEmailExists(true);
+          setError('email', {
+            type: 'manual',
+            message: 'Email already exists'
+          });
+        } else {
+          setEmailExists(false);
+          clearErrors('email');
+        }
+      } catch (error) {
+        console.error('Error checking email:', error);
+        // Don't block form submission on API error
+        setEmailExists(false);
+      } finally {
+        setEmailChecking(false);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [emailValue, customer, setError, clearErrors]);
+
+  // Business name validation effect
+  useEffect(() => {
+    // Skip validation if business name is empty
+    if (!businessNameValue || businessNameValue.trim() === '') {
+      setBusinessNameExists(false);
+      clearErrors('businessName');
+      return;
+    }
+
+    // Skip check if editing and business name hasn't changed
+    if (customer && customer.businessName && customer.businessName.trim().toLowerCase() === businessNameValue.trim().toLowerCase()) {
+      setBusinessNameExists(false);
+      clearErrors('businessName');
+      return;
+    }
+
+    // Debounce business name check
+    const timeoutId = setTimeout(async () => {
+      try {
+        setBusinessNameChecking(true);
+        const excludeId = customer?._id || null;
+        const response = await customersAPI.checkBusinessName(businessNameValue, excludeId);
+        
+        if (response.data?.exists) {
+          setBusinessNameExists(true);
+          setError('businessName', {
+            type: 'manual',
+            message: 'Business name already exists'
+          });
+        } else {
+          setBusinessNameExists(false);
+          clearErrors('businessName');
+        }
+      } catch (error) {
+        console.error('Error checking business name:', error);
+        // Don't block form submission on API error
+        setBusinessNameExists(false);
+      } finally {
+        setBusinessNameChecking(false);
+      }
+    }, 500); // 500ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [businessNameValue, customer, setError, clearErrors]);
 
   useEffect(() => {
     if (customer) {
@@ -76,10 +179,18 @@ const CustomerFormModal = ({ customer, onSave, onCancel, isSubmitting }) => {
         ledgerAccount: customer.ledgerAccount?._id || customer.ledgerAccount || '',
         addresses: customer.addresses?.length ? customer.addresses : defaultCustomerValues.addresses
       });
+      setEmailExists(false);
+      setBusinessNameExists(false);
+      clearErrors('email');
+      clearErrors('businessName');
     } else {
       reset(defaultCustomerValues);
+      setEmailExists(false);
+      setBusinessNameExists(false);
+      clearErrors('email');
+      clearErrors('businessName');
     }
-  }, [customer, reset]);
+  }, [customer, reset, clearErrors]);
 
   const handleAddressChange = (index, field, value) => {
     const newAddresses = [...addresses];
@@ -236,8 +347,20 @@ const CustomerFormModal = ({ customer, onSave, onCancel, isSubmitting }) => {
   }, [customer, ledgerOptions, setValue]);
 
   const onSubmit = (data) => {
+    // Prevent submission if email exists
+    if (emailExists) {
+      toast.error('Please use a different email address');
+      return;
+    }
+    // Prevent submission if business name exists
+    if (businessNameExists) {
+      toast.error('Please use a different business name');
+      return;
+    }
     onSave(data);
     reset(defaultCustomerValues);
+    setEmailExists(false);
+    setBusinessNameExists(false);
   };
 
   return (
@@ -266,12 +389,20 @@ const CustomerFormModal = ({ customer, onSave, onCancel, isSubmitting }) => {
                 <Building className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
                   {...register('businessName', { required: 'Business name is required' })}
-                  className="input pl-10"
+                  className={`input pl-10 ${businessNameExists ? 'border-red-500' : ''}`}
                   placeholder="Enter business name"
                 />
+                {businessNameChecking && (
+                  <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                    <LoadingInline size="sm" />
+                  </div>
+                )}
               </div>
               {errors.businessName && (
                 <p className="text-red-500 text-sm mt-1">{errors.businessName.message}</p>
+              )}
+              {businessNameExists && !errors.businessName && (
+                <p className="text-red-500 text-sm mt-1">Business name already exists</p>
               )}
             </div>
 
@@ -306,12 +437,20 @@ const CustomerFormModal = ({ customer, onSave, onCancel, isSubmitting }) => {
                       }
                     })}
                     type="text"
-                    className="input pl-10"
+                    className={`input pl-10 ${emailExists ? 'border-red-500' : ''}`}
                     placeholder="Enter email address (optional)"
                   />
+                  {emailChecking && (
+                    <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                      <LoadingInline size="sm" />
+                    </div>
+                  )}
                 </div>
                 {errors.email && (
                   <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>
+                )}
+                {emailExists && !errors.email && (
+                  <p className="text-red-500 text-sm mt-1">Email already exists</p>
                 )}
               </div>
               
