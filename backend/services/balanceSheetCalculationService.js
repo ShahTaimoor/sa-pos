@@ -567,28 +567,41 @@ class BalanceSheetCalculationService {
   // Calculate equity
   async calculateEquity(statementDate, periodType) {
     try {
-      const contributedCapital = await this.calculateContributedCapital(statementDate);
-      const retainedEarnings = await this.calculateRetainedEarnings(statementDate, periodType);
-      const otherEquity = await this.calculateOtherEquity(statementDate);
+      // Ensure statementDate is a Date object
+      const date = statementDate instanceof Date ? statementDate : new Date(statementDate);
+      if (isNaN(date.getTime())) {
+        throw new Error(`Invalid statement date: ${statementDate}`);
+      }
+
+      const contributedCapital = await this.calculateContributedCapital(date);
+      const retainedEarnings = await this.calculateRetainedEarnings(date, periodType);
+      const otherEquity = await this.calculateOtherEquity(date);
+
+      // Ensure all values are numbers (handle NaN/undefined)
+      const contributedCapitalTotal = Number(contributedCapital?.total) || 0;
+      const retainedEarningsTotal = Number(retainedEarnings?.endingRetainedEarnings) || 0;
+      const otherEquityTotal = Number(otherEquity?.total) || 0;
 
       // Calculate total equity manually
-      const totalEquity = 
-        contributedCapital.total +
-        retainedEarnings.endingRetainedEarnings +
-        otherEquity.total;
+      const totalEquity = contributedCapitalTotal + retainedEarningsTotal + otherEquityTotal;
 
       const equity = {
         contributedCapital: {
-          ...contributedCapital,
-          total: contributedCapital.total
+          commonStock: Number(contributedCapital?.commonStock) || 0,
+          preferredStock: Number(contributedCapital?.preferredStock) || 0,
+          additionalPaidInCapital: Number(contributedCapital?.additionalPaidInCapital) || 0,
+          total: contributedCapitalTotal
         },
         retainedEarnings: {
-          ...retainedEarnings,
-          endingRetainedEarnings: retainedEarnings.endingRetainedEarnings
+          beginningRetainedEarnings: Number(retainedEarnings?.beginningRetainedEarnings) || 0,
+          currentPeriodEarnings: Number(retainedEarnings?.currentPeriodEarnings) || 0,
+          dividendsPaid: Number(retainedEarnings?.dividendsPaid) || 0,
+          endingRetainedEarnings: retainedEarningsTotal
         },
         otherEquity: {
-          ...otherEquity,
-          total: otherEquity.total
+          treasuryStock: Number(otherEquity?.treasuryStock) || 0,
+          accumulatedOtherComprehensiveIncome: Number(otherEquity?.accumulatedOtherComprehensiveIncome) || 0,
+          total: otherEquityTotal
         },
         totalEquity: totalEquity
       };
@@ -596,14 +609,50 @@ class BalanceSheetCalculationService {
       return equity;
     } catch (error) {
       console.error('Error calculating equity:', error);
-      throw error;
+      // Return default equity structure instead of throwing to prevent balance sheet generation failure
+      return {
+        contributedCapital: {
+          commonStock: 0,
+          preferredStock: 0,
+          additionalPaidInCapital: 0,
+          total: 0
+        },
+        retainedEarnings: {
+          beginningRetainedEarnings: 0,
+          currentPeriodEarnings: 0,
+          dividendsPaid: 0,
+          endingRetainedEarnings: 0
+        },
+        otherEquity: {
+          treasuryStock: 0,
+          accumulatedOtherComprehensiveIncome: 0,
+          total: 0
+        },
+        totalEquity: 0
+      };
     }
   }
 
   // Calculate account balance from transactions
   async calculateAccountBalance(accountCode, statementDate) {
     try {
-      const account = await ChartOfAccounts.findOne({ accountCode, isActive: true });
+      // Ensure accountCode is uppercase to match Transaction model format
+      const normalizedAccountCode = accountCode ? accountCode.toString().trim().toUpperCase() : null;
+      if (!normalizedAccountCode) {
+        return 0;
+      }
+      
+      // Ensure statementDate is a Date object
+      const date = statementDate instanceof Date ? statementDate : new Date(statementDate);
+      if (isNaN(date.getTime())) {
+        console.error(`Invalid statement date: ${statementDate}`);
+        return 0;
+      }
+      
+      const account = await ChartOfAccounts.findOne({ 
+        accountCode: normalizedAccountCode, 
+        isActive: true 
+      });
       if (!account) {
         return 0;
       }
@@ -615,8 +664,8 @@ class BalanceSheetCalculationService {
       const transactions = await Transaction.aggregate([
         {
           $match: {
-            accountCode: accountCode,
-            createdAt: { $lte: statementDate },
+            accountCode: normalizedAccountCode,
+            createdAt: { $lte: date },
             status: 'completed'
           }
         },
@@ -649,6 +698,9 @@ class BalanceSheetCalculationService {
   // Calculate contributed capital
   async calculateContributedCapital(statementDate) {
     try {
+      // Ensure statementDate is a Date object
+      const date = statementDate instanceof Date ? statementDate : new Date(statementDate);
+      
       // Get all owner equity accounts from Chart of Accounts
       // Exclude system accounts (parent accounts) as they don't have direct balances
       const ownerEquityAccounts = await ChartOfAccounts.find({
@@ -656,7 +708,7 @@ class BalanceSheetCalculationService {
         accountCategory: 'owner_equity',
         isActive: true,
         isSystemAccount: { $ne: true } // Exclude parent/system accounts
-      });
+      }).lean(); // Use lean() for better performance
 
       let commonStock = 0;
       let preferredStock = 0;
@@ -664,14 +716,17 @@ class BalanceSheetCalculationService {
 
       // Calculate balances for each equity account
       for (const account of ownerEquityAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        if (!account || !account.accountCode) {
+          continue; // Skip invalid accounts
+        }
+        const balance = await this.calculateAccountBalance(account.accountCode, date);
         
         // Map accounts to balance sheet categories based on account name/code
         // Common stock typically uses codes like 3101, 3102, etc.
         // Preferred stock uses codes like 3103, 3104, etc.
         // Additional paid-in capital uses codes like 3105, 3106, etc.
-        const accountCodeNum = parseInt(account.accountCode);
-        const accountNameLower = account.accountName.toLowerCase();
+        const accountCodeNum = parseInt(account.accountCode) || 0;
+        const accountNameLower = (account.accountName || '').toLowerCase();
 
         if (accountNameLower.includes('common stock') || 
             accountNameLower.includes('common') ||
@@ -755,6 +810,9 @@ class BalanceSheetCalculationService {
   // Calculate other equity
   async calculateOtherEquity(statementDate) {
     try {
+      // Ensure statementDate is a Date object
+      const date = statementDate instanceof Date ? statementDate : new Date(statementDate);
+      
       // Get equity accounts that are not owner_equity or retained_earnings
       // Exclude system accounts (parent accounts) as they don't have direct balances
       const otherEquityAccounts = await ChartOfAccounts.find({
@@ -762,17 +820,20 @@ class BalanceSheetCalculationService {
         accountCategory: { $nin: ['owner_equity', 'retained_earnings'] },
         isActive: true,
         isSystemAccount: { $ne: true } // Exclude parent/system accounts
-      });
+      }).lean(); // Use lean() for better performance
 
       let treasuryStock = 0;
       let accumulatedOtherComprehensiveIncome = 0;
 
       // Calculate balances for each equity account
       for (const account of otherEquityAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        if (!account || !account.accountCode) {
+          continue; // Skip invalid accounts
+        }
+        const balance = await this.calculateAccountBalance(account.accountCode, date);
         
         // Map accounts to balance sheet categories based on account name
-        const accountNameLower = account.accountName.toLowerCase();
+        const accountNameLower = (account.accountName || '').toLowerCase();
 
         if (accountNameLower.includes('treasury') || 
             accountNameLower.includes('treasury stock')) {
