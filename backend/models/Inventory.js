@@ -188,154 +188,162 @@ InventorySchema.pre('save', function(next) {
   next();
 });
 
-// Static method to update stock with WriteConflict retry logic
+// Static method to update stock using atomic operations
 InventorySchema.statics.updateStock = async function(productId, movement) {
-  const maxRetries = 5;
-  let attempt = 0;
+  const { retryMongoOperation } = require('../utils/retry');
   
-  while (attempt < maxRetries) {
-    try {
-      let inventory = await this.findOne({ product: productId });
-      
-      if (!inventory) {
-        // Create inventory record if it doesn't exist
-        console.log('Creating inventory record for product:', productId);
-        inventory = new this({
-          product: productId,
-          currentStock: 0,
-          reorderPoint: 10,
-          reorderQuantity: 50,
-          status: 'active'
-        });
-        await inventory.save();
-      }
-      
-      // Calculate new stock level
-      let newStock = inventory.currentStock;
-      console.log('Current stock:', newStock, 'Movement type:', movement.type, 'Quantity:', movement.quantity);
-      
-      switch (movement.type) {
-        case 'in':
-        case 'return':
-          newStock += movement.quantity;
-          break;
-        case 'out':
-        case 'damage':
-        case 'theft':
-          newStock -= movement.quantity;
-          break;
-        case 'adjustment':
-          newStock = movement.quantity; // Set to exact amount
-          break;
-        default:
-          break;
-      }
-      
-      console.log('New stock calculated:', newStock);
-      
-      // Ensure stock doesn't go below 0 (unless it's an adjustment)
-      if (movement.type !== 'adjustment' && newStock < 0) {
-        throw new Error('Insufficient stock for this operation');
-      }
-      
-      // Update inventory
-      inventory.currentStock = newStock;
-      inventory.movements.push(movement);
-      
-      console.log('Saving inventory with new stock:', newStock);
-      const savedInventory = await inventory.save();
-      console.log('Inventory saved successfully, final stock:', savedInventory.currentStock);
-      
-      return savedInventory;
-    } catch (error) {
-      // Check if it's a WriteConflict error (code 112)
-      const isWriteConflict = error.code === 112 || error.codeName === 'WriteConflict';
-      
-      if (isWriteConflict && attempt < maxRetries - 1) {
-        attempt++;
-        // Exponential backoff: 50ms, 100ms, 200ms, 400ms, 800ms
-        const backoffMs = 50 * Math.pow(2, attempt - 1);
-        console.log(`WriteConflict detected on attempt ${attempt}, retrying after ${backoffMs}ms...`);
-        await new Promise(resolve => setTimeout(resolve, backoffMs));
-        continue; // Retry the operation
-      }
-      
-      // If not a WriteConflict or max retries reached, throw the error
-      throw error;
+  return retryMongoOperation(async () => {
+    // Determine quantity change based on movement type
+    let quantityChange = 0;
+    switch (movement.type) {
+      case 'in':
+      case 'return':
+        quantityChange = movement.quantity;
+        break;
+      case 'out':
+      case 'damage':
+      case 'theft':
+        quantityChange = -movement.quantity;
+        break;
+      case 'adjustment':
+        // For adjustments, we need to set exact value, not increment
+        // First get current stock, then calculate difference
+        const current = await this.findOne({ product: productId });
+        const currentStock = current ? current.currentStock : 0;
+        quantityChange = movement.quantity - currentStock;
+        break;
+      default:
+        throw new Error(`Invalid movement type: ${movement.type}`);
     }
-  }
+
+    // Build update operations
+    const updateOps = {
+      $inc: { currentStock: quantityChange },
+      $push: { movements: movement },
+      $set: { lastUpdated: new Date() }
+    };
+
+    // For adjustments, use $set instead of $inc
+    if (movement.type === 'adjustment') {
+      delete updateOps.$inc;
+      updateOps.$set.currentStock = movement.quantity;
+    }
+
+    // Use findOneAndUpdate with atomic operations
+    const filter = { product: productId };
+    const options = {
+      upsert: true,
+      new: true,
+      runValidators: true,
+      setDefaultsOnInsert: true
+    };
+
+    // If upserting, set default values
+    if (!(await this.findOne(filter))) {
+      updateOps.$setOnInsert = {
+        product: productId,
+        productModel: 'Product',
+        reorderPoint: 10,
+        reorderQuantity: 50,
+        status: 'active',
+        reservedStock: 0,
+        availableStock: 0
+      };
+    }
+
+    // Check stock availability before updating (for out movements)
+    if (movement.type !== 'adjustment' && quantityChange < 0) {
+      const current = await this.findOne(filter);
+      if (!current) {
+        throw new Error('Inventory record not found and cannot create with negative stock');
+      }
+      if (current.currentStock + quantityChange < 0) {
+        throw new Error(`Insufficient stock. Available: ${current.currentStock}, Requested: ${Math.abs(quantityChange)}`);
+      }
+    }
+
+    const updated = await this.findOneAndUpdate(filter, updateOps, options);
+    
+    // Update available stock
+    updated.availableStock = Math.max(0, updated.currentStock - updated.reservedStock);
+    
+    // Update status based on stock
+    if (updated.currentStock === 0) {
+      updated.status = 'out_of_stock';
+    } else if (updated.status === 'out_of_stock') {
+      updated.status = 'active';
+    }
+    
+    await updated.save();
+    
+    return updated;
+  });
 };
 
-// Static method to reserve stock with WriteConflict retry logic
+// Static method to reserve stock using atomic operations
 InventorySchema.statics.reserveStock = async function(productId, quantity) {
-  const maxRetries = 5;
-  let attempt = 0;
+  const { retryMongoOperation } = require('../utils/retry');
   
-  while (attempt < maxRetries) {
-    try {
-      const inventory = await this.findOne({ product: productId });
-      
-      if (!inventory) {
-        throw new Error('Inventory record not found for product');
-      }
-      
-      if (inventory.availableStock < quantity) {
-        throw new Error('Insufficient available stock');
-      }
-      
-      inventory.reservedStock += quantity;
-      return await inventory.save();
-    } catch (error) {
-      // Check if it's a WriteConflict error (code 112)
-      const isWriteConflict = error.code === 112 || error.codeName === 'WriteConflict';
-      
-      if (isWriteConflict && attempt < maxRetries - 1) {
-        attempt++;
-        // Exponential backoff: 50ms, 100ms, 200ms, 400ms, 800ms
-        const backoffMs = 50 * Math.pow(2, attempt - 1);
-        console.log(`WriteConflict detected in reserveStock on attempt ${attempt}, retrying after ${backoffMs}ms...`);
-        await new Promise(resolve => setTimeout(resolve, backoffMs));
-        continue; // Retry the operation
-      }
-      
-      // If not a WriteConflict or max retries reached, throw the error
-      throw error;
+  return retryMongoOperation(async () => {
+    // First check if sufficient stock is available
+    const inventory = await this.findOne({ product: productId });
+    if (!inventory) {
+      throw new Error('Inventory record not found for product');
     }
-  }
+    
+    const availableStock = inventory.currentStock - inventory.reservedStock;
+    if (availableStock < quantity) {
+      throw new Error(`Insufficient available stock. Available: ${availableStock}, Requested: ${quantity}`);
+    }
+
+    // Atomically increment reserved stock
+    const updated = await this.findOneAndUpdate(
+      { product: productId },
+      {
+        $inc: { reservedStock: quantity },
+        $set: { lastUpdated: new Date() }
+      },
+      { new: true }
+    );
+
+    // Update available stock
+    updated.availableStock = Math.max(0, updated.currentStock - updated.reservedStock);
+    await updated.save();
+
+    return updated;
+  });
 };
 
-// Static method to release reserved stock with WriteConflict retry logic
+// Static method to release reserved stock using atomic operations
 InventorySchema.statics.releaseStock = async function(productId, quantity) {
-  const maxRetries = 5;
-  let attempt = 0;
+  const { retryMongoOperation } = require('../utils/retry');
   
-  while (attempt < maxRetries) {
-    try {
-      const inventory = await this.findOne({ product: productId });
-      
-      if (!inventory) {
-        throw new Error('Inventory record not found for product');
-      }
-      
-      inventory.reservedStock = Math.max(0, inventory.reservedStock - quantity);
-      return await inventory.save();
-    } catch (error) {
-      // Check if it's a WriteConflict error (code 112)
-      const isWriteConflict = error.code === 112 || error.codeName === 'WriteConflict';
-      
-      if (isWriteConflict && attempt < maxRetries - 1) {
-        attempt++;
-        // Exponential backoff: 50ms, 100ms, 200ms, 400ms, 800ms
-        const backoffMs = 50 * Math.pow(2, attempt - 1);
-        console.log(`WriteConflict detected in releaseStock on attempt ${attempt}, retrying after ${backoffMs}ms...`);
-        await new Promise(resolve => setTimeout(resolve, backoffMs));
-        continue; // Retry the operation
-      }
-      
-      // If not a WriteConflict or max retries reached, throw the error
-      throw error;
+  return retryMongoOperation(async () => {
+    // Atomically decrement reserved stock (ensure it doesn't go below 0)
+    const updated = await this.findOneAndUpdate(
+      { product: productId },
+      {
+        $inc: { reservedStock: -quantity },
+        $set: { lastUpdated: new Date() }
+      },
+      { new: true }
+    );
+
+    if (!updated) {
+      throw new Error('Inventory record not found for product');
     }
-  }
+
+    // Ensure reservedStock doesn't go negative (shouldn't happen, but safety check)
+    if (updated.reservedStock < 0) {
+      updated.reservedStock = 0;
+    }
+
+    // Update available stock
+    updated.availableStock = Math.max(0, updated.currentStock - updated.reservedStock);
+    await updated.save();
+
+    return updated;
+  });
 };
 
 // Static method to get low stock items

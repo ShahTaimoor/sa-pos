@@ -220,23 +220,32 @@ orderSchema.index({ createdBy: 1, createdAt: -1 }); // For user-specific queries
 orderSchema.index({ 'pricing.total': -1 }); // For sorting by total
 orderSchema.index({ status: 1, 'payment.status': 1 }); // For payment status filtering
 
-// Pre-save middleware to generate order number
+// Pre-save middleware to generate order number using atomic Counter
 orderSchema.pre('save', async function(next) {
   if (this.isNew && !this.orderNumber) {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
-    
-    // Get count of orders today
-    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
-    
-    const count = await this.constructor.countDocuments({
-      createdAt: { $gte: startOfDay, $lt: endOfDay }
-    });
-    
-    this.orderNumber = `SI-${year}${month}${day}-${String(count + 1).padStart(4, '0')}`;
+    try {
+      const Counter = mongoose.model('Counter');
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = String(today.getMonth() + 1).padStart(2, '0');
+      const day = String(today.getDate()).padStart(2, '0');
+      
+      // Use atomic counter for date-based order numbers
+      // Counter key format: orderNumber_YYYYMMDD
+      const counterKey = `orderNumber_${year}${month}${day}`;
+      
+      // Atomically increment counter using findOneAndUpdate
+      const counter = await Counter.findOneAndUpdate(
+        { _id: counterKey },
+        { $inc: { seq: 1 } },
+        { upsert: true, new: true }
+      );
+      
+      this.orderNumber = `SI-${year}${month}${day}-${String(counter.seq).padStart(4, '0')}`;
+    } catch (err) {
+      console.error('Error generating order number:', err);
+      return next(err);
+    }
   }
   next();
 });

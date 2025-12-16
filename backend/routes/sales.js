@@ -11,6 +11,7 @@ const CashReceipt = require('../models/CashReceipt');
 const BankReceipt = require('../models/BankReceipt');
 const StockMovementService = require('../services/stockMovementService');
 const { auth, requirePermission } = require('../middleware/auth');
+const { preventPOSDuplicates } = require('../middleware/duplicatePrevention');
 
 const router = express.Router();
 
@@ -292,6 +293,7 @@ router.get('/customer/:customerId/last-prices', auth, async (req, res) => {
 router.post('/', [
   auth,
   requirePermission('create_orders'),
+  preventPOSDuplicates, // Prevent duplicate POS submissions
   body('orderType').isIn(['retail', 'wholesale', 'return', 'exchange']).withMessage('Invalid order type'),
   body('customer').optional().isMongoId().withMessage('Invalid customer ID'),
   body('items').isArray({ min: 1 }).withMessage('Order must have at least one item'),
