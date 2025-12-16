@@ -35,7 +35,7 @@ app.use(cors({
     process.env.FRONTEND_URL // Allow from environment variable if set
   ].filter(Boolean), // Remove undefined values
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key', 'Idempotency-Key', 'idempotency-key'],
   credentials: true
 }));
 
