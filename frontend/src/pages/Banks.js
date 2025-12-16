@@ -15,6 +15,7 @@ import {
   CheckCircle
 } from 'lucide-react';
 import { banksAPI } from '../services/api';
+import { useFuzzySearch } from '../hooks/useFuzzySearch';
 import toast from 'react-hot-toast';
 import { LoadingSpinner, LoadingButton, LoadingCard, LoadingGrid, LoadingPage, LoadingInline } from '../components/LoadingSpinner';
 import { DeleteConfirmationDialog } from '../components/ConfirmationDialog';
@@ -447,22 +448,27 @@ const Banks = () => {
     });
   };
 
-  // Get banks from query data - data is already an array from the query
-  const banksList = Array.isArray(data) ? data : [];
+  // Get all banks from query data - data is already an array from the query
+  const allBanks = Array.isArray(data) ? data : [];
+  
+  // Apply fuzzy search on client side for better UX
+  // Hook must be called before any early returns
+  const banks = useFuzzySearch(
+    allBanks,
+    searchTerm,
+    ['bankName', 'accountName', 'accountNumber', 'branchName'],
+    {
+      threshold: 0.4,
+      minScore: 0.3,
+      limit: null // Show all matches
+    }
+  );
 
-  // Filter banks by search term and show active banks by default
-  const filteredBanks = banksList.filter(bank => {
+  // Filter to show active banks by default (isActive defaults to true if not specified)
+  const filteredBanks = banks.filter(bank => {
     if (!bank) return false;
-    
-    const matchesSearch = 
-      bank.bankName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bank.accountName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      bank.accountNumber?.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    // Show active banks by default (isActive defaults to true if not specified)
     const isActive = bank.isActive !== false;
-    
-    return matchesSearch && isActive;
+    return isActive;
   });
 
   const isSubmitting = createMutation.isLoading || updateMutation.isLoading;
@@ -502,15 +508,15 @@ const Banks = () => {
       </div>
 
       {/* Search */}
-      <div className="card">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+      <div className="flex items-center space-x-4">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
           <input
             type="text"
+            placeholder="Search banks..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="input pl-10"
-            placeholder="Search by bank name, account name, or account number..."
           />
         </div>
       </div>
