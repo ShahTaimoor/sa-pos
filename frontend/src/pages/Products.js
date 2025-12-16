@@ -33,7 +33,7 @@ import { useFormValidation } from '../hooks/useFormValidation';
 import { FIELD_VALIDATORS } from '../utils/validation';
 import ValidationSummary from '../components/ValidationSummary';
 import ProductImportExport from '../components/ProductImportExport';
-import IntegratedSearchFilters from '../components/IntegratedSearchFilters';
+import ProductFilters from '../components/ProductFilters';
 import { useTab } from '../contexts/TabContext';
 import { useBulkOperations } from '../hooks/useBulkOperations';
 import BulkOperationsBar from '../components/BulkOperationsBar';
@@ -1014,83 +1014,12 @@ export const Products = () => {
 
   useKeyboardShortcuts(shortcuts);
 
-  // Combine search term with filters - convert to API format
-  const queryParams = {};
-  
-  // Set limit to get all products (remove pagination)
-  queryParams.limit = 999999;
-  
-  // Only add search if there's a search term (at least 1 character after trim)
-  const trimmedSearchTerm = searchTerm?.trim();
-  if (trimmedSearchTerm && trimmedSearchTerm.length > 0) {
-    queryParams.search = trimmedSearchTerm;
-    // Ensure searchFields is a valid JSON array
-    try {
-      const searchFieldsArray = ['name', 'description', 'sku', 'barcode', 'brand'];
-      queryParams.searchFields = JSON.stringify(searchFieldsArray);
-    } catch (e) {
-      console.error('Error stringifying searchFields:', e);
-      // Fallback to default fields without JSON.stringify if needed
-      queryParams.searchFields = JSON.stringify(['name', 'description']);
-    }
-  }
-
-  // Convert filter format for API - only add valid values
-  if (filters.category) {
-    if (Array.isArray(filters.category) && filters.category.length > 0) {
-      queryParams.categories = JSON.stringify(filters.category);
-    } else if (typeof filters.category === 'string' && filters.category.trim()) {
-      queryParams.category = filters.category.trim();
-    }
-  }
-  if (filters.status) {
-    if (Array.isArray(filters.status) && filters.status.length > 0) {
-      queryParams.statuses = JSON.stringify(filters.status);
-    } else if (typeof filters.status === 'string' && filters.status.trim()) {
-      queryParams.status = filters.status.trim();
-    }
-  }
-  if (filters.priceRange) {
-    if (filters.priceRange.min !== undefined && filters.priceRange.min !== null && !isNaN(filters.priceRange.min)) {
-      queryParams.minPrice = parseFloat(filters.priceRange.min);
-    }
-    if (filters.priceRange.max !== undefined && filters.priceRange.max !== null && !isNaN(filters.priceRange.max)) {
-      queryParams.maxPrice = parseFloat(filters.priceRange.max);
-    }
-    if (filters.priceRange.field && ['retail', 'wholesale', 'cost'].includes(filters.priceRange.field)) {
-      queryParams.priceField = filters.priceRange.field;
-    }
-  }
-  if (filters.stockLevel) {
-    if (filters.stockLevel.min !== undefined && filters.stockLevel.min !== null && !isNaN(filters.stockLevel.min)) {
-      queryParams.minStock = parseInt(filters.stockLevel.min);
-    }
-    if (filters.stockLevel.max !== undefined && filters.stockLevel.max !== null && !isNaN(filters.stockLevel.max)) {
-      queryParams.maxStock = parseInt(filters.stockLevel.max);
-    }
-  }
-  if (filters.dateRange) {
-    if (filters.dateRange.from && typeof filters.dateRange.from === 'string') {
-      queryParams.dateFrom = filters.dateRange.from;
-    }
-    if (filters.dateRange.to && typeof filters.dateRange.to === 'string') {
-      queryParams.dateTo = filters.dateRange.to;
-    }
-    if (filters.dateRange.field && ['createdAt', 'updatedAt'].includes(filters.dateRange.field)) {
-      queryParams.dateField = filters.dateRange.field;
-    }
-  }
-  
-  // Add other filters that might be set
-  if (filters.brand && typeof filters.brand === 'string' && filters.brand.trim()) {
-    queryParams.brand = filters.brand.trim();
-  }
-  if (filters.stockStatus && ['lowStock', 'outOfStock', 'inStock'].includes(filters.stockStatus)) {
-    queryParams.stockStatus = filters.stockStatus;
-  }
-  if (filters.lowStock === true || filters.lowStock === 'true') {
-    queryParams.lowStock = true;
-  }
+  // Combine search term with filters - simplified to match Customers pattern
+  const queryParams = { 
+    search: searchTerm,
+    limit: 999999, // Get all products without pagination
+    ...filters
+  };
 
   const { data, isLoading, error, refetch } = useQuery(
     ['products', queryParams],
@@ -1270,8 +1199,8 @@ export const Products = () => {
   };
 
   const handleClearFilters = () => {
-    setSearchTerm('');
     setFilters({});
+    setSearchTerm('');
   };
 
   // Get all products from API
@@ -1382,7 +1311,19 @@ export const Products = () => {
     if (error?.response?.data?.errors) {
       // Validation errors from backend
       const validationErrors = error.response.data.errors;
-      errorMessage = validationErrors.map(err => err.msg || err.message).join(', ');
+      const errorDetails = validationErrors.map(err => {
+        const field = err.param || err.field || '';
+        const msg = err.msg || err.message || 'Invalid value';
+        return field ? `${field}: ${msg}` : msg;
+      });
+      errorMessage = errorDetails.length > 0 
+        ? errorDetails.join(', ')
+        : (error.response.data.message || 'Invalid request parameters');
+    } else if (error?.response?.data?.details) {
+      // Use details array if available
+      errorMessage = Array.isArray(error.response.data.details)
+        ? error.response.data.details.join(', ')
+        : error.response.data.details;
     } else if (error?.response?.data?.message) {
       errorMessage = error.response.data.message;
     } else if (error?.message) {
@@ -1476,72 +1417,32 @@ export const Products = () => {
         </div>
       </div>
 
-      {/* Show error banner if search failed but we have previous data */}
-      {error && data && searchTerm && (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4 mb-4">
-          <div className="flex items-center">
-            <AlertTriangle className="h-5 w-5 text-yellow-600 mr-2" />
-            <div className="flex-1">
-              <p className="text-sm text-yellow-800">
-                Search failed. Showing previous results. Please try adjusting your search terms.
-              </p>
-            </div>
-            <button
-              onClick={() => {
-                setSearchTerm('');
-                setFilters({});
-              }}
-              className="text-sm text-yellow-600 hover:text-yellow-800 underline"
-            >
-              Clear Search
-            </button>
-          </div>
+      {/* Search */}
+      <div className="flex items-center space-x-4">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search products..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="input pl-10"
+          />
         </div>
-      )}
-
-      {/* Advanced Search and Filters */}
-      <IntegratedSearchFilters
-        onSearch={(term, activeFilters) => {
-          setSearchTerm(term);
-          setFilters(activeFilters);
-        }}
-        onFiltersChange={(newFilters) => {
-          setFilters(prev => ({ ...prev, ...newFilters }));
-        }}
-        searchFields={['name', 'description', 'sku', 'barcode', 'brand']}
-        availableFields={[
-          { value: 'name', label: 'Product Name' },
-          { value: 'description', label: 'Description' },
-          { value: 'sku', label: 'SKU' },
-          { value: 'barcode', label: 'Barcode' },
-          { value: 'brand', label: 'Brand' },
-          { value: 'category', label: 'Category' },
-          { value: 'status', label: 'Status' },
-          { value: 'pricing.retail', label: 'Retail Price' },
-          { value: 'pricing.wholesale', label: 'Wholesale Price' },
-          { value: 'pricing.cost', label: 'Cost Price' },
-          { value: 'inventory.currentStock', label: 'Current Stock' },
-          { value: 'inventory.reorderPoint', label: 'Reorder Point' },
-          { value: 'createdAt', label: 'Created Date' },
-          { value: 'updatedAt', label: 'Updated Date' }
-        ]}
-        categories={categoriesData || []}
-        statusOptions={[
-          { value: 'active', label: 'Active' },
-          { value: 'inactive', label: 'Inactive' },
-          { value: 'discontinued', label: 'Discontinued' }
-        ]}
-        quickFilters={[
-          { key: 'stockStatus', value: 'lowStock', label: 'Low Stock' },
-          { key: 'stockStatus', value: 'outOfStock', label: 'Out of Stock' },
-          { key: 'status', value: 'active', label: 'Active Only' }
-        ]}
-      />
+      </div>
 
       {/* Import/Export Section */}
       <ProductImportExport 
         onImportComplete={() => queryClient.invalidateQueries('products')}
         filters={queryParams}
+      />
+
+      {/* Advanced Filters */}
+      <ProductFilters 
+        filters={filters}
+        onFiltersChange={handleFiltersChange}
+        onClearFilters={handleClearFilters}
+        categories={categoriesData || []}
       />
 
 
