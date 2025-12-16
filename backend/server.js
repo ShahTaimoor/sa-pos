@@ -23,30 +23,21 @@ if (!process.env.JWT_SECRET || process.env.JWT_SECRET.trim() === '') {
   }
 }
 
-// Strict CORS Configuration
-const allowedOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || '').split(',').map(s => s.trim()).filter(Boolean);
-const isDev = (process.env.NODE_ENV || 'development') !== 'production';
-if (!isDev && allowedOrigins.length === 0) {
-  console.error('FATAL: FRONTEND_URL or FRONTEND_URLS must be set in production for CORS');
-  if (!process.env.VERCEL) process.exit(1);
-}
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (isDev) return callback(null, true);
-    if (!origin) return callback(null, false);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
-  optionsSuccessStatus: 200,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key']
-};
-
 // Security middleware
 app.use(helmet());
-app.use(cors(corsOptions));
+
+// CORS configuration - allow requests from https://sa.wiserconsulting.info
+app.use(cors({
+  origin: [
+    'https://sa.wiserconsulting.info',
+    'http://localhost:3000', // Allow local development
+    'http://localhost:5173', // Allow Vite dev server
+    process.env.FRONTEND_URL // Allow from environment variable if set
+  ].filter(Boolean), // Remove undefined values
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key'],
+  credentials: true
+}));
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
