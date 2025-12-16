@@ -1020,10 +1020,19 @@ export const Products = () => {
   // Set limit to get all products (remove pagination)
   queryParams.limit = 999999;
   
-  // Only add search if there's a search term
-  if (searchTerm && searchTerm.trim()) {
-    queryParams.search = searchTerm.trim();
-    queryParams.searchFields = JSON.stringify(['name', 'description', 'sku', 'barcode', 'brand']);
+  // Only add search if there's a search term (at least 1 character after trim)
+  const trimmedSearchTerm = searchTerm?.trim();
+  if (trimmedSearchTerm && trimmedSearchTerm.length > 0) {
+    queryParams.search = trimmedSearchTerm;
+    // Ensure searchFields is a valid JSON array
+    try {
+      const searchFieldsArray = ['name', 'description', 'sku', 'barcode', 'brand'];
+      queryParams.searchFields = JSON.stringify(searchFieldsArray);
+    } catch (e) {
+      console.error('Error stringifying searchFields:', e);
+      // Fallback to default fields without JSON.stringify if needed
+      queryParams.searchFields = JSON.stringify(['name', 'description']);
+    }
   }
 
   // Convert filter format for API - only add valid values
@@ -1088,8 +1097,22 @@ export const Products = () => {
     () => productsAPI.getProducts(queryParams),
     {
       keepPreviousData: true,
+      retry: (failureCount, error) => {
+        // Don't retry on validation errors (400) or client errors (4xx)
+        if (error?.response?.status >= 400 && error?.response?.status < 500) {
+          return false;
+        }
+        // Retry up to 2 times for network/server errors
+        return failureCount < 2;
+      },
+      retryDelay: 1000,
       onError: (error) => {
         console.error('Products query error:', error);
+        // Only show toast for search-related errors, not for initial load failures
+        if (searchTerm && error?.response?.status === 400) {
+          const errorMessage = error?.response?.data?.message || 'Invalid search parameters. Please try again.';
+          showErrorToast(errorMessage);
+        }
       }
     }
   );
@@ -1346,11 +1369,14 @@ export const Products = () => {
     showSuccessToast(`Exported ${selectedItems.length} products`);
   };
 
-  if (isLoading) {
+  // Show loading only on initial load (when there's no previous data)
+  if (isLoading && !data) {
     return <LoadingPage message="Loading products..." />;
   }
 
-  if (error) {
+  // Only show full error page if it's not a search-related error and we have no data
+  // For search errors, we'll show the previous data and display a toast instead
+  if (error && !data) {
     // Extract error message from response
     let errorMessage = 'Unable to load products. Please try again.';
     if (error?.response?.data?.errors) {
@@ -1381,6 +1407,12 @@ export const Products = () => {
         </button>
       </div>
     );
+  }
+
+  // If there's an error but we have previous data, show a warning but keep displaying products
+  if (error && data) {
+    // Error toast is already shown in onError handler
+    // Continue to show previous data
   }
 
   return (
@@ -1443,6 +1475,29 @@ export const Products = () => {
           </button>
         </div>
       </div>
+
+      {/* Show error banner if search failed but we have previous data */}
+      {error && data && searchTerm && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4 mb-4">
+          <div className="flex items-center">
+            <AlertTriangle className="h-5 w-5 text-yellow-600 mr-2" />
+            <div className="flex-1">
+              <p className="text-sm text-yellow-800">
+                Search failed. Showing previous results. Please try adjusting your search terms.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setSearchTerm('');
+                setFilters({});
+              }}
+              className="text-sm text-yellow-600 hover:text-yellow-800 underline"
+            >
+              Clear Search
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Advanced Search and Filters */}
       <IntegratedSearchFilters
