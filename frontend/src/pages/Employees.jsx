@@ -66,7 +66,7 @@ const Employees = () => {
     notes: ''
   });
 
-  const { showDeleteDialog, handleDeleteClick, handleDeleteConfirm, handleDeleteCancel, itemToDelete } = useDeleteConfirmation();
+  const { confirmation, confirmDelete, handleConfirm, handleCancel } = useDeleteConfirmation();
 
   // Fetch employees
   const { data: employeesData, isLoading, refetch, error: employeesError } = useGetEmployeesQuery({
@@ -219,15 +219,15 @@ const Employees = () => {
     }
   };
 
-  const handleDelete = () => {
-    if (itemToDelete) {
-      handleDeleteEmployee(itemToDelete._id);
-    }
-  };
-
-  const handleDeleteConfirmWrapper = () => {
-    handleDeleteConfirm();
-    handleDelete();
+  const handleDelete = (employee) => {
+    const employeeName = `${employee.firstName} ${employee.lastName}`;
+    confirmDelete(employeeName, 'Employee', async () => {
+      try {
+        await handleDeleteEmployee(employee._id);
+      } catch (error) {
+        // Error already handled in handleDeleteEmployee
+      }
+    });
   };
 
   return (
@@ -403,7 +403,7 @@ const Employees = () => {
                             <Edit className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => handleDeleteClick(employee)}
+                            onClick={() => handleDelete(employee)}
                             className="btn btn-danger btn-sm"
                             title="Delete"
                           >
@@ -644,11 +644,12 @@ const Employees = () => {
 
       {/* Delete Confirmation Dialog */}
       <DeleteConfirmationDialog
-        isOpen={showDeleteDialog}
-        onClose={handleDeleteCancel}
-        onConfirm={handleDeleteConfirmWrapper}
-        title="Delete Employee"
-        message={`Are you sure you want to delete ${itemToDelete?.firstName} ${itemToDelete?.lastName}? This action cannot be undone.`}
+        isOpen={confirmation.isOpen}
+        onClose={handleCancel}
+        onConfirm={handleConfirm}
+        itemName={confirmation.message?.match(/"([^"]*)"/)?.[1] || ''}
+        itemType="Employee"
+        isLoading={deleting}
       />
     </div>
   );

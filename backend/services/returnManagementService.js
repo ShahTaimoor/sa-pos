@@ -8,6 +8,8 @@ const Inventory = require('../models/Inventory');
 const Transaction = require('../models/Transaction');
 const Customer = require('../models/Customer');
 const CustomerBalanceService = require('../services/customerBalanceService');
+const ReturnRepository = require('../repositories/ReturnRepository');
+const SalesRepository = require('../repositories/SalesRepository');
 
 class ReturnManagementService {
   constructor() {
@@ -264,7 +266,7 @@ class ReturnManagementService {
 
   // Get already returned quantity for an order item
   async getAlreadyReturnedQuantity(orderId, orderItemId) {
-    const returns = await Return.find({
+    const returns = await ReturnRepository.findAll({
       originalOrder: orderId,
       'items.originalOrderItem': orderItemId,
       status: { $nin: ['rejected', 'cancelled'] }
@@ -285,7 +287,7 @@ class ReturnManagementService {
   // Approve return request
   async approveReturn(returnId, approvedBy, notes = null) {
     try {
-      const returnRequest = await Return.findById(returnId);
+      const returnRequest = await ReturnRepository.findById(returnId);
       if (!returnRequest) {
         throw new Error('Return request not found');
       }
@@ -310,7 +312,7 @@ class ReturnManagementService {
   // Reject return request
   async rejectReturn(returnId, rejectedBy, reason) {
     try {
-      const returnRequest = await Return.findById(returnId);
+      const returnRequest = await ReturnRepository.findById(returnId);
       if (!returnRequest) {
         throw new Error('Return request not found');
       }
@@ -335,9 +337,10 @@ class ReturnManagementService {
   // Process received return
   async processReceivedReturn(returnId, receivedBy, inspectionData = {}) {
     try {
-      const returnRequest = await Return.findById(returnId)
-        .populate('originalOrder')
-        .populate('items.product');
+      const returnRequest = await ReturnRepository.findById(returnId, [
+        { path: 'originalOrder' },
+        { path: 'items.product' }
+      ]);
       
       if (!returnRequest) {
         throw new Error('Return request not found');
@@ -526,19 +529,19 @@ class ReturnManagementService {
   // Get return statistics
   async getReturnStats(period = {}) {
     try {
-      const stats = await Return.getReturnStats(period);
+      const stats = await ReturnRepository.getStats(period);
       
       // Get additional metrics
-      const totalReturns = await Return.countDocuments(
-        period.startDate && period.endDate ? {
-          returnDate: {
-            $gte: period.startDate,
-            $lte: period.endDate
-          }
-        } : {}
-      );
+      const filter = period.startDate && period.endDate ? {
+        returnDate: {
+          $gte: period.startDate,
+          $lte: period.endDate
+        }
+      } : {};
+      
+      const totalReturns = await ReturnRepository.count(filter);
 
-      const pendingReturns = await Return.countDocuments({
+      const pendingFilter = {
         status: 'pending',
         ...(period.startDate && period.endDate ? {
           returnDate: {
@@ -546,16 +549,36 @@ class ReturnManagementService {
             $lte: period.endDate
           }
         } : {})
-      });
+      };
+      const pendingReturns = await ReturnRepository.count(pendingFilter);
 
       const averageProcessingTime = await this.calculateAverageProcessingTime(period);
 
+      // Calculate status and type breakdowns
+      const statusBreakdown = {};
+      const typeBreakdown = {};
+      if (stats.byStatus && Array.isArray(stats.byStatus)) {
+        stats.byStatus.forEach(status => {
+          statusBreakdown[status] = (statusBreakdown[status] || 0) + 1;
+        });
+      }
+      if (stats.byType && Array.isArray(stats.byType)) {
+        stats.byType.forEach(type => {
+          typeBreakdown[type] = (typeBreakdown[type] || 0) + 1;
+        });
+      }
+
       return {
-        ...stats,
         totalReturns,
         pendingReturns,
+        totalRefundAmount: stats.totalRefundAmount || 0,
+        totalRestockingFee: stats.totalRestockingFee || 0,
+        netRefundAmount: stats.netRefundAmount || 0,
+        averageRefundAmount: totalReturns > 0 ? (stats.totalRefundAmount || 0) / totalReturns : 0,
         averageProcessingTime,
-        returnRate: await this.calculateReturnRate(period)
+        returnRate: await this.calculateReturnRate(period),
+        statusBreakdown,
+        typeBreakdown
       };
     } catch (error) {
       console.error('Error getting return stats:', error);
@@ -619,34 +642,148 @@ class ReturnManagementService {
   // Get return trends
   async getReturnTrends(periods = 12) {
     try {
-      const trends = [];
-      const now = new Date();
+      const trends = await ReturnRepository.getTrends(periods);
       
-      for (let i = periods - 1; i >= 0; i--) {
-        const startDate = new Date(now);
-        startDate.setMonth(now.getMonth() - i);
-        startDate.setDate(1);
-        
-        const endDate = new Date(startDate);
-        endDate.setMonth(endDate.getMonth() + 1);
-        endDate.setDate(0);
-        
-        const stats = await this.getReturnStats({ startDate, endDate });
-        
-        trends.push({
-          period: startDate.toISOString().split('T')[0],
-          totalReturns: stats.totalReturns,
-          totalRefundAmount: stats.totalRefundAmount,
-          averageRefundAmount: stats.averageRefundAmount,
-          returnRate: stats.returnRate
-        });
-      }
-      
-      return trends;
+      // Format trends data
+      return trends.map(trend => ({
+        period: `${trend._id.year}-${String(trend._id.month).padStart(2, '0')}`,
+        totalReturns: trend.count || 0,
+        totalRefundAmount: trend.totalRefundAmount || 0,
+        averageRefundAmount: trend.averageRefundAmount || 0
+      }));
     } catch (error) {
       console.error('Error getting return trends:', error);
       throw error;
     }
+  }
+
+  // Get returns with filters and pagination
+  async getReturns(queryParams) {
+    const page = parseInt(queryParams.page) || 1;
+    const limit = parseInt(queryParams.limit) || 10;
+
+    const filter = {};
+
+    // Apply filters
+    if (queryParams.status) filter.status = queryParams.status;
+    if (queryParams.returnType) filter.returnType = queryParams.returnType;
+    if (queryParams.customer) filter.customer = queryParams.customer;
+    if (queryParams.priority) filter.priority = queryParams.priority;
+
+    // Date range filter
+    if (queryParams.startDate || queryParams.endDate) {
+      filter.returnDate = {};
+      if (queryParams.startDate) filter.returnDate.$gte = queryParams.startDate;
+      if (queryParams.endDate) filter.returnDate.$lte = queryParams.endDate;
+    }
+
+    // Search filter
+    if (queryParams.search) {
+      filter.$or = [
+        { returnNumber: { $regex: queryParams.search, $options: 'i' } },
+        { 'customer.firstName': { $regex: queryParams.search, $options: 'i' } },
+        { 'customer.lastName': { $regex: queryParams.search, $options: 'i' } }
+      ];
+    }
+
+    const result = await ReturnRepository.findWithPagination(filter, {
+      page,
+      limit,
+      sort: { returnDate: -1 }
+    });
+
+    return {
+      returns: result.returns,
+      pagination: result.pagination
+    };
+  }
+
+  // Get single return by ID
+  async getReturnById(returnId) {
+    const returnRequest = await ReturnRepository.findById(returnId, [
+      { path: 'originalOrder', populate: { path: 'customer' } },
+      { path: 'customer', select: 'name businessName email phone firstName lastName' },
+      { path: 'supplier', select: 'name businessName email phone companyName contactPerson' },
+      { path: 'items.product', select: 'name description pricing' },
+      { path: 'requestedBy', select: 'firstName lastName email' },
+      { path: 'approvedBy', select: 'firstName lastName email' },
+      { path: 'processedBy', select: 'firstName lastName email' }
+    ]);
+
+    if (!returnRequest) {
+      throw new Error('Return request not found');
+    }
+
+    return returnRequest;
+  }
+
+  // Update return inspection details
+  async updateInspection(returnId, inspectionData, userId) {
+    const returnRequest = await ReturnRepository.findById(returnId);
+    if (!returnRequest) {
+      throw new Error('Return request not found');
+    }
+
+    returnRequest.inspection = {
+      inspectedBy: userId,
+      inspectionDate: new Date(),
+      ...inspectionData
+    };
+
+    await returnRequest.save();
+    return returnRequest;
+  }
+
+  // Add note to return
+  async addNote(returnId, note, userId, isInternal = false) {
+    const returnRequest = await ReturnRepository.findById(returnId);
+    if (!returnRequest) {
+      throw new Error('Return request not found');
+    }
+
+    await returnRequest.addNote(note, userId, isInternal);
+    return returnRequest;
+  }
+
+  // Add communication log to return
+  async addCommunication(returnId, type, message, userId, recipient) {
+    const returnRequest = await ReturnRepository.findById(returnId);
+    if (!returnRequest) {
+      throw new Error('Return request not found');
+    }
+
+    await returnRequest.addCommunication(type, message, userId, recipient);
+    return returnRequest;
+  }
+
+  // Cancel return request
+  async cancelReturn(returnId, userId) {
+    const returnRequest = await ReturnRepository.findById(returnId);
+    if (!returnRequest) {
+      throw new Error('Return request not found');
+    }
+
+    if (returnRequest.status !== 'pending') {
+      throw new Error('Only pending return requests can be cancelled');
+    }
+
+    await returnRequest.updateStatus('cancelled', userId, 'Return request cancelled');
+    return returnRequest;
+  }
+
+  // Delete return request
+  async deleteReturn(returnId) {
+    const returnRequest = await ReturnRepository.findById(returnId);
+    if (!returnRequest) {
+      throw new Error('Return request not found');
+    }
+
+    if (!['pending', 'cancelled'].includes(returnRequest.status)) {
+      throw new Error('Only pending or cancelled return requests can be deleted');
+    }
+
+    await ReturnRepository.softDelete(returnId);
+    return { message: 'Return request deleted successfully' };
   }
 }
 

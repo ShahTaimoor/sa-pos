@@ -219,6 +219,17 @@ const userSchema = new mongoose.Schema({
       type: String,
       default: 'America/New_York'
     }
+  },
+  
+  // Soft Delete Fields
+  isDeleted: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  deletedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true,

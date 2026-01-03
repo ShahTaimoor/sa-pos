@@ -1,9 +1,11 @@
 const express = require('express');
 const { query, param, body } = require('express-validator');
 const AccountingService = require('../services/accountingService');
-const Transaction = require('../models/Transaction');
-const ChartOfAccounts = require('../models/ChartOfAccounts');
-const BalanceSheet = require('../models/BalanceSheet');
+const Transaction = require('../models/Transaction'); // Still needed for model reference
+const ChartOfAccounts = require('../models/ChartOfAccounts'); // Still needed for model reference
+const BalanceSheet = require('../models/BalanceSheet'); // Still needed for model reference
+const transactionRepository = require('../repositories/TransactionRepository');
+const chartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
 const { auth, requirePermission, requireAnyPermission } = require('../middleware/auth');
 
 const router = express.Router();
@@ -65,17 +67,20 @@ router.get('/transactions', [
     const parsedLimit = parseInt(limit) || 50;
     const skip = (parsedPage - 1) * parsedLimit;
     
-    const [transactions, total] = await Promise.all([
-      Transaction.find(query)
-        .populate('orderId', 'orderNumber') // Fixed: use 'orderId' instead of 'order' to match schema field
-        .populate('customer', 'name businessName')
-        .populate('supplier', 'companyName')
-        .populate('createdBy', 'firstName lastName')
-        .sort({ transactionDate: -1 })
-        .skip(skip)
-        .limit(parsedLimit),
-      Transaction.countDocuments(query)
-    ]);
+    const result = await transactionRepository.findWithPagination(query, {
+      page: parsedPage,
+      limit: parsedLimit,
+      sort: { transactionDate: -1 },
+      populate: [
+        { path: 'orderId', select: 'orderNumber' },
+        { path: 'customer', select: 'name businessName' },
+        { path: 'supplier', select: 'companyName' },
+        { path: 'createdBy', select: 'firstName lastName' }
+      ]
+    });
+    
+    const transactions = result.transactions;
+    const total = result.total;
     
     res.json({
       success: true,
@@ -206,8 +211,9 @@ router.get('/chart-of-accounts', [
     const includeBalances = req.query.includeBalances === 'true';
     const asOfDate = req.query.asOfDate ? new Date(req.query.asOfDate) : new Date();
     
-    const accounts = await ChartOfAccounts.find({ isActive: true })
-      .sort({ accountCode: 1 });
+    const accounts = await chartOfAccountsRepository.findAll({ isActive: true }, {
+      sort: { accountCode: 1 }
+    });
     
     let accountsWithBalances = accounts;
     

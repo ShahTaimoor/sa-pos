@@ -1,42 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import React, { useState } from 'react';
 import { formatCurrency, formatDate } from '../utils/formatters';
+import { useGetBackdateReportQuery } from '../store/services/reportsApi';
+import { LoadingPage } from '../components/LoadingSpinner';
 
 const BackdateReport = () => {
-  const { token } = useAuth();
-  const [reportData, setReportData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all'); // all, backdate, future, recent
   const [typeFilter, setTypeFilter] = useState('all');
 
-  useEffect(() => {
-    fetchReportData();
-  }, []);
+  const { data: reportResponse, isLoading: loading, error: queryError, refetch } = useGetBackdateReportQuery();
 
-  const fetchReportData = async () => {
-    try {
-      setLoading(true);
-      // Use relative path to avoid double /api when REACT_APP_API_URL already includes it
-      const response = await fetch(`/api/backdate-report`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch report data');
-      }
-
-      const data = await response.json();
-      setReportData(data.data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const reportData = reportResponse?.data || reportResponse;
+  const error = queryError?.message || queryError?.data?.message || (queryError ? 'Failed to fetch report data' : null);
 
   const getDateTypeColor = (dateType) => {
     switch (dateType) {
@@ -81,14 +55,7 @@ const BackdateReport = () => {
   }) || [];
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading backdate report...</p>
-        </div>
-      </div>
-    );
+    return <LoadingPage message="Loading backdate report..." />;
   }
 
   if (error) {
@@ -99,7 +66,7 @@ const BackdateReport = () => {
           <h2 className="text-2xl font-bold text-gray-900 mb-2">Error Loading Report</h2>
           <p className="text-gray-600 mb-4">{error}</p>
           <button
-            onClick={fetchReportData}
+            onClick={() => refetch()}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
           >
             Retry
@@ -219,7 +186,7 @@ const BackdateReport = () => {
 
             <div className="flex items-end">
               <button
-                onClick={fetchReportData}
+                onClick={() => refetch()}
                 className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 Refresh

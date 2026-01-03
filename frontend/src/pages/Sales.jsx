@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   ShoppingCart, 
   Search, 
@@ -430,7 +430,7 @@ const ProductSearch = ({ onAddProduct, selectedCustomer, showCostPrice, onLastPu
           } else {
             // If not found by barcode, search by name/description
             setProductSearchTerm(barcodeValue);
-            toast.info(`Searching for: ${barcodeValue}`);
+            toast(`Searching for: ${barcodeValue}`, { icon: 'ℹ️' });
           }
           setShowBarcodeScanner(false);
         }}
@@ -626,6 +626,16 @@ export const Sales = ({ tabId, editData }) => {
   // Sales mutations
   const [createSale, { isLoading: isCreatingSale }] = useCreateSaleMutation();
   const [updateOrder, { isLoading: isUpdatingOrder }] = useUpdateOrderMutation();
+  
+  // Duplicate prevention: use BOTH ref (synchronous check) and state (button disable)
+  const isSubmittingRef = useRef(false); // For immediate synchronous checks
+  const [isSubmitting, setIsSubmitting] = useState(false); // For button disabled state
+  
+  // Helper function to reset submitting state (ensures both ref and state are reset)
+  const resetSubmittingState = useCallback(() => {
+    isSubmittingRef.current = false;
+    setIsSubmitting(false);
+  }, []);
   
   // Extract customers array from RTK Query response
   const customers = useMemo(() => {
@@ -1337,28 +1347,24 @@ export const Sales = ({ tabId, editData }) => {
     }
   };
 
-  const handleCreateOrder = async (orderData) => {
+  const handleCreateOrder = useCallback(async (orderData) => {
+    // Double-check: prevent duplicate calls even if handleCheckout guard fails
+    if (isSubmittingRef.current) {
+      // Silently ignore duplicate calls - this is expected behavior
+      return;
+    }
+    
+    // Set flag immediately before async operation
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+    
     try {
       const result = await createSale({ payload: orderData }).unwrap();
       showSuccessToast('Sale created successfully');
       
-      // Immediately refetch products to update stock levels
-      if (refetchProducts && typeof refetchProducts === 'function') {
-        try {
-          refetchProducts();
-        } catch (error) {
-          console.warn('Failed to refetch products:', error);
-        }
-      }
-      
-      // Immediately refetch customers to update credit information
-      if (refetchCustomers && typeof refetchCustomers === 'function') {
-        try {
-          refetchCustomers();
-        } catch (error) {
-          console.warn('Failed to refetch customers:', error);
-        }
-      }
+      // RTK Query invalidatesTags will automatically refetch Products and Customers
+      // No need to manually refetch - it happens automatically via cache invalidation
+      // This prevents React warnings about updating components during render
       
       // Reset cart and form
       setCart([]);
@@ -1379,33 +1385,48 @@ export const Sales = ({ tabId, editData }) => {
         setCurrentOrder(result.order);
         setShowPrintModal(true);
       }
+      resetSubmittingState();
     } catch (error) {
-      handleApiError(error, 'Create Sale');
+      // Handle duplicate request errors gracefully (409)
+      if (error?.status === 409 || error?.data?.error?.code === 'DUPLICATE_REQUEST') {
+        const retryAfter = error?.data?.error?.retryAfter || 1;
+        toast(
+          `Your request is being processed. Please wait ${retryAfter} second${retryAfter > 1 ? 's' : ''}...`,
+          { 
+            duration: 3000,
+            icon: 'ℹ️'
+          }
+        );
+        // Don't reset submitting flag immediately for duplicate requests
+        // The request might complete successfully, wait a bit longer
+        setTimeout(() => {
+          resetSubmittingState();
+        }, (retryAfter + 2) * 1000);
+      } else {
+        handleApiError(error, 'Create Sale');
+        resetSubmittingState();
+      }
     }
-  };
+  }, [createSale, resetSubmittingState]);
 
-  const handleUpdateOrder = async (orderId, updateData) => {
+  const handleUpdateOrder = useCallback(async (orderId, updateData) => {
+    // Double-check: prevent duplicate calls even if handleCheckout guard fails
+    if (isSubmittingRef.current) {
+      // Silently ignore duplicate calls - this is expected behavior
+      return;
+    }
+    
+    // Set flag immediately before async operation
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
+    
     try {
       const result = await updateOrder({ id: orderId, ...updateData }).unwrap();
       showSuccessToast('Order updated successfully');
       
-      // Immediately refetch products to update stock levels
-      if (refetchProducts && typeof refetchProducts === 'function') {
-        try {
-          refetchProducts();
-        } catch (error) {
-          console.warn('Failed to refetch products:', error);
-        }
-      }
-      
-      // Immediately refetch customers to update credit information
-      if (refetchCustomers && typeof refetchCustomers === 'function') {
-        try {
-          refetchCustomers();
-        } catch (error) {
-          console.warn('Failed to refetch customers:', error);
-        }
-      }
+      // RTK Query invalidatesTags will automatically refetch Products and Customers
+      // No need to manually refetch - it happens automatically via cache invalidation
+      // This prevents React warnings about updating components during render
       
       // Reset cart and form
       setCart([]);
@@ -1426,13 +1447,47 @@ export const Sales = ({ tabId, editData }) => {
         setCurrentOrder(result.order);
         setShowPrintModal(true);
       }
+      resetSubmittingState();
     } catch (error) {
-      handleApiError(error, 'Update Order');
+      // Handle duplicate request errors gracefully (409)
+      if (error?.status === 409 || error?.data?.error?.code === 'DUPLICATE_REQUEST') {
+        const retryAfter = error?.data?.error?.retryAfter || 1;
+        toast(
+          `Your request is being processed. Please wait ${retryAfter} second${retryAfter > 1 ? 's' : ''}...`,
+          { 
+            duration: 3000,
+            icon: 'ℹ️'
+          }
+        );
+        // Don't reset submitting flag immediately for duplicate requests
+        setTimeout(() => {
+          resetSubmittingState();
+        }, (retryAfter + 2) * 1000);
+      } else {
+        handleApiError(error, 'Update Order');
+        resetSubmittingState();
+      }
     }
-  };
+  }, [updateOrder, resetSubmittingState, isSubmittingRef]);
 
-  const handleCheckout = () => {
+  const handleCheckout = useCallback((e) => {
+    // Prevent default and stop propagation to avoid any event bubbling issues
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    // Prevent duplicate submissions - check ref FIRST (synchronous, no delay)
+    if (isSubmittingRef.current || isSubmitting || isCreatingSale || isUpdatingOrder) {
+      // Silently ignore duplicate calls - this is expected behavior
+      return;
+    }
+    
+    // NOTE: Don't set flags here - let handleCreateOrder/handleUpdateOrder set them
+    // This prevents the double-check guard in those functions from triggering
+    
     if (cart.length === 0) {
+      // No need to reset state since we don't set it in handleCheckout
       showErrorToast({ message: 'Cart is empty' });
       return;
     }
@@ -1459,6 +1514,7 @@ export const Sales = ({ tabId, editData }) => {
             `Available credit: $${availableCredit.toFixed(2)}. ` +
             `Please collect payment or reduce the order amount.`;
           
+          // No need to reset state since we don't set it in handleCheckout
           toast.error(message, {
             duration: 8000,
             position: 'top-center'
@@ -1479,6 +1535,7 @@ export const Sales = ({ tabId, editData }) => {
     }
     
     if (paymentMethod === 'bank' && !selectedBankAccount) {
+      // Don't reset state here since we never set it in handleCheckout
       showErrorToast({ message: 'Please select a bank account for bank payments' });
       return;
     }
@@ -1542,7 +1599,30 @@ export const Sales = ({ tabId, editData }) => {
     } else {
       handleCreateOrder(orderData);
     }
-  };
+  }, [
+    isSubmitting,
+    isCreatingSale,
+    isUpdatingOrder,
+    cart,
+    selectedCustomer,
+    paymentMethod,
+    amountPaid,
+    total,
+    appliedDiscounts,
+    directDiscount,
+    subtotal,
+    totalDiscountAmount,
+    tax,
+    isTaxExempt,
+    invoiceNumber,
+    notes,
+    selectedBankAccount,
+    isAdvancePayment,
+    editData,
+    resetSubmittingState,
+    handleCreateOrder,
+    handleUpdateOrder
+  ]);
 
   const handlePaymentSuccess = async (paymentResult) => {
     // Handle payment success
@@ -2436,7 +2516,8 @@ export const Sales = ({ tabId, editData }) => {
                 )}
                 <LoadingButton
                   onClick={handleCheckout}
-                  isLoading={isCreatingSale || isUpdatingOrder}
+                  isLoading={isSubmitting || isCreatingSale || isUpdatingOrder}
+                  disabled={isSubmitting || isCreatingSale || isUpdatingOrder}
                   className="btn btn-primary btn-lg flex-2"
                 >
                   <Receipt className="h-4 w-4 mr-2" />

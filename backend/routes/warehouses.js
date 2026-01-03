@@ -2,8 +2,7 @@ const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { sanitizeRequest } = require('../middleware/validation');
-const Warehouse = require('../models/Warehouse');
-const Inventory = require('../models/Inventory');
+const warehouseService = require('../services/warehouseService');
 
 const router = express.Router();
 
@@ -129,37 +128,18 @@ router.get(
         limit = 20,
       } = req.query;
 
-      const filters = {};
-      if (isActive !== undefined) {
-        filters.isActive = isActive === 'true' || isActive === true;
-      }
-
-      if (search) {
-        const searchRegex = new RegExp(search, 'i');
-        filters.$or = [{ name: searchRegex }, { code: searchRegex }];
-      }
-
-      const numericLimit = parseInt(limit, 10) || 20;
-      const numericPage = parseInt(page, 10) || 1;
-
-      const [items, total] = await Promise.all([
-        Warehouse.find(filters)
-          .sort({ isPrimary: -1, name: 1 })
-          .skip((numericPage - 1) * numericLimit)
-          .limit(numericLimit),
-        Warehouse.countDocuments(filters),
-      ]);
+      const { warehouses, pagination } = await warehouseService.getWarehouses({
+        search,
+        isActive,
+        page,
+        limit
+      });
 
       res.json({
         success: true,
         data: {
-          items,
-          pagination: {
-            total,
-            pages: Math.ceil(total / numericLimit),
-            current: numericPage,
-            limit: numericLimit,
-          },
+          warehouses,
+          pagination,
         },
       });
     } catch (error) {
@@ -184,19 +164,19 @@ router.get(
   ],
   async (req, res) => {
     try {
-      const warehouse = await Warehouse.findById(req.params.id);
-      if (!warehouse) {
-        return res.status(404).json({
-          success: false,
-          message: 'Warehouse not found',
-        });
-      }
+      const warehouse = await warehouseService.getWarehouseById(req.params.id);
 
       res.json({
         success: true,
         data: warehouse,
       });
     } catch (error) {
+      if (error.message === 'Warehouse not found') {
+        return res.status(404).json({
+          success: false,
+          message: 'Warehouse not found',
+        });
+      }
       console.error('Error fetching warehouse:', error);
       res.status(500).json({
         success: false,
@@ -221,23 +201,16 @@ router.post(
       const payload = {
         ...req.body,
         code: req.body.code.toUpperCase(),
-        createdBy: req.user?._id,
-        updatedBy: req.user?._id,
       };
-
-      if (payload.isPrimary) {
-        await Warehouse.updateMany({}, { $set: { isPrimary: false } });
-      }
 
       let warehouse;
       try {
-        warehouse = await Warehouse.create(payload);
+        warehouse = await warehouseService.createWarehouse(payload, req.user._id);
       } catch (err) {
-        if (err.code === 11000) {
-          const duplicateField = Object.keys(err.keyPattern || {})[0];
+        if (err.message === 'Warehouse code already exists') {
           return res.status(400).json({
             success: false,
-            message: `${duplicateField} already exists`
+            message: 'Warehouse code already exists'
           });
         }
         throw err;
@@ -276,29 +249,13 @@ router.put(
   ],
   async (req, res) => {
     try {
-      const warehouse = await Warehouse.findById(req.params.id);
-      if (!warehouse) {
-        return res.status(404).json({
-          success: false,
-          message: 'Warehouse not found',
-        });
-      }
-
       const updates = { ...req.body };
 
       if (updates.code) {
         updates.code = updates.code.toUpperCase();
       }
 
-      if (updates.isPrimary) {
-        await Warehouse.updateMany(
-          { _id: { $ne: warehouse._id } },
-          { $set: { isPrimary: false } }
-        );
-      }
-
-      Object.assign(warehouse, updates, { updatedBy: req.user?._id });
-      await warehouse.save();
+      const warehouse = await warehouseService.updateWarehouse(req.params.id, updates, req.user._id);
 
       res.json({
         success: true,
@@ -306,13 +263,19 @@ router.put(
         data: warehouse,
       });
     } catch (error) {
-      console.error('Error updating warehouse:', error);
-      if (error.code === 11000) {
+      if (error.message === 'Warehouse not found') {
+        return res.status(404).json({
+          success: false,
+          message: 'Warehouse not found',
+        });
+      }
+      if (error.message === 'Warehouse code already exists') {
         return res.status(409).json({
           success: false,
           message: 'Warehouse code must be unique',
         });
       }
+      console.error('Error updating warehouse:', error);
       res.status(500).json({
         success: false,
         message: 'Server error updating warehouse',
@@ -333,13 +296,7 @@ router.delete(
   ],
   async (req, res) => {
     try {
-      const warehouse = await Warehouse.findById(req.params.id);
-      if (!warehouse) {
-        return res.status(404).json({
-          success: false,
-          message: 'Warehouse not found',
-        });
-      }
+      const warehouse = await warehouseService.getWarehouseById(req.params.id);
 
       if (warehouse.isPrimary) {
         return res.status(400).json({
@@ -348,29 +305,25 @@ router.delete(
         });
       }
 
-      const usageCount = await Inventory.countDocuments({
-        $or: [
-          { 'location.warehouse': warehouse.name },
-          { 'location.warehouseCode': warehouse.code },
-          { warehouseId: warehouse._id },
-        ],
-      });
-
-      if (usageCount > 0) {
-        return res.status(400).json({
-          success: false,
-          message:
-            'Cannot delete warehouse while inventory records are assigned to it. Please reassign or deactivate instead.',
-        });
-      }
-
-      await Warehouse.deleteOne({ _id: warehouse._id });
+      const result = await warehouseService.deleteWarehouse(req.params.id);
 
       res.json({
         success: true,
-        message: 'Warehouse deleted successfully',
+        message: result.message,
       });
     } catch (error) {
+      if (error.message === 'Warehouse not found') {
+        return res.status(404).json({
+          success: false,
+          message: 'Warehouse not found',
+        });
+      }
+      if (error.message.includes('Cannot delete warehouse')) {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
       console.error('Error deleting warehouse:', error);
       res.status(500).json({
         success: false,

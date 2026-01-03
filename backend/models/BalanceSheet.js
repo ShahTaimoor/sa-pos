@@ -385,6 +385,8 @@ balanceSheetSchema.methods.calculateTotals = function() {
 
 // Method to calculate financial ratios
 balanceSheetSchema.methods.calculateRatios = async function() {
+  const FinancialStatement = require('./FinancialStatement');
+  
   const ratios = {
     currentRatio: 0,
     quickRatio: 0,
@@ -422,9 +424,25 @@ balanceSheetSchema.methods.calculateRatios = async function() {
   }
 
   // 4. Return on Assets = Net Income / Total Assets
-  // Requires net income from P&L statement - will be calculated if available
-  // For now, we can use current period earnings as a proxy
-  const netIncome = this.equity?.retainedEarnings?.currentPeriodEarnings || 0;
+  // Get net income from P&L statement for this period
+  let netIncome = this.equity?.retainedEarnings?.currentPeriodEarnings || 0;
+  
+  try {
+    // Try to get more accurate net income from P&L statement
+    const plStatement = await FinancialStatement.findOne({
+      type: 'profit_loss',
+      'period.startDate': this.getPreviousPeriodStartDate(),
+      'period.endDate': this.statementDate,
+      status: { $in: ['draft', 'review', 'approved', 'published'] }
+    }).sort({ createdAt: -1 });
+
+    if (plStatement && plStatement.netIncome && plStatement.netIncome.amount !== undefined) {
+      netIncome = plStatement.netIncome.amount;
+    }
+  } catch (error) {
+    console.warn('Could not fetch P&L statement for ROA/ROE calculation:', error.message);
+  }
+
   if (totalAssets > 0) {
     ratios.returnOnAssets = netIncome / totalAssets;
   }
@@ -435,21 +453,141 @@ balanceSheetSchema.methods.calculateRatios = async function() {
   }
 
   // 6. Inventory Turnover = COGS / Average Inventory
-  // Requires COGS from P&L statement - will be 0 if not available
-  // This would need to be calculated from P&L data if available
-  // For now, set to 0 (would need external calculation)
+  try {
+    // Get P&L statement for COGS
+    const plStatement = await FinancialStatement.findOne({
+      type: 'profit_loss',
+      'period.startDate': this.getPreviousPeriodStartDate(),
+      'period.endDate': this.statementDate,
+      status: { $in: ['draft', 'review', 'approved', 'published'] }
+    }).sort({ createdAt: -1 });
+
+    if (plStatement && plStatement.costOfGoodsSold && plStatement.costOfGoodsSold.totalCOGS) {
+      const cogs = plStatement.costOfGoodsSold.totalCOGS.amount || 0;
+      
+      // Calculate average inventory (beginning + ending) / 2
+      const previousPeriodStart = this.getPreviousPeriodStartDate();
+      const previousBalanceSheet = await BalanceSheet.findOne({
+        statementDate: previousPeriodStart,
+        periodType: this.periodType,
+        status: { $in: ['draft', 'review', 'approved', 'final'] }
+      }).sort({ createdAt: -1 });
+
+      const beginningInventory = previousBalanceSheet?.assets?.currentAssets?.inventory?.total || inventory;
+      const endingInventory = inventory;
+      const averageInventory = (beginningInventory + endingInventory) / 2;
+
+      if (averageInventory > 0) {
+        ratios.inventoryTurnover = cogs / averageInventory;
+      }
+    }
+  } catch (error) {
+    console.warn('Could not calculate inventory turnover:', error.message);
+  }
 
   // 7. Accounts Receivable Turnover = Net Sales / Average Accounts Receivable
-  // Requires sales data - will be 0 if not available
-  // This would need to be calculated from sales data if available
-  // For now, set to 0 (would need external calculation)
+  try {
+    // Get P&L statement for Net Sales
+    const plStatement = await FinancialStatement.findOne({
+      type: 'profit_loss',
+      'period.startDate': this.getPreviousPeriodStartDate(),
+      'period.endDate': this.statementDate,
+      status: { $in: ['draft', 'review', 'approved', 'published'] }
+    }).sort({ createdAt: -1 });
+
+    if (plStatement && plStatement.revenue) {
+      // Net Sales = Gross Sales - Sales Returns - Sales Discounts
+      const grossSales = plStatement.revenue.grossSales?.amount || 0;
+      const salesReturns = plStatement.revenue.salesReturns?.amount || 0;
+      const salesDiscounts = plStatement.revenue.salesDiscounts?.amount || 0;
+      const netSales = grossSales - salesReturns - salesDiscounts;
+
+      // Calculate average accounts receivable
+      const previousPeriodStart = this.getPreviousPeriodStartDate();
+      const previousBalanceSheet = await BalanceSheet.findOne({
+        statementDate: previousPeriodStart,
+        periodType: this.periodType,
+        status: { $in: ['draft', 'review', 'approved', 'final'] }
+      }).sort({ createdAt: -1 });
+
+      const beginningAR = previousBalanceSheet?.assets?.currentAssets?.accountsReceivable?.netReceivables || accountsReceivable;
+      const endingAR = accountsReceivable;
+      const averageAR = (beginningAR + endingAR) / 2;
+
+      if (averageAR > 0) {
+        ratios.accountsReceivableTurnover = netSales / averageAR;
+      }
+    }
+  } catch (error) {
+    console.warn('Could not calculate accounts receivable turnover:', error.message);
+  }
 
   // 8. Accounts Payable Turnover = COGS / Average Accounts Payable
-  // Requires COGS from P&L statement - will be 0 if not available
-  // This would need to be calculated from P&L data if available
-  // For now, set to 0 (would need external calculation)
+  try {
+    // Get P&L statement for COGS
+    const plStatement = await FinancialStatement.findOne({
+      type: 'profit_loss',
+      'period.startDate': this.getPreviousPeriodStartDate(),
+      'period.endDate': this.statementDate,
+      status: { $in: ['draft', 'review', 'approved', 'published'] }
+    }).sort({ createdAt: -1 });
+
+    if (plStatement && plStatement.costOfGoodsSold && plStatement.costOfGoodsSold.totalCOGS) {
+      const cogs = plStatement.costOfGoodsSold.totalCOGS.amount || 0;
+
+      // Calculate average accounts payable
+      const previousPeriodStart = this.getPreviousPeriodStartDate();
+      const previousBalanceSheet = await BalanceSheet.findOne({
+        statementDate: previousPeriodStart,
+        periodType: this.periodType,
+        status: { $in: ['draft', 'review', 'approved', 'final'] }
+      }).sort({ createdAt: -1 });
+
+      const beginningAP = previousBalanceSheet?.liabilities?.currentLiabilities?.accountsPayable?.total || accountsPayable;
+      const endingAP = accountsPayable;
+      const averageAP = (beginningAP + endingAP) / 2;
+
+      if (averageAP > 0) {
+        ratios.accountsPayableTurnover = cogs / averageAP;
+      }
+    }
+  } catch (error) {
+    console.warn('Could not calculate accounts payable turnover:', error.message);
+  }
 
   return ratios;
+};
+
+// Helper method to get previous period start date
+balanceSheetSchema.methods.getPreviousPeriodStartDate = function() {
+  const statementDate = new Date(this.statementDate);
+  let startDate = new Date(statementDate);
+
+  switch (this.periodType) {
+    case 'monthly':
+      startDate.setMonth(statementDate.getMonth() - 1);
+      startDate.setDate(1);
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    case 'quarterly':
+      startDate.setMonth(statementDate.getMonth() - 3);
+      startDate.setDate(1);
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    case 'yearly':
+      startDate.setFullYear(statementDate.getFullYear() - 1);
+      startDate.setMonth(0);
+      startDate.setDate(1);
+      startDate.setHours(0, 0, 0, 0);
+      break;
+    default:
+      // Default to monthly
+      startDate.setMonth(statementDate.getMonth() - 1);
+      startDate.setDate(1);
+      startDate.setHours(0, 0, 0, 0);
+  }
+
+  return startDate;
 };
 
 // Pre-save hook to calculate totals and ratios before saving

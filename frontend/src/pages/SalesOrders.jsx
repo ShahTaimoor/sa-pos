@@ -60,6 +60,14 @@ import PrintModal from '../components/PrintModal';
 import { useCompanyInfo } from '../hooks/useCompanyInfo';
 import NotesPanel from '../components/NotesPanel';
 
+// Helper function to get local date in YYYY-MM-DD format (avoids timezone issues with toISOString)
+const getLocalDateString = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 // Helper function to safely render values
 const safeRender = (value) => {
   if (value === null || value === undefined) return '';
@@ -71,16 +79,22 @@ const safeRender = (value) => {
 };
 
 const SalesOrders = () => {
-  const { updateTabTitle, getActiveTab } = useTab();
+  const { updateTabTitle, tabs, activeTabId } = useTab();
   const { companyInfo: companySettings } = useCompanyInfo();
   const resolvedCompanyName = companySettings.companyName || 'Company Name';
   const resolvedCompanyAddress = companySettings.address || companySettings.billingAddress || '';
   const resolvedCompanyPhone = companySettings.contactNumber || '';
   
+  // Calculate default date range (14 days ago to today)
+  const today = getLocalDateString();
+  const fourteenDaysAgo = new Date();
+  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+  const fromDateDefault = getLocalDateString(fourteenDaysAgo);
+  
   // State for filters and pagination
   const [filters, setFilters] = useState({
-    fromDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days ago
-    toDate: new Date().toISOString().split('T')[0], // Today
+    fromDate: fromDateDefault, // 14 days ago
+    toDate: today, // Today
     orderNumber: '',
     customer: '',
     status: '',
@@ -288,6 +302,29 @@ const totalProfit = useMemo(() => {
     };
   }, []);
 
+  // Update tab title when selectedCustomer changes (after render)
+  useEffect(() => {
+    if (!updateTabTitle || !activeTabId || !tabs) return;
+    
+    const activeTab = tabs.find(tab => tab.id === activeTabId);
+    if (!activeTab) return;
+
+    let newTitle;
+    if (selectedCustomer) {
+      newTitle = `SO - ${selectedCustomer.businessName || selectedCustomer.name || 'Unknown'}`;
+    } else if (!showEditModal) {
+      // Only reset to 'SO' if not in edit modal
+      newTitle = 'SO';
+    } else {
+      return; // Don't update title when in edit modal
+    }
+
+    // Only update if the title actually changed
+    if (activeTab.title !== newTitle) {
+      updateTabTitle(activeTab.id, newTitle);
+    }
+  }, [selectedCustomer, updateTabTitle, activeTabId, tabs, showEditModal]);
+
   // Fetch sales orders
   const {
     data: salesOrdersData,
@@ -411,13 +448,7 @@ const totalProfit = useMemo(() => {
     setIsRemovingFromCart({});
     setIsSortingItems(false);
     
-    // Reset tab title to default
-    if (updateTabTitle && getActiveTab) {
-      const activeTab = getActiveTab();
-      if (activeTab) {
-        updateTabTitle(activeTab.id, 'SO');
-      }
-    }
+    // Tab title will be updated by useEffect when selectedCustomer changes
   };
 
   const handleCustomerSelect = (customerId) => {
@@ -437,13 +468,7 @@ const totalProfit = useMemo(() => {
     setIsLastPricesApplied(false);
     setPriceStatus({});
     
-    // Update tab title to show customer name
-    if (updateTabTitle && getActiveTab && customer) {
-      const activeTab = getActiveTab();
-      if (activeTab) {
-        updateTabTitle(activeTab.id, `SO - ${customer.businessName || customer.name || 'Unknown'}`);
-      }
-    }
+    // Tab title will be updated by useEffect when selectedCustomer changes
   };
 
   const handleCustomerSearch = (searchTerm) => {
@@ -459,12 +484,7 @@ const totalProfit = useMemo(() => {
         orderNumber: autoGenerateOrderNumber ? generateOrderNumber(null) : prev.orderNumber
       }));
       
-      if (updateTabTitle && getActiveTab) {
-        const activeTab = getActiveTab();
-        if (activeTab) {
-          updateTabTitle(activeTab.id, 'SO');
-        }
-      }
+      // Tab title will be updated by useEffect when selectedCustomer changes
     }
   };
 
@@ -1018,12 +1038,7 @@ const totalProfit = useMemo(() => {
       .then(() => {
         resetForm();
         showSuccessToast('Sales order created successfully');
-        if (updateTabTitle && getActiveTab) {
-          const activeTab = getActiveTab();
-          if (activeTab) {
-            updateTabTitle(activeTab.id, 'SO');
-          }
-        }
+        // Tab title will be updated by useEffect when selectedCustomer is reset
         refetch();
       })
       .catch((error) => {
@@ -1055,12 +1070,7 @@ const totalProfit = useMemo(() => {
         setModalSelectedSuggestionIndex(-1);
         resetForm();
         showSuccessToast('Sales order updated successfully');
-        if (updateTabTitle && getActiveTab) {
-          const activeTab = getActiveTab();
-          if (activeTab) {
-            updateTabTitle(activeTab.id, 'SO');
-          }
-        }
+        // Tab title will be updated by useEffect when selectedCustomer is reset
         refetch();
       })
       .catch((error) => {
@@ -1361,30 +1371,16 @@ const totalProfit = useMemo(() => {
     });
     setAutoGenerateOrderNumber(!(order.soNumber || order.orderNumber || order.invoiceNumber));
     
-    // Set the selected customer and update tab title
+    // Set the selected customer
     if (order.customer) {
       setSelectedCustomer(order.customer);
       setCustomerSearchTerm(order.customer.businessName || order.customer.name || '');
-      
-      // Update tab title to show customer name
-      if (updateTabTitle && getActiveTab) {
-        const activeTab = getActiveTab();
-        if (activeTab) {
-          updateTabTitle(activeTab.id, `SO - ${order.customer.businessName || order.customer.name || 'Unknown'}`);
-        }
-      }
+      // Tab title will be updated by useEffect when selectedCustomer changes
     } else {
       setSelectedCustomer(null);
       setCustomerSearchTerm('');
       setIsSelectingCustomer(true);
-      
-      // Reset tab title to default
-      if (updateTabTitle && getActiveTab) {
-        const activeTab = getActiveTab();
-        if (activeTab) {
-          updateTabTitle(activeTab.id, 'SO');
-        }
-      }
+      // Tab title will be updated by useEffect when selectedCustomer changes
     }
     
     setShowEditModal(true);
@@ -1812,13 +1808,7 @@ const totalProfit = useMemo(() => {
                           setIsLastPricesApplied(false);
                           setPriceStatus({});
                           
-                          // Reset tab title to default
-                          if (updateTabTitle && getActiveTab) {
-                            const activeTab = getActiveTab();
-                            if (activeTab) {
-                              updateTabTitle(activeTab.id, 'SO');
-                            }
-                          }
+                          // Tab title will be updated by useEffect when selectedCustomer changes
                         }}
                         className="text-xs text-blue-600 hover:text-blue-800 underline"
                         title="Change customer"

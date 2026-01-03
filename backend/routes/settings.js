@@ -1,15 +1,14 @@
 const express = require('express');
 const router = express.Router();
-const Settings = require('../models/Settings');
-const User = require('../models/User');
 const { auth } = require('../middleware/auth');
+const settingsService = require('../services/settingsService');
 
 // @route   GET /api/settings/company
 // @desc    Get company settings
 // @access  Private
 router.get('/company', auth, async (req, res) => {
   try {
-    const settings = await Settings.getSettings();
+    const settings = await settingsService.getCompanySettings();
     res.json({
       success: true,
       data: settings
@@ -45,29 +44,7 @@ router.put('/company', auth, async (req, res) => {
       defaultTaxRate
     } = req.body;
 
-    // Validation
-    if (!companyName || !contactNumber || !address) {
-      return res.status(400).json({
-        success: false,
-        message: 'Company name, contact number, and address are required'
-      });
-    }
-
-    const updates = {};
-    if (companyName) updates.companyName = companyName;
-    if (contactNumber) updates.contactNumber = contactNumber;
-    if (address) updates.address = address;
-    if (email !== undefined) updates.email = email;
-    if (website !== undefined) updates.website = website;
-    if (taxId !== undefined) updates.taxId = taxId;
-    if (registrationNumber !== undefined) updates.registrationNumber = registrationNumber;
-    if (currency) updates.currency = currency;
-    if (dateFormat) updates.dateFormat = dateFormat;
-    if (timeFormat) updates.timeFormat = timeFormat;
-    if (fiscalYearStart) updates.fiscalYearStart = fiscalYearStart;
-    if (defaultTaxRate !== undefined) updates.defaultTaxRate = defaultTaxRate;
-
-    const settings = await Settings.updateSettings(updates);
+    const settings = await settingsService.updateCompanySettings(req.body);
 
     res.json({
       success: true,
@@ -75,6 +52,12 @@ router.put('/company', auth, async (req, res) => {
       data: settings
     });
   } catch (error) {
+    if (error.message === 'Company name, contact number, and address are required') {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
     console.error('Update company settings error:', error);
     res.status(500).json({
       success: false,
@@ -89,20 +72,19 @@ router.put('/company', auth, async (req, res) => {
 // @access  Private
 router.get('/preferences', auth, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('preferences');
+    const preferences = await settingsService.getUserPreferences(req.user.id);
     
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-
     res.json({
       success: true,
-      data: user.preferences || {}
+      data: preferences
     });
   } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({
+        success: false,
+        message: error.message
+      });
+    }
     console.error('Get user preferences error:', error);
     res.status(500).json({
       success: false,
@@ -117,32 +99,20 @@ router.get('/preferences', auth, async (req, res) => {
 // @access  Private
 router.put('/preferences', auth, async (req, res) => {
   try {
-    const { theme, language, timezone } = req.body;
-
-    const updates = {};
-    if (theme) updates['preferences.theme'] = theme;
-    if (language) updates['preferences.language'] = language;
-    if (timezone) updates['preferences.timezone'] = timezone;
-
-    const user = await User.findByIdAndUpdate(
-      req.user.id,
-      { $set: updates },
-      { new: true, runValidators: true }
-    ).select('preferences');
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
+    const preferences = await settingsService.updateUserPreferences(req.user.id, req.body);
 
     res.json({
       success: true,
       message: 'User preferences updated successfully',
-      data: user.preferences
+      data: preferences
     });
   } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({
+        success: false,
+        message: error.message
+      });
+    }
     console.error('Update user preferences error:', error);
     res.status(500).json({
       success: false,

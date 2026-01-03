@@ -3,11 +3,22 @@ import { api } from '../api';
 export const productsApi = api.injectEndpoints({
   endpoints: (builder) => ({
     getProducts: builder.query({
-      query: (params) => ({
-        url: 'products',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'products',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: (result) => {
         const list =
           result?.data?.products ||
@@ -186,6 +197,7 @@ export const {
   useImportExcelMutation,
   useImportCSVMutation,
   useLazyDownloadFileQuery,
+  useDownloadTemplateQuery,
   useLazyDownloadTemplateQuery,
 } = productsApi;
 

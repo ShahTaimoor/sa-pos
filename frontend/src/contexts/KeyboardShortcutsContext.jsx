@@ -28,7 +28,7 @@ export const KeyboardShortcutsProvider = ({ children, customShortcuts = {} }) =>
       const saved = localStorage.getItem('keyboardShortcuts');
       return saved ? JSON.parse(saved) : {};
     } catch (error) {
-      console.error('Error loading keyboard shortcuts:', error);
+      // Error loading keyboard shortcuts - silent fail
       return {};
     }
   }, []);
@@ -241,7 +241,7 @@ export const KeyboardShortcutsProvider = ({ children, customShortcuts = {} }) =>
   useEffect(() => {
     const conflicts = detectConflicts(configuredShortcuts);
     if (conflicts.length > 0) {
-      console.warn('Keyboard shortcut conflicts detected:', conflicts);
+      // Keyboard shortcut conflicts detected - handled silently
     }
   }, [configuredShortcuts]);
 
@@ -269,7 +269,7 @@ export const KeyboardShortcutsProvider = ({ children, customShortcuts = {} }) =>
       try {
         localStorage.setItem('keyboardShortcuts', JSON.stringify(updated));
       } catch (error) {
-        console.error('Error saving keyboard shortcuts:', error);
+        // Error saving keyboard shortcuts - silent fail
       }
       return updated;
     });
@@ -281,7 +281,7 @@ export const KeyboardShortcutsProvider = ({ children, customShortcuts = {} }) =>
     try {
       localStorage.removeItem('keyboardShortcuts');
     } catch (error) {
-      console.error('Error resetting keyboard shortcuts:', error);
+      // Error resetting keyboard shortcuts - silent fail
     }
   }, []);
 

@@ -1,7 +1,6 @@
-const Sales = require('../models/Sales');
-const Product = require('../models/Product');
-const Investor = require('../models/Investor');
-const ProfitShare = require('../models/ProfitShare');
+const ProductRepository = require('../repositories/ProductRepository');
+const InvestorRepository = require('../repositories/InvestorRepository');
+const ProfitShareRepository = require('../repositories/ProfitShareRepository');
 
 class ProfitDistributionService {
   constructor() {
@@ -36,7 +35,9 @@ class ProfitDistributionService {
       for (const item of order.items) {
         try {
           // Get product with investors
-          const product = await Product.findById(item.product).populate('investors.investor');
+          const product = await ProductRepository.findById(item.product, {
+            populate: [{ path: 'investors.investor' }]
+          });
           
           if (!product) {
             distributionResults.errors.push({
@@ -101,7 +102,7 @@ class ProfitDistributionService {
             
             let profitShare;
             try {
-              profitShare = await ProfitShare.create({
+              profitShare = await ProfitShareRepository.create({
                 order: order._id,
                 orderNumber: order.orderNumber,
                 orderDate: order.createdAt || new Date(),
@@ -136,7 +137,7 @@ class ProfitDistributionService {
 
             // Update investor earnings immediately after creating the record
             try {
-              const investor = await Investor.findById(invDetail.investor);
+              const investor = await InvestorRepository.findById(invDetail.investor);
               if (investor) {
                 await investor.addProfit(invDetail.shareAmount);
                 distributionResults.investorsUpdated.push({
@@ -189,47 +190,41 @@ class ProfitDistributionService {
    * Get profit shares for a specific order
    */
   async getProfitSharesForOrder(orderId) {
-    return await ProfitShare.find({ order: orderId })
-      .populate('product', 'name')
-      .populate('investor', 'name email')
-      .populate('investors.investor', 'name email')
-      .sort({ createdAt: -1 });
+    return await ProfitShareRepository.findByOrder(orderId, {
+      populate: [
+        { path: 'product', select: 'name' },
+        { path: 'investor', select: 'name email' },
+        { path: 'investors.investor', select: 'name email' }
+      ],
+      sort: { createdAt: -1 }
+    });
   }
 
   /**
    * Get profit shares for a specific investor
    */
   async getProfitSharesForInvestor(investorId, startDate, endDate) {
-    const query = { 
-      $or: [
-        { investor: investorId },
-        { 'investors.investor': investorId }
-      ]
-    };
-    if (startDate || endDate) {
-      query.orderDate = {};
-      if (startDate) query.orderDate.$gte = new Date(startDate);
-      if (endDate) query.orderDate.$lte = new Date(endDate);
-    }
-    return await ProfitShare.find(query)
-      .populate('order', 'orderNumber')
-      .populate('product', 'name')
-      .populate('investor', 'name email')
-      .sort({ orderDate: -1 });
+    return await ProfitShareRepository.findByInvestor(investorId, {
+      startDate,
+      endDate,
+      populate: [
+        { path: 'order', select: 'orderNumber' },
+        { path: 'product', select: 'name' },
+        { path: 'investor', select: 'name email' }
+      ],
+      sort: { orderDate: -1 }
+    });
   }
 
   /**
    * Get summary statistics
    */
   async getProfitSummary(startDate, endDate) {
-    const query = {};
-    if (startDate || endDate) {
-      query.orderDate = {};
-      if (startDate) query.orderDate.$gte = new Date(startDate);
-      if (endDate) query.orderDate.$lte = new Date(endDate);
-    }
-
-    const shares = await ProfitShare.find(query);
+    const shares = await ProfitShareRepository.findByDateRange({
+      startDate,
+      endDate,
+      lean: true
+    });
     
     return {
       totalOrders: new Set(shares.map(s => s.order.toString())).size,

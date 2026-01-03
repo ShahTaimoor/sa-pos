@@ -46,6 +46,14 @@ import { getComponentInfo } from '../utils/componentUtils';
 import { formatDate, formatCurrency } from '../utils/formatters';
 import { useCompanyInfo } from '../hooks/useCompanyInfo';
 
+// Helper function to get local date in YYYY-MM-DD format (avoids timezone issues with toISOString)
+const getLocalDateString = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 // Helper function to safely render values
 const safeRender = (value) => {
   if (value === null || value === undefined) return '';
@@ -215,10 +223,16 @@ export const PurchaseOrders = ({ tabId }) => {
   const resolvedCompanyAddress = companySettings.address || companySettings.billingAddress || '';
   const resolvedCompanyPhone = companySettings.contactNumber || '';
   
+  // Calculate default date range (14 days ago to today)
+  const today = getLocalDateString();
+  const fourteenDaysAgo = new Date();
+  fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+  const fromDateDefault = getLocalDateString(fourteenDaysAgo);
+  
   // State for filters and pagination
   const [filters, setFilters] = useState({
-    fromDate: new Date().toISOString().split('T')[0],
-    toDate: new Date().toISOString().split('T')[0],
+    fromDate: fromDateDefault, // 14 days ago
+    toDate: today, // Today
     poNumber: '',
     supplier: '',
     status: '',
@@ -762,7 +776,7 @@ export const PurchaseOrders = ({ tabId }) => {
           try {
             refetchSuppliers();
           } catch (error) {
-            console.warn('Failed to refetch suppliers:', error);
+            // Failed to refetch suppliers - silent fail
           }
         }
         
@@ -813,13 +827,13 @@ export const PurchaseOrders = ({ tabId }) => {
             }).catch((error) => {
               // Ignore "Cannot refetch a query that has not been started yet" errors
               if (!error?.message?.includes('has not been started')) {
-                console.warn('Failed to refetch supplier:', error);
+                // Failed to refetch supplier - silent fail
               }
             });
           } catch (error) {
             // Ignore "Cannot refetch a query that has not been started yet" errors
             if (!error?.message?.includes('has not been started')) {
-              console.warn('Failed to call refetchSupplier:', error);
+              // Failed to call refetchSupplier - silent fail
             }
           }
         }
@@ -829,7 +843,7 @@ export const PurchaseOrders = ({ tabId }) => {
           try {
             refetchSuppliers();
           } catch (error) {
-            console.warn('Failed to refetch suppliers:', error);
+            // Failed to refetch suppliers - silent fail
           }
         }
         

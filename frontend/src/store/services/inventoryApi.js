@@ -3,11 +3,22 @@ import { api } from '../api';
 export const inventoryApi = api.injectEndpoints({
   endpoints: (builder) => ({
     getInventory: builder.query({
-      query: (params) => ({
-        url: 'inventory',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'inventory',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: (result) =>
         result?.data?.items
           ? [
@@ -48,11 +59,22 @@ export const inventoryApi = api.injectEndpoints({
     }),
     // Inventory Alerts
     getLowStockAlerts: builder.query({
-      query: (params) => ({
-        url: 'inventory-alerts',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'inventory-alerts',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: [{ type: 'Inventory', id: 'ALERTS' }],
     }),
     getAlertSummary: builder.query({
@@ -68,23 +90,49 @@ export const inventoryApi = api.injectEndpoints({
         method: 'post',
         params,
       }),
-      invalidatesTags: [{ type: 'Inventory', id: 'ALERTS' }, { type: 'Inventory', id: 'ALERTS_SUMMARY' }, { type: 'PurchaseOrders', id: 'LIST' }],
+      invalidatesTags: [
+        { type: 'Inventory', id: 'ALERTS' },
+        { type: 'Inventory', id: 'ALERTS_SUMMARY' },
+        { type: 'Orders', id: 'PO_LIST' },
+      ],
     }),
     // Stock Movements
     getStockMovements: builder.query({
-      query: (params) => ({
-        url: 'stock-movements',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'stock-movements',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: [{ type: 'Inventory', id: 'MOVEMENTS' }],
     }),
     getStockMovementStats: builder.query({
-      query: (params) => ({
-        url: 'stock-movements/stats/overview',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'stock-movements/stats/overview',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: [{ type: 'Inventory', id: 'MOVEMENTS_STATS' }],
     }),
     createStockMovement: builder.mutation({
@@ -113,11 +161,22 @@ export const inventoryApi = api.injectEndpoints({
     }),
     // Inventory Reports
     getReports: builder.query({
-      query: (params) => ({
-        url: 'inventory-reports',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'inventory-reports',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: [{ type: 'Inventory', id: 'REPORTS' }],
     }),
     getReport: builder.query({
@@ -129,33 +188,66 @@ export const inventoryApi = api.injectEndpoints({
     }),
     getQuickSummary: builder.query({
       query: () => ({
-        url: 'inventory-reports/quick-summary',
+        url: 'inventory-reports/quick/summary',
         method: 'get',
       }),
       providesTags: [{ type: 'Inventory', id: 'REPORTS_SUMMARY' }],
     }),
     getQuickStockLevels: builder.query({
-      query: (params) => ({
-        url: 'inventory-reports/quick-stock-levels',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'inventory-reports/quick/stock-levels',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: [{ type: 'Inventory', id: 'REPORTS_STOCK_LEVELS' }],
     }),
     getQuickTurnoverRates: builder.query({
-      query: (params) => ({
-        url: 'inventory-reports/quick-turnover-rates',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'inventory-reports/quick/turnover-rates',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: [{ type: 'Inventory', id: 'REPORTS_TURNOVER' }],
     }),
     getQuickAgingAnalysis: builder.query({
-      query: (params) => ({
-        url: 'inventory-reports/quick-aging-analysis',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'inventory-reports/quick/aging-analysis',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: [{ type: 'Inventory', id: 'REPORTS_AGING' }],
     }),
     createReport: builder.mutation({

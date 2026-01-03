@@ -17,7 +17,7 @@ class AsyncErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error('AsyncErrorBoundary caught an error:', error, errorInfo);
+    // Error handled by error boundary UI
   }
 
   handleRetry = async () => {

@@ -1,6 +1,5 @@
-const Customer = require('../models/Customer');
-const Sales = require('../models/Sales');
-const PurchaseOrder = require('../models/PurchaseOrder');
+const CustomerRepository = require('../repositories/CustomerRepository');
+const SalesRepository = require('../repositories/SalesRepository');
 
 /**
  * Customer Analytics Service
@@ -18,12 +17,13 @@ class CustomerAnalyticsService {
       const customerId = customer && customer._id ? customer._id : customer;
       
       // Get sales data for this customer
-      const sales = await Sales.find({
+      const sales = await SalesRepository.findAll({
         customer: customerId,
         status: 'completed'
-      })
-        .sort({ createdAt: -1 })
-        .lean();
+      }, {
+        sort: { createdAt: -1 },
+        lean: true
+      });
 
       if (!sales || sales.length === 0) {
         return {
@@ -263,9 +263,12 @@ class CustomerAnalyticsService {
       
       // Get customer age (days since first purchase)
       const customerId = customer && customer._id ? customer._id : customer;
-      const firstSale = await Sales.findOne({ customer: customerId })
-        .sort({ createdAt: 1 })
-        .lean();
+      const sales = await SalesRepository.findAll({ customer: customerId }, {
+        sort: { createdAt: 1 },
+        limit: 1,
+        lean: true
+      });
+      const firstSale = sales.length > 0 ? sales[0] : null;
       
       if (!firstSale) {
         return {
@@ -484,7 +487,7 @@ class CustomerAnalyticsService {
         customerQuery.status = 'active';
       }
 
-      const customers = await Customer.find(customerQuery).lean();
+      const customers = await CustomerRepository.findAll(customerQuery, { lean: true });
 
       const analytics = {
         totalCustomers: customers.length,
@@ -575,7 +578,7 @@ class CustomerAnalyticsService {
    */
   static async getCustomerAnalytics(customerId) {
     try {
-      const customer = await Customer.findById(customerId);
+      const customer = await CustomerRepository.findById(customerId);
       if (!customer) {
         throw new Error('Customer not found');
       }

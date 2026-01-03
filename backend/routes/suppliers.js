@@ -7,9 +7,11 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
-const Supplier = require('../models/Supplier');
 const { auth, requirePermission } = require('../middleware/auth');
 const ledgerAccountService = require('../services/ledgerAccountService');
+const supplierService = require('../services/supplierService');
+const supplierRepository = require('../repositories/SupplierRepository');
+const Supplier = require('../models/Supplier'); // Still needed for new Supplier() in transaction helpers
 
 const router = express.Router();
 
@@ -87,7 +89,7 @@ const saveSupplierWithLedger = async (supplierData, userId) => {
     await session.commitTransaction();
     session.endSession();
 
-    supplier = await Supplier.findById(supplier._id).populate('ledgerAccount', 'accountCode accountName');
+    supplier = await supplierService.getSupplierByIdWithLedger(supplier._id);
     return supplier;
   } catch (error) {
     await session.abortTransaction();
@@ -100,7 +102,7 @@ const updateSupplierWithLedger = async (supplierId, updateData, userId) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const supplier = await Supplier.findById(supplierId).session(session);
+    const supplier = await supplierRepository.findById(supplierId, { session });
 
     if (!supplier) {
       await session.abortTransaction();
@@ -128,7 +130,7 @@ const updateSupplierWithLedger = async (supplierId, updateData, userId) => {
     await session.commitTransaction();
     session.endSession();
 
-    return Supplier.findById(supplier._id).populate('ledgerAccount', 'accountCode accountName');
+    return supplierService.getSupplierByIdWithLedger(supplier._id);
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -140,7 +142,7 @@ const deleteSupplierWithLedger = async (supplierId, userId) => {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const supplier = await Supplier.findById(supplierId).session(session);
+    const supplier = await supplierRepository.findById(supplierId, { session });
 
     if (!supplier) {
       await session.abortTransaction();
@@ -203,107 +205,12 @@ router.get('/', [
       });
     }
 
-    // Check if all suppliers are requested (no pagination)
-    const getAllSuppliers = req.query.all === 'true' || req.query.all === true || 
-                          (req.query.limit && parseInt(req.query.limit) >= 999999);
-    
-    const page = getAllSuppliers ? 1 : (parseInt(req.query.page) || 1);
-    const limit = getAllSuppliers ? 999999 : (parseInt(req.query.limit) || 20);
-    const skip = getAllSuppliers ? 0 : ((page - 1) * limit);
-
-    // Build filter
-    const filter = {};
-    
-    if (req.query.search) {
-      filter.$or = [
-        { companyName: { $regex: req.query.search, $options: 'i' } },
-        { 'contactPerson.name': { $regex: req.query.search, $options: 'i' } },
-        { email: { $regex: req.query.search, $options: 'i' } }
-      ];
-    }
-    
-    if (req.query.businessType && req.query.businessType !== '') {
-      filter.businessType = req.query.businessType;
-    }
-    
-    if (req.query.status && req.query.status !== '') {
-      filter.status = req.query.status;
-    }
-    
-    if (req.query.reliability && req.query.reliability !== '') {
-      filter.reliability = req.query.reliability;
-    }
-
-    // Email status filter
-    if (req.query.emailStatus) {
-      switch (req.query.emailStatus) {
-        case 'verified':
-          filter.emailVerified = true;
-          break;
-        case 'unverified':
-          filter.emailVerified = false;
-          filter.email = { $exists: true, $ne: '' };
-          break;
-        case 'no-email':
-          filter.$or = [
-            { email: { $exists: false } },
-            { email: '' },
-            { email: null }
-          ];
-          break;
-      }
-    }
-
-    // Phone status filter
-    if (req.query.phoneStatus) {
-      switch (req.query.phoneStatus) {
-        case 'verified':
-          filter.phoneVerified = true;
-          break;
-        case 'unverified':
-          filter.phoneVerified = false;
-          filter.phone = { $exists: true, $ne: '' };
-          break;
-        case 'no-phone':
-          filter.$or = [
-            { phone: { $exists: false } },
-            { phone: '' },
-            { phone: null }
-          ];
-          break;
-      }
-    }
-    
-    let query = Supplier.find(filter)
-      .sort({ createdAt: -1 });
-    
-    // Only apply skip and limit if not getting all suppliers
-    if (!getAllSuppliers) {
-      query = query.skip(skip).limit(limit);
-    }
-    
-    const suppliers = await query;
-    const total = await Supplier.countDocuments(filter);
-    
-    
-    // Transform supplier names to uppercase
-    const transformedSuppliers = suppliers.map(transformSupplierToUppercase);
+    // Call service to get suppliers
+    const result = await supplierService.getSuppliers(req.query);
     
     res.json({
-      suppliers: transformedSuppliers,
-      pagination: getAllSuppliers ? {
-        current: 1,
-        pages: 1,
-        total,
-        hasNext: false,
-        hasPrev: false
-      } : {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page < Math.ceil(total / limit),
-        hasPrev: page > 1
-      }
+      suppliers: result.suppliers,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Get suppliers error:', error);
@@ -316,14 +223,12 @@ router.get('/', [
 // @access  Private
 router.get('/:id', auth, async (req, res) => {
   try {
-    const supplier = await Supplier.findById(req.params.id);
-    
-    if (!supplier) {
+    const supplier = await supplierService.getSupplierById(req.params.id);
+    res.json({ supplier });
+  } catch (error) {
+    if (error.message === 'Supplier not found') {
       return res.status(404).json({ message: 'Supplier not found' });
     }
-    
-    res.json({ supplier: transformSupplierToUppercase(supplier) });
-  } catch (error) {
     console.error('Get supplier error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -433,7 +338,7 @@ router.put('/:id', [
 });
 
 // @route   DELETE /api/suppliers/:id
-// @desc    Delete supplier
+// @desc    Delete supplier (soft delete)
 // @access  Private
 router.delete('/:id', [
   auth,
@@ -453,26 +358,55 @@ router.delete('/:id', [
   }
 });
 
+// @route   POST /api/suppliers/:id/restore
+// @desc    Restore soft-deleted supplier
+// @access  Private
+router.post('/:id/restore', [
+  auth,
+  requirePermission('delete_suppliers')
+], async (req, res) => {
+  try {
+    const supplierRepository = require('../repositories/SupplierRepository');
+    const supplier = await supplierRepository.findDeletedById(req.params.id);
+    if (!supplier) {
+      return res.status(404).json({ message: 'Deleted supplier not found' });
+    }
+    
+    await supplierRepository.restore(req.params.id);
+    res.json({ message: 'Supplier restored successfully' });
+  } catch (error) {
+    console.error('Restore supplier error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/suppliers/deleted
+// @desc    Get all deleted suppliers
+// @access  Private
+router.get('/deleted', [
+  auth,
+  requirePermission('view_suppliers')
+], async (req, res) => {
+  try {
+    const supplierRepository = require('../repositories/SupplierRepository');
+    const deletedSuppliers = await supplierRepository.findDeleted({}, {
+      sort: { deletedAt: -1 }
+    });
+    res.json(deletedSuppliers);
+  } catch (error) {
+    console.error('Get deleted suppliers error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // @route   GET /api/suppliers/search/:query
 // @desc    Search suppliers by company name, contact person, or email
 // @access  Private
 router.get('/search/:query', auth, async (req, res) => {
   try {
     const query = req.params.query;
-    
-    const suppliers = await Supplier.find({
-      $or: [
-        { companyName: { $regex: query, $options: 'i' } },
-        { 'contactPerson.name': { $regex: query, $options: 'i' } },
-        { email: { $regex: query, $options: 'i' } }
-      ]
-    })
-    .select('companyName contactPerson email phone businessType paymentTerms rating reliability pendingBalance advanceBalance')
-    .limit(10);
-    
-    // Transform supplier names to uppercase
-    const transformedSuppliers = suppliers.map(transformSupplierToUppercase);
-    res.json({ suppliers: transformedSuppliers });
+    const suppliers = await supplierService.searchSuppliers(query, 10);
+    res.json({ suppliers });
   } catch (error) {
     console.error('Search suppliers error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -498,10 +432,10 @@ router.get('/check-email/:email', auth, async (req, res) => {
       query._id = { $ne: excludeId };
     }
     
-    const existingSupplier = await Supplier.findOne(query);
+    const exists = await supplierService.supplierExists(query);
     
     res.json({ 
-      exists: !!existingSupplier,
+      exists,
       email: emailLower
     });
   } catch (error) {
@@ -522,18 +456,11 @@ router.get('/check-company-name/:companyName', auth, async (req, res) => {
       return res.json({ exists: false });
     }
     
-    // Use case-insensitive search (company names are stored in uppercase via transform)
-    const companyNameTrimmed = companyName.trim();
-    const query = { companyName: { $regex: new RegExp(`^${companyNameTrimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } };
-    if (excludeId && isValidObjectId(excludeId)) {
-      query._id = { $ne: excludeId };
-    }
-    
-    const existingSupplier = await Supplier.findOne(query);
+    const exists = await supplierService.checkCompanyNameExists(companyName, excludeId);
     
     res.json({ 
-      exists: !!existingSupplier,
-      companyName: companyNameTrimmed
+      exists,
+      companyName: companyName.trim()
     });
   } catch (error) {
     console.error('Check company name error:', error);
@@ -560,10 +487,10 @@ router.get('/check-contact-name/:contactName', auth, async (req, res) => {
       query._id = { $ne: excludeId };
     }
     
-    const existingSupplier = await Supplier.findOne(query);
+    const exists = await supplierService.supplierExists(query);
     
     res.json({ 
-      exists: !!existingSupplier,
+      exists,
       contactName: contactNameTrimmed
     });
   } catch (error) {
@@ -616,8 +543,8 @@ router.post('/', [
     
     // Check if supplier with same email already exists (only if email is provided)
     if (supplierData.email) {
-      const existingSupplier = await Supplier.findOne({ email: supplierData.email });
-      if (existingSupplier) {
+      const emailExists = await supplierService.supplierExists({ email: supplierData.email });
+      if (emailExists) {
         return res.status(400).json({ 
           message: 'Supplier with this email already exists' 
         });
@@ -645,9 +572,7 @@ router.post('/', [
 // @access  Private
 router.get('/active/list', auth, async (req, res) => {
   try {
-    const suppliers = await Supplier.find({})
-      .select('companyName contactPerson email phone businessType paymentTerms rating pendingBalance advanceBalance')
-      .sort({ companyName: 1 });
+    const suppliers = await supplierService.getAllSuppliers({ status: 'active' });
     
     // Transform supplier names to uppercase
     const transformedSuppliers = suppliers.map(transformSupplierToUppercase);
@@ -724,11 +649,11 @@ router.post('/import/excel', [
         }
         
         // Check if supplier already exists
-        const existingSupplier = await Supplier.findOne({ 
+        const supplierExists = await supplierService.supplierExists({ 
           companyName: supplierData.companyName.toString().trim()
         });
         
-        if (existingSupplier) {
+        if (supplierExists) {
           results.errors.push({
             row: i + 2,
             error: `Supplier already exists with company name: ${supplierData.companyName}`
@@ -794,7 +719,7 @@ router.post('/export/excel', [auth, requirePermission('view_suppliers')], async 
     if (filters.status) query.status = filters.status;
     if (filters.reliability) query.reliability = filters.reliability;
     
-    const suppliers = await Supplier.find(query).lean();
+    const suppliers = await supplierService.getSuppliersForExport(query);
     
     // Prepare Excel data
     const excelData = suppliers.map(supplier => ({

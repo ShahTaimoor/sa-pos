@@ -1,14 +1,22 @@
 const express = require('express');
 const router = express.Router();
-const Sales = require('../models/Sales');
-const PurchaseInvoice = require('../models/PurchaseInvoice');
-const SalesOrder = require('../models/SalesOrder');
-const PurchaseOrder = require('../models/PurchaseOrder');
-const CashReceipt = require('../models/CashReceipt');
-const CashPayment = require('../models/CashPayment');
-const BankReceipt = require('../models/BankReceipt');
-const BankPayment = require('../models/BankPayment');
+const Sales = require('../models/Sales'); // Still needed for model reference
+const PurchaseInvoice = require('../models/PurchaseInvoice'); // Still needed for model reference
+const SalesOrder = require('../models/SalesOrder'); // Still needed for model reference
+const PurchaseOrder = require('../models/PurchaseOrder'); // Still needed for model reference
+const CashReceipt = require('../models/CashReceipt'); // Still needed for model reference
+const CashPayment = require('../models/CashPayment'); // Still needed for model reference
+const BankReceipt = require('../models/BankReceipt'); // Still needed for model reference
+const BankPayment = require('../models/BankPayment'); // Still needed for model reference
 const { auth } = require('../middleware/auth');
+const salesOrderRepository = require('../repositories/SalesOrderRepository');
+const purchaseOrderRepository = require('../repositories/PurchaseOrderRepository');
+const cashReceiptRepository = require('../repositories/CashReceiptRepository');
+const cashPaymentRepository = require('../repositories/CashPaymentRepository');
+const bankReceiptRepository = require('../repositories/BankReceiptRepository');
+const bankPaymentRepository = require('../repositories/BankPaymentRepository');
+const salesRepository = require('../repositories/SalesRepository');
+const purchaseInvoiceRepository = require('../repositories/PurchaseInvoiceRepository');
 
 // Get backdate/future date report
 router.get('/', auth, async (req, res) => {
@@ -47,66 +55,106 @@ router.get('/', auth, async (req, res) => {
       purchases
     ] = await Promise.all([
       // Sales Orders - check orderDate vs createdAt
-      SalesOrder.find({
+      salesOrderRepository.findAll({
         $or: [
           { orderDate: { $lt: thirtyDaysAgo } },
           { orderDate: { $gt: thirtyDaysFuture } }
         ]
-      }).populate('customer', 'name').populate('createdBy', 'name'),
+      }, {
+        populate: [
+          { path: 'customer', select: 'name' },
+          { path: 'createdBy', select: 'name' }
+        ]
+      }),
 
       // Purchase Orders - check orderDate vs createdAt  
-      PurchaseOrder.find({
+      purchaseOrderRepository.findAll({
         $or: [
           { orderDate: { $lt: thirtyDaysAgo } },
           { orderDate: { $gt: thirtyDaysFuture } }
         ]
-      }).populate('supplier', 'name').populate('createdBy', 'name'),
+      }, {
+        populate: [
+          { path: 'supplier', select: 'name' },
+          { path: 'createdBy', select: 'name' }
+        ]
+      }),
 
       // Cash Receipts - check date vs createdAt
-      CashReceipt.find({
+      cashReceiptRepository.findAll({
         $or: [
           { date: { $lt: thirtyDaysAgo } },
           { date: { $gt: thirtyDaysFuture } }
         ]
-      }).populate('customer', 'name').populate('createdBy', 'name'),
+      }, {
+        populate: [
+          { path: 'customer', select: 'name' },
+          { path: 'createdBy', select: 'name' }
+        ]
+      }),
 
       // Cash Payments - check date vs createdAt
-      CashPayment.find({
+      cashPaymentRepository.findAll({
         $or: [
           { date: { $lt: thirtyDaysAgo } },
           { date: { $gt: thirtyDaysFuture } }
         ]
-      }).populate('supplier', 'name').populate('createdBy', 'name'),
+      }, {
+        populate: [
+          { path: 'supplier', select: 'name' },
+          { path: 'createdBy', select: 'name' }
+        ]
+      }),
 
       // Bank Receipts - check date vs createdAt
-      BankReceipt.find({
+      bankReceiptRepository.findAll({
         $or: [
           { date: { $lt: thirtyDaysAgo } },
           { date: { $gt: thirtyDaysFuture } }
         ]
-      }).populate('customer', 'name').populate('createdBy', 'name'),
+      }, {
+        populate: [
+          { path: 'customer', select: 'name' },
+          { path: 'createdBy', select: 'name' }
+        ]
+      }),
 
       // Bank Payments - check date vs createdAt
-      BankPayment.find({
+      bankPaymentRepository.findAll({
         $or: [
           { date: { $lt: thirtyDaysAgo } },
           { date: { $gt: thirtyDaysFuture } }
         ]
-      }).populate('supplier', 'name').populate('createdBy', 'name'),
+      }, {
+        populate: [
+          { path: 'supplier', select: 'name' },
+          { path: 'createdBy', select: 'name' }
+        ]
+      }),
 
       // Sales (Orders) - get recent entries created in the last 30 days
       // Note: Sales model doesn't have a separate transaction date field,
       // so we can only detect entries created recently (potential backdated entries)
-      Sales.find({
+      salesRepository.findAll({
         createdAt: { $gte: thirtyDaysAgo }
-      }).populate('customer', 'name').populate('createdBy', 'name'),
+      }, {
+        populate: [
+          { path: 'customer', select: 'name' },
+          { path: 'createdBy', select: 'name' }
+        ]
+      }),
 
       // Purchases (Purchase Invoices) - get recent entries created in the last 30 days
       // Note: PurchaseInvoice model doesn't have a separate invoice date field,
       // so we can only detect entries created recently (potential backdated entries)
-      PurchaseInvoice.find({
+      purchaseInvoiceRepository.findAll({
         createdAt: { $gte: thirtyDaysAgo }
-      }).populate('supplier', 'name').populate('createdBy', 'name')
+      }, {
+        populate: [
+          { path: 'supplier', select: 'name' },
+          { path: 'createdBy', select: 'name' }
+        ]
+      })
     ]);
 
     // Format entries for the report

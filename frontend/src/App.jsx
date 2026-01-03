@@ -21,7 +21,7 @@ const Sales = lazy(() => import('./pages/Sales').then(m => ({ default: m.Sales }
 const PurchaseOrders = lazy(() => import('./pages/PurchaseOrders').then(m => ({ default: m.PurchaseOrders })));
 const PurchaseInvoices = lazy(() => import('./pages/PurchaseInvoices').then(m => ({ default: m.PurchaseInvoices })));
 const Purchase = lazy(() => import('./pages/Purchase').then(m => ({ default: m.Purchase })));
-const Products = lazy(() => import('./pages/Products').then(m => ({ default: m.Products })));
+const Products = lazy(() => import('./pages/Products'));
 const Customers = lazy(() => import('./pages/Customers').then(m => ({ default: m.Customers })));
 const Suppliers = lazy(() => import('./pages/Suppliers').then(m => ({ default: m.Suppliers })));
 const SalesInvoices = lazy(() => import('./pages/Orders').then(m => ({ default: m.Orders })));

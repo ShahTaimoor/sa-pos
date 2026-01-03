@@ -16,12 +16,18 @@ const TabContent = () => {
       if (tab.component && typeof tab.component === 'function' && !loadedComponents[tab.id]) {
         const componentLoader = tab.component;
         componentLoader().then(Component => {
-          setLoadedComponents(prev => ({
-            ...prev,
-            [tab.id]: Component
-          }));
-        }).catch(error => {
-          console.error('Failed to load component:', error);
+          // Handle both default and named exports
+          const ComponentToUse = Component.default || Component;
+          if (ComponentToUse) {
+            setLoadedComponents(prev => ({
+              ...prev,
+              [tab.id]: ComponentToUse
+            }));
+          }
+        }).catch((error) => {
+          // Log error for debugging
+          console.error(`Failed to load component for tab ${tab.id}:`, error);
+          // Component failed to load - error handled silently
         });
       }
     });
@@ -57,14 +63,27 @@ const TabContent = () => {
         ) : null;
       }
 
-      return (
-        <div
-          key={tab.id}
-          className={`${isActive ? 'block' : 'hidden'} h-full`}
-        >
-          <TabComponent {...tab.props} />
-        </div>
-      );
+      try {
+        return (
+          <div
+            key={tab.id}
+            className={`${isActive ? 'block' : 'hidden'} h-full`}
+          >
+            <TabComponent {...tab.props} />
+          </div>
+        );
+      } catch (error) {
+        console.error(`Error rendering component for tab ${tab.id}:`, error);
+        return isActive ? (
+          <div key={tab.id} className="flex-1 flex items-center justify-center bg-gray-50">
+            <div className="text-center">
+              <div className="text-red-400 text-6xl mb-4">⚠️</div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Error Loading Component</h3>
+              <p className="text-gray-500">{error.message || 'An error occurred while loading this component'}</p>
+            </div>
+          </div>
+        ) : null;
+      }
     });
   };
 

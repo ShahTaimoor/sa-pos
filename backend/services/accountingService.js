@@ -1,6 +1,7 @@
+const TransactionRepository = require('../repositories/TransactionRepository');
+const ChartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
+const BalanceSheetRepository = require('../repositories/BalanceSheetRepository');
 const Transaction = require('../models/Transaction');
-const ChartOfAccounts = require('../models/ChartOfAccounts');
-const BalanceSheet = require('../models/BalanceSheet');
 
 class AccountingService {
   /**
@@ -9,7 +10,7 @@ class AccountingService {
    * @returns {Promise<Object>} Account object
    */
   static async validateAccount(accountCode) {
-    const account = await ChartOfAccounts.findOne({ 
+    const account = await ChartOfAccountsRepository.findOne({ 
       accountCode: accountCode.toUpperCase(),
       isActive: true 
     });
@@ -44,11 +45,11 @@ class AccountingService {
       query.accountCategory = accountCategory;
     }
     
-    const account = await ChartOfAccounts.findOne(query);
+    const account = await ChartOfAccountsRepository.findOne(query);
     
     if (!account) {
       // Fallback: Try to find by account name only
-      const fallbackAccount = await ChartOfAccounts.findOne({
+      const fallbackAccount = await ChartOfAccountsRepository.findOne({
         accountName: { $regex: new RegExp(accountName, 'i') },
         isActive: true
       });
@@ -598,7 +599,7 @@ class AccountingService {
    */
   static async getTrialBalance(asOfDate = new Date()) {
     try {
-      const accounts = await ChartOfAccounts.find({ isActive: true });
+      const accounts = await ChartOfAccountsRepository.findAll({ isActive: true });
       const trialBalance = [];
 
       for (const account of accounts) {

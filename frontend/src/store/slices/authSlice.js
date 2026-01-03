@@ -3,7 +3,7 @@ import { authApi } from '../services/authApi';
 
 const initialState = {
   user: null,
-  token: localStorage.getItem('token'),
+  token: null, // Token is stored in HTTP-only cookie, not in localStorage
   status: 'idle',
   error: null,
   isAuthenticated: false,
@@ -15,7 +15,11 @@ const authSlice = createSlice({
   reducers: {
     setUser(state, { payload }) {
       state.user = payload;
-      state.isAuthenticated = !!payload && !!state.token;
+      // If we have a user, we're authenticated (token is in HTTP-only cookie)
+      state.isAuthenticated = !!payload;
+      if (payload && !state.token) {
+        state.token = 'cookie'; // Placeholder to indicate auth via cookie
+      }
     },
     logout(state) {
       state.user = null;
@@ -23,7 +27,7 @@ const authSlice = createSlice({
       state.isAuthenticated = false;
       state.status = 'idle';
       state.error = null;
-      localStorage.removeItem('token');
+      // Token is in HTTP-only cookie, backend handles logout/clearing
     },
   },
   extraReducers: (builder) => {
@@ -34,13 +38,12 @@ const authSlice = createSlice({
       })
       .addMatcher(authApi.endpoints.login.matchFulfilled, (state, { payload }) => {
         state.user = payload.user;
-        state.token = payload.token;
+        // Token is stored in HTTP-only cookie by backend, not in localStorage
+        state.token = payload.token || 'cookie'; // Placeholder to indicate auth success
         state.isAuthenticated = true;
         state.status = 'succeeded';
         state.error = null;
-        if (payload.token) {
-          localStorage.setItem('token', payload.token);
-        }
+        // Backend should set HTTP-only cookie with token
       })
       .addMatcher(authApi.endpoints.login.matchRejected, (state, action) => {
         state.status = 'failed';
@@ -48,7 +51,8 @@ const authSlice = createSlice({
         state.isAuthenticated = false;
       })
       .addMatcher(authApi.endpoints.currentUser.matchFulfilled, (state, { payload }) => {
-        state.user = payload.user;
+        state.user = payload.user || payload;
+        state.token = 'cookie'; // Placeholder to indicate auth via HTTP-only cookie
         state.isAuthenticated = true;
         state.status = 'succeeded';
         state.error = null;

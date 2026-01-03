@@ -3,11 +3,22 @@ import { api } from '../api';
 export const employeesApi = api.injectEndpoints({
   endpoints: (builder) => ({
     getEmployees: builder.query({
-      query: (params) => ({
-        url: 'employees',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'employees',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: (result) => {
         const list = result?.data?.employees || result?.employees || result?.items || [];
         return list.length

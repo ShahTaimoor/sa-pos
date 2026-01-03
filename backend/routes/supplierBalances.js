@@ -1,8 +1,9 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
-const Supplier = require('../models/Supplier');
-const PurchaseOrder = require('../models/PurchaseOrder');
+const Supplier = require('../models/Supplier'); // Still needed for model reference
+const PurchaseOrder = require('../models/PurchaseOrder'); // Still needed for model reference
 const SupplierBalanceService = require('../services/supplierBalanceService');
+const supplierRepository = require('../repositories/SupplierRepository');
 const { auth, requirePermission } = require('../middleware/auth');
 
 const router = express.Router();
@@ -156,19 +157,25 @@ router.get('/reports/balance-issues', [
 ], async (req, res) => {
   try {
     // Find suppliers with pending balances
-    const suppliersWithPendingBalances = await Supplier.find({
+    const suppliersWithPendingBalances = await supplierRepository.findAll({
       pendingBalance: { $gt: 0 }
-    }).select('companyName contactPerson email phone pendingBalance advanceBalance creditLimit');
+    }, {
+      select: 'companyName contactPerson email phone pendingBalance advanceBalance creditLimit'
+    });
 
     // Find suppliers with advance balances
-    const suppliersWithAdvanceBalances = await Supplier.find({
+    const suppliersWithAdvanceBalances = await supplierRepository.findAll({
       advanceBalance: { $gt: 0 }
-    }).select('companyName contactPerson email phone pendingBalance advanceBalance creditLimit');
+    }, {
+      select: 'companyName contactPerson email phone pendingBalance advanceBalance creditLimit'
+    });
 
     // Find suppliers over credit limit
-    const suppliersOverCreditLimit = await Supplier.find({
+    const suppliersOverCreditLimit = await supplierRepository.findAll({
       $expr: { $gt: ['$currentBalance', '$creditLimit'] }
-    }).select('companyName contactPerson email phone currentBalance creditLimit');
+    }, {
+      select: 'companyName contactPerson email phone currentBalance creditLimit'
+    });
 
     res.json({
       success: true,
@@ -201,7 +208,7 @@ router.post('/fix-all-balances', [
   requirePermission('manage_suppliers')
 ], async (req, res) => {
   try {
-    const suppliers = await Supplier.find({});
+    const suppliers = await supplierRepository.findAll({});
     const results = [];
 
     for (const supplier of suppliers) {

@@ -1,6 +1,6 @@
 const express = require('express');
-const Sales = require('../models/Sales');
 const { auth } = require('../middleware/auth');
+const migrationService = require('../services/migrationService');
 
 const router = express.Router();
 
@@ -9,66 +9,8 @@ const router = express.Router();
 // @access  Private
 router.post('/update-invoice-prefix', auth, async (req, res) => {
   try {
-    
-    // Find all orders with ORD- prefix
-    const ordersToUpdate = await Sales.find({
-      orderNumber: { $regex: '^ORD-' }
-    });
-    
-    
-    if (ordersToUpdate.length === 0) {
-      return res.json({
-        success: true,
-        message: 'No orders found with ORD- prefix. Nothing to update.',
-        updated: 0,
-        total: 0
-      });
-    }
-    
-    // Update each order
-    let updatedCount = 0;
-    let skippedCount = 0;
-    const updates = [];
-    
-    for (const order of ordersToUpdate) {
-      const oldOrderNumber = order.orderNumber;
-      const newOrderNumber = order.orderNumber.replace('ORD-', 'SI-');
-      
-      // Check if the new order number already exists
-      const existingOrder = await Sales.findOne({ orderNumber: newOrderNumber });
-      if (existingOrder) {
-        updates.push({
-          oldNumber: oldOrderNumber,
-          newNumber: newOrderNumber,
-          status: 'skipped',
-          reason: 'Order number already exists'
-        });
-        skippedCount++;
-        continue;
-      }
-      
-      // Update the order number
-      await Sales.findByIdAndUpdate(order._id, {
-        orderNumber: newOrderNumber
-      });
-      
-      updates.push({
-        oldNumber: oldOrderNumber,
-        newNumber: newOrderNumber,
-        status: 'updated'
-      });
-      updatedCount++;
-    }
-    
-    res.json({
-      success: true,
-      message: `Update completed! Updated ${updatedCount} out of ${ordersToUpdate.length} orders.`,
-      updated: updatedCount,
-      skipped: skippedCount,
-      total: ordersToUpdate.length,
-      updates: updates
-    });
-    
+    const result = await migrationService.updateInvoicePrefix();
+    res.json(result);
   } catch (error) {
     console.error('Error updating invoice prefixes:', error);
     res.status(500).json({

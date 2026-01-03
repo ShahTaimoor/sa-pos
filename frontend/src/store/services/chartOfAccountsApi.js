@@ -63,7 +63,7 @@ export const chartOfAccountsApi = api.injectEndpoints({
     }),
     getAccountStats: builder.query({
       query: () => ({
-        url: 'chart-of-accounts/stats',
+        url: 'chart-of-accounts/stats/summary',
         method: 'get',
       }),
       providesTags: [{ type: 'ChartOfAccounts', id: 'STATS' }],

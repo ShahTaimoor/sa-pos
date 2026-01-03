@@ -14,12 +14,21 @@ import { useGetAccountsQuery } from '../store/services/chartOfAccountsApi';
 import { useCreateBatchCashReceiptsMutation } from '../store/services/cashReceiptsApi';
 import PrintModal from '../components/PrintModal';
 
+// Helper function to get local date in YYYY-MM-DD format (avoids timezone issues with toISOString)
+const getLocalDateString = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const CashReceiving = () => {
+  const today = getLocalDateString();
 
   // Voucher form state
   const [voucherData, setVoucherData] = useState({
     cashAccount: 'CASH IN HAND',
-    voucherDate: new Date().toISOString().split('T')[0],
+    voucherDate: today,
     voucherNo: '',
     paymentType: 'CASH'
   });

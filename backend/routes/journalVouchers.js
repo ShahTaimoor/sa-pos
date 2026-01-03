@@ -2,9 +2,11 @@ const express = require('express');
 const { body, query, param, validationResult } = require('express-validator');
 const mongoose = require('mongoose');
 const { auth, requirePermission } = require('../middleware/auth');
-const JournalVoucher = require('../models/JournalVoucher');
-const ChartOfAccounts = require('../models/ChartOfAccounts');
+const JournalVoucher = require('../models/JournalVoucher'); // Still needed for new JournalVoucher() and static methods
+const ChartOfAccounts = require('../models/ChartOfAccounts'); // Still needed for model reference
 const { runWithTransactionRetry } = require('../services/transactionUtils');
+const journalVoucherRepository = require('../repositories/JournalVoucherRepository');
+const chartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
 
 const router = express.Router();
 
@@ -70,18 +72,19 @@ router.get('/', [
       ];
     }
 
-    const skip = (parseInt(page, 10) - 1) * parseInt(limit, 10);
-
-    const [vouchers, total] = await Promise.all([
-      JournalVoucher.find(filter)
-        .sort({ voucherDate: -1, createdAt: -1 })
-        .skip(skip)
-        .limit(parseInt(limit, 10))
-        .populate('createdBy', 'firstName lastName email')
-        .populate('approvedBy', 'firstName lastName email')
-        .lean(),
-      JournalVoucher.countDocuments(filter)
-    ]);
+    const result = await journalVoucherRepository.findWithPagination(filter, {
+      page: parseInt(page, 10),
+      limit: parseInt(limit, 10),
+      sort: { voucherDate: -1, createdAt: -1 },
+      populate: [
+        { path: 'createdBy', select: 'firstName lastName email' },
+        { path: 'approvedBy', select: 'firstName lastName email' }
+      ],
+      lean: true
+    });
+    
+    const vouchers = result.vouchers;
+    const total = result.total;
 
     res.json({
       success: true,
@@ -111,10 +114,13 @@ router.get('/:id', [
   param('id').isMongoId().withMessage('Invalid voucher ID')
 ], withValidation, async (req, res) => {
   try {
-    const voucher = await JournalVoucher.findById(req.params.id)
-      .populate('entries.account', 'accountCode accountName accountType')
-      .populate('createdBy', 'firstName lastName email')
-      .populate('approvedBy', 'firstName lastName email');
+    const voucher = await journalVoucherRepository.findById(req.params.id, {
+      populate: [
+        { path: 'entries.account', select: 'accountCode accountName accountType' },
+        { path: 'createdBy', select: 'firstName lastName email' },
+        { path: 'approvedBy', select: 'firstName lastName email' }
+      ]
+    });
 
     if (!voucher) {
       return res.status(404).json({
@@ -154,7 +160,7 @@ router.post('/', [
     const createdBy = req.user?._id;
 
     const accountIds = entries.map(entry => entry.accountId);
-    const accounts = await ChartOfAccounts.find({ _id: { $in: accountIds } });
+    const accounts = await chartOfAccountsRepository.findAll({ _id: { $in: accountIds } });
 
     if (accounts.length !== entries.length) {
       throw new Error('One or more selected accounts were not found.');
@@ -226,16 +232,17 @@ router.post('/', [
           delta = isDebitEntry ? -amount : amount;
         }
 
-        await ChartOfAccounts.updateOne(
-          { _id: account._id },
+        await chartOfAccountsRepository.updateBalance(
+          account._id,
           { $inc: { currentBalance: delta } },
           { session }
         );
       }
 
-      return JournalVoucher.findById(journalVoucher._id)
-        .session(session)
-        .populate('createdBy', 'firstName lastName email');
+      return journalVoucherRepository.findByIdWithSession(journalVoucher._id, {
+        session,
+        populate: [{ path: 'createdBy', select: 'firstName lastName email' }]
+      });
     });
 
     res.status(201).json({

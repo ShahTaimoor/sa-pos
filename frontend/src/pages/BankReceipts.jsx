@@ -30,11 +30,20 @@ import {
 } from '../store/services/bankReceiptsApi';
 import PrintModal from '../components/PrintModal';
 
+// Helper function to get local date in YYYY-MM-DD format (avoids timezone issues with toISOString)
+const getLocalDateString = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const BankReceipts = () => {
+  const today = getLocalDateString();
   // State for filters and pagination
   const [filters, setFilters] = useState({
-    fromDate: new Date().toISOString().split('T')[0],
-    toDate: new Date().toISOString().split('T')[0],
+    fromDate: today,
+    toDate: today,
     voucherCode: '',
     amount: '',
     particular: ''
@@ -56,7 +65,7 @@ const BankReceipts = () => {
 
   // Form state
   const [formData, setFormData] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: today,
     amount: '',
     particular: '',
     bank: '',
@@ -118,7 +127,7 @@ const BankReceipts = () => {
   // Helper functions
   const resetForm = () => {
     setFormData({
-      date: new Date().toISOString().split('T')[0],
+      date: getLocalDateString(),
       amount: '',
       particular: '',
       bank: '',
@@ -177,10 +186,31 @@ const BankReceipts = () => {
   };
 
   const handleCreate = () => {
+    // Validation
+    if (!formData.amount || parseFloat(formData.amount) <= 0) {
+      showErrorToast('Please enter a valid amount');
+      return;
+    }
+
+    if (!formData.bank) {
+      showErrorToast('Please select a bank account');
+      return;
+    }
+
+    if (paymentType === 'customer' && !formData.customer) {
+      showErrorToast('Please select a customer');
+      return;
+    }
+
+    if (paymentType === 'supplier' && !formData.supplier) {
+      showErrorToast('Please select a supplier');
+      return;
+    }
+
     // Clean up form data - remove empty strings and only send fields with values
     const cleanedData = {
-      date: formData.date || new Date().toISOString().split('T')[0],
-      amount: parseFloat(formData.amount) || 0,
+      date: formData.date || getLocalDateString(),
+      amount: parseFloat(formData.amount),
       particular: formData.particular || undefined,
       bank: formData.bank,
       transactionReference: formData.transactionReference || undefined,

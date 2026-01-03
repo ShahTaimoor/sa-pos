@@ -1,9 +1,10 @@
 const mongoose = require('mongoose');
-const ChartOfAccounts = require('../models/ChartOfAccounts');
-const Customer = require('../models/Customer');
-const Supplier = require('../models/Supplier');
+const ChartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
+const CustomerRepository = require('../repositories/CustomerRepository');
+const SupplierRepository = require('../repositories/SupplierRepository');
 const AccountingService = require('./accountingService');
-const Counter = require('../models/Counter');
+const Counter = require('../models/Counter'); // Keep for findOneAndUpdate with upsert
+const ChartOfAccounts = require('../models/ChartOfAccounts'); // Keep for instance creation
 
 const isStatusActive = (status) => {
   if (!status) return true;
@@ -55,26 +56,24 @@ const createLedgerAccount = async ({
     if (err.code === 11000) {
       // Duplicate key error - account already exists, fetch and return it
       console.log('Duplicate accountCode, fetching existing account:', accountCode);
-      const findQuery = ChartOfAccounts.findOne({ accountCode });
-      if (session) {
-        findQuery.session(session);
-      }
-      const existingAccount = await findQuery;
+      const existingAccount = await ChartOfAccountsRepository.findOne(
+        { accountCode },
+        { session }
+      );
       if (existingAccount) {
         return existingAccount;
       }
-      // If not found, try upsert approach
+      // If not found, try upsert approach (using model directly for upsert)
       const updateOptions = session ? { session } : {};
       await ChartOfAccounts.updateOne(
         { accountCode },
         { $setOnInsert: accountData },
         { upsert: true, ...updateOptions }
       );
-      const findAfterUpsert = ChartOfAccounts.findOne({ accountCode });
-      if (session) {
-        findAfterUpsert.session(session);
-      }
-      return await findAfterUpsert;
+      return await ChartOfAccountsRepository.findOne(
+        { accountCode },
+        { session }
+      );
     }
     throw err;
   }
@@ -85,22 +84,21 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
 
   // Find or get the general "Accounts Receivable" account
   // Try multiple possible account codes/names that might exist
-  const findQuery = ChartOfAccounts.findOne({
-    $or: [
-      { accountCode: '1130' },
-      { accountCode: '1201' },
-      { 
-        accountName: { $regex: /^Accounts Receivable$/i },
-        accountType: 'asset',
-        accountCategory: 'current_assets'
-      }
-    ],
-    isActive: true
-  });
-  if (session) {
-    findQuery.session(session);
-  }
-  let accountsReceivableAccount = await findQuery;
+  let accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
+    {
+      $or: [
+        { accountCode: '1130' },
+        { accountCode: '1201' },
+        { 
+          accountName: { $regex: /^Accounts Receivable$/i },
+          accountType: 'asset',
+          accountCategory: 'current_assets'
+        }
+      ],
+      isActive: true
+    },
+    { session }
+  );
 
   // If Accounts Receivable doesn't exist, create it using upsert to handle duplicates
   if (!accountsReceivableAccount) {
@@ -117,39 +115,37 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
       createdBy: userId || undefined
     };
     
+    // Use model directly for upsert operation
     const updateOptions = session ? { session } : {};
-    const result = await ChartOfAccounts.updateOne(
+    await ChartOfAccounts.updateOne(
       { accountCode: '1130' },
       { $setOnInsert: accountData },
       { upsert: true, ...updateOptions }
     );
     
     // Fetch the account after upsert
-    const findQuery = ChartOfAccounts.findOne({ accountCode: '1130' });
-    if (session) {
-      findQuery.session(session);
-    }
-    accountsReceivableAccount = await findQuery;
+    accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
+      { accountCode: '1130' },
+      { session }
+    );
   }
 
   // If customer has an individual account (like "Customer - NAME"), migrate to general account
   if (customer.ledgerAccount) {
-    const findByIdQuery = ChartOfAccounts.findById(customer.ledgerAccount);
-    if (session) {
-      findByIdQuery.session(session);
-    }
-    const existingAccount = await findByIdQuery;
+    const existingAccount = await ChartOfAccountsRepository.findById(
+      customer.ledgerAccount,
+      { session }
+    );
     if (existingAccount && existingAccount.accountName?.startsWith('Customer -')) {
       // This is an individual customer account - we should migrate to the general account
       // Deactivate the individual account
-      const updateOptions = session ? { session } : {};
-      await ChartOfAccounts.findByIdAndUpdate(
+      await ChartOfAccountsRepository.updateById(
         customer.ledgerAccount,
         {
           isActive: false,
           updatedBy: userId || undefined
         },
-        updateOptions
+        { session }
       );
     }
   }
@@ -185,7 +181,7 @@ const syncSupplierLedgerAccount = async (supplier, { session, userId } = {}) => 
 
     supplier.ledgerAccount = account._id;
   } else {
-    account = await ChartOfAccounts.findByIdAndUpdate(
+    account = await ChartOfAccountsRepository.updateById(
       supplier.ledgerAccount,
       {
         accountName,
@@ -210,7 +206,7 @@ const syncSupplierLedgerAccount = async (supplier, { session, userId } = {}) => 
 
 const deactivateLedgerAccount = async (accountId, { session, userId } = {}) => {
   if (!accountId) return;
-  await ChartOfAccounts.findByIdAndUpdate(
+  await ChartOfAccountsRepository.updateById(
     accountId,
     {
       isActive: false,
@@ -222,7 +218,7 @@ const deactivateLedgerAccount = async (accountId, { session, userId } = {}) => {
 
 const ensureCustomerLedgerAccounts = async ({ userId } = {}) => {
   // Find all customers that need ledger accounts or have individual accounts
-  const customers = await Customer.find({
+  const customers = await CustomerRepository.findAll({
     $or: [
       { ledgerAccount: { $exists: false } }, 
       { ledgerAccount: null }
@@ -230,9 +226,14 @@ const ensureCustomerLedgerAccounts = async ({ userId } = {}) => {
   });
 
   // Also find customers with individual accounts to migrate them
-  const customersWithIndividualAccounts = await Customer.find({
-    ledgerAccount: { $exists: true, $ne: null }
-  }).populate('ledgerAccount');
+  const customersWithIndividualAccounts = await CustomerRepository.findAll(
+    {
+      ledgerAccount: { $exists: true, $ne: null }
+    },
+    {
+      populate: [{ path: 'ledgerAccount' }]
+    }
+  );
 
   // Migrate customers with individual accounts
   for (const customer of customersWithIndividualAccounts) {
@@ -268,7 +269,7 @@ const ensureCustomerLedgerAccounts = async ({ userId } = {}) => {
 };
 
 const ensureSupplierLedgerAccounts = async ({ userId } = {}) => {
-  const suppliers = await Supplier.find({
+  const suppliers = await SupplierRepository.findAll({
     $or: [{ ledgerAccount: { $exists: false } }, { ledgerAccount: null }]
   });
 

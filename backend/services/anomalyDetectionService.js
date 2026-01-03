@@ -1,10 +1,8 @@
-const Sales = require('../models/Sales');
-const PurchaseOrder = require('../models/PurchaseOrder');
-const Inventory = require('../models/Inventory');
-const Product = require('../models/Product');
-const Customer = require('../models/Customer');
-const CashReceipt = require('../models/CashReceipt');
-const CashPayment = require('../models/CashPayment');
+const SalesRepository = require('../repositories/SalesRepository');
+const InventoryRepository = require('../repositories/InventoryRepository');
+const ProductRepository = require('../repositories/ProductRepository');
+const CashReceiptRepository = require('../repositories/CashReceiptRepository');
+const CashPaymentRepository = require('../repositories/CashPaymentRepository');
 
 /**
  * Anomaly Detection Service
@@ -27,13 +25,16 @@ class AnomalyDetectionService {
       const anomalies = [];
 
       // Get all sales in the period
-      const sales = await Sales.find({
+      const sales = await SalesRepository.findAll({
         createdAt: { $gte: startDate, $lte: endDate },
         status: 'completed'
-      })
-        .populate('customer', 'name businessName email')
-        .populate('items.product', 'name sku pricing')
-        .lean();
+      }, {
+        populate: [
+          { path: 'customer', select: 'name businessName email' },
+          { path: 'items.product', select: 'name sku pricing' }
+        ],
+        lean: true
+      });
 
       // 1. Detect unusually large transactions
       const largeTransactionAnomalies = await this.detectLargeTransactions(sales);
@@ -383,11 +384,12 @@ class AnomalyDetectionService {
       const anomalies = [];
 
       // Get all products with inventory
-      const products = await Product.find({ status: 'active' })
-        .populate('category', 'name')
-        .lean();
+      const products = await ProductRepository.findAll({ status: 'active' }, {
+        populate: [{ path: 'category', select: 'name' }],
+        lean: true
+      });
 
-      const inventories = await Inventory.find({}).lean();
+      const inventories = await InventoryRepository.findAll({}, { lean: true });
       const inventoryMap = {};
       inventories.forEach(inv => {
         inventoryMap[inv.product.toString()] = inv;
@@ -481,11 +483,12 @@ class AnomalyDetectionService {
       const anomalies = [];
 
       // Check cash receipts
-      const cashReceipts = await CashReceipt.find({
+      const cashReceipts = await CashReceiptRepository.findAll({
         createdAt: { $gte: startDate, $lte: endDate }
-      })
-        .populate('customer', 'name businessName')
-        .lean();
+      }, {
+        populate: [{ path: 'customer', select: 'name businessName' }],
+        lean: true
+      });
 
       // Check for duplicate receipts
       const receiptMap = {};
@@ -513,11 +516,12 @@ class AnomalyDetectionService {
       }
 
       // Check cash payments
-      const cashPayments = await CashPayment.find({
+      const cashPayments = await CashPaymentRepository.findAll({
         createdAt: { $gte: startDate, $lte: endDate }
-      })
-        .populate('supplier', 'companyName')
-        .lean();
+      }, {
+        populate: [{ path: 'supplier', select: 'companyName' }],
+        lean: true
+      });
 
       // Check for unusually large payments
       const paymentAmounts = cashPayments.map(p => p.amount || 0);

@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 
@@ -42,16 +43,16 @@ app.use(cors({
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+// Cookie parsing middleware (for HTTP-only cookies)
+app.use(cookieParser());
 
 // Idempotency key middleware - prevents duplicate requests
-// DISABLED: Commented out to allow duplicate requests during development/testing
-// TODO: Re-enable in production for better request deduplication and prevent duplicate submissions
 // Note: This middleware uses in-memory storage - consider Redis for production scaling
-// const { preventDuplicates } = require('./middleware/duplicatePrevention');
-// app.use(preventDuplicates({
-//   windowMs: 60000, // 60 second window for idempotency
-//   requireIdempotencyKey: false // Auto-generate if not provided, but allow explicit keys
-// }));
+const { preventDuplicates } = require('./middleware/duplicatePrevention');
+app.use(preventDuplicates({
+  windowMs: 60000, // 60 second window for idempotency
+  requireIdempotencyKey: false // Auto-generate if not provided, but allow explicit keys
+}));
 
 // Middleware to check database connection before handling API requests (except health check)
 app.use((req, res, next) => {

@@ -4,10 +4,12 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
-const PurchaseInvoice = require('../models/PurchaseInvoice');
-const Supplier = require('../models/Supplier');
+const PurchaseInvoice = require('../models/PurchaseInvoice'); // Still needed for new PurchaseInvoice() and static methods
 const { auth, requirePermission } = require('../middleware/auth');
 const { sanitizeRequest, handleValidationErrors } = require('../middleware/validation');
+const purchaseInvoiceService = require('../services/purchaseInvoiceService');
+const purchaseInvoiceRepository = require('../repositories/PurchaseInvoiceRepository');
+const supplierRepository = require('../repositories/SupplierRepository');
 
 const router = express.Router();
 
@@ -51,93 +53,12 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
-    
-    // Build filter
-    const filter = {};
-    
-    if (req.query.search) {
-      const searchTerm = req.query.search.trim();
-      const searchConditions = [
-        { invoiceNumber: { $regex: searchTerm, $options: 'i' } },
-        { notes: { $regex: searchTerm, $options: 'i' } },
-        { 'supplierInfo.companyName': { $regex: searchTerm, $options: 'i' } },
-        { 'supplierInfo.name': { $regex: searchTerm, $options: 'i' } }
-      ];
-      
-      // Search in Supplier collection and match by supplier ID
-      const supplierMatches = await Supplier.find({
-        $or: [
-          { companyName: { $regex: searchTerm, $options: 'i' } },
-          { name: { $regex: searchTerm, $options: 'i' } },
-          { businessName: { $regex: searchTerm, $options: 'i' } },
-          { email: { $regex: searchTerm, $options: 'i' } },
-          { 'contactPerson.name': { $regex: searchTerm, $options: 'i' } }
-        ]
-      }).select('_id').lean();
-      
-      if (supplierMatches.length > 0) {
-        const supplierIds = supplierMatches.map(s => s._id);
-        searchConditions.push({ supplier: { $in: supplierIds } });
-      }
-      
-      // If search term is numeric, also search in pricing.total
-      if (!isNaN(searchTerm)) {
-        searchConditions.push({ 'pricing.total': parseFloat(searchTerm) });
-      }
-      
-      filter.$or = searchConditions;
-    }
-    
-    if (req.query.status) {
-      filter.status = req.query.status;
-    }
-    
-    if (req.query.paymentStatus) {
-      filter['payment.status'] = req.query.paymentStatus;
-    }
-    
-    if (req.query.invoiceType) {
-      filter.invoiceType = req.query.invoiceType;
-    }
-    
-    if (req.query.dateFrom || req.query.dateTo) {
-      filter.createdAt = {};
-      if (req.query.dateFrom) {
-        // Set to start of day (00:00:00) in local timezone
-        const dateFrom = new Date(req.query.dateFrom);
-        dateFrom.setHours(0, 0, 0, 0);
-        filter.createdAt.$gte = dateFrom;
-      }
-      if (req.query.dateTo) {
-        // Set to end of day (23:59:59.999) - add 1 day and use $lt to include entire toDate
-        const dateTo = new Date(req.query.dateTo);
-        dateTo.setDate(dateTo.getDate() + 1);
-        dateTo.setHours(0, 0, 0, 0);
-        filter.createdAt.$lt = dateTo;
-      }
-    }
-    
-    const invoices = await PurchaseInvoice.find(filter)
-      .populate('supplier', 'name companyName email phone')
-      .populate('items.product', 'name description pricing')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
-    
-    const total = await PurchaseInvoice.countDocuments(filter);
+    // Call service to get purchase invoices
+    const result = await purchaseInvoiceService.getPurchaseInvoices(req.query);
     
     res.json({
-      invoices,
-      pagination: {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page < Math.ceil(total / limit),
-        hasPrev: page > 1
-      }
+      invoices: result.invoices,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Error fetching purchase invoices:', error);
@@ -153,30 +74,13 @@ router.get('/:id', [
   query('id').isMongoId().withMessage('Invalid invoice ID')
 ], async (req, res) => {
   try {
-    const invoice = await PurchaseInvoice.findById(req.params.id)
-      .populate('supplier', 'name companyName email phone address')
-      .populate('items.product', 'name description pricing inventory')
-      .populate('createdBy', 'name email')
-      .populate('lastModifiedBy', 'name email');
-    
-    if (!invoice) {
-      return res.status(404).json({ message: 'Purchase invoice not found' });
-    }
-    
-    // Transform names to uppercase
-    if (invoice.supplier) {
-      invoice.supplier = transformSupplierToUppercase(invoice.supplier);
-    }
-    if (invoice.items && Array.isArray(invoice.items)) {
-      invoice.items.forEach(item => {
-        if (item.product) {
-          item.product = transformProductToUppercase(item.product);
-        }
-      });
-    }
+    const invoice = await purchaseInvoiceService.getPurchaseInvoiceById(req.params.id);
     
     res.json({ invoice });
   } catch (error) {
+    if (error.message === 'Purchase invoice not found') {
+      return res.status(404).json({ message: 'Purchase invoice not found' });
+    }
     console.error('Error fetching purchase invoice:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -328,16 +232,13 @@ router.post('/', [
     if (supplier && pricing && pricing.total > 0) {
       try {
         const SupplierBalanceService = require('../services/supplierBalanceService');
-        const Supplier = require('../models/Supplier');
-        const supplierExists = await Supplier.findById(supplier);
+        const supplierExists = await supplierRepository.findById(supplier);
         
         if (supplierExists) {
           // Step 1: Add invoice total to pendingBalance (we owe this amount to supplier)
-          await Supplier.findByIdAndUpdate(
-            supplier,
-            { $inc: { pendingBalance: pricing.total } },
-            { new: true }
-          );
+          await supplierRepository.updateById(supplier, {
+            $inc: { pendingBalance: pricing.total }
+          });
           
           // Step 2: Record payment (this will reduce pendingBalance and handle overpayments)
           const amountPaid = payment?.amount || payment?.paidAmount || 0;
@@ -400,7 +301,7 @@ router.put('/:id', [
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const invoice = await PurchaseInvoice.findById(req.params.id);
+    const invoice = await purchaseInvoiceRepository.findById(req.params.id);
     if (!invoice) {
       return res.status(404).json({ message: 'Purchase invoice not found' });
     }
@@ -419,7 +320,7 @@ router.put('/:id', [
     let supplierData = null;
     if (req.body.supplier) {
       const Supplier = require('../models/Supplier');
-      supplierData = await Supplier.findById(req.body.supplier);
+      supplierData = await supplierRepository.findById(req.body.supplier);
       if (!supplierData) {
         return res.status(400).json({ message: 'Supplier not found' });
       }
@@ -470,11 +371,10 @@ router.put('/:id', [
       };
     }
     
-    const updatedInvoice = await PurchaseInvoice.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    );
+    const updatedInvoice = await purchaseInvoiceRepository.update(req.params.id, updateData, {
+      new: true,
+      runValidators: true
+    });
     
     // Adjust inventory based on item changes if invoice was confirmed
     if (invoice.status === 'confirmed' && req.body.items && req.body.items.length > 0) {
@@ -563,7 +463,7 @@ router.put('/:id', [
         
         // Step 1: Rollback old invoice's impact on supplier balance
         if (oldSupplier) {
-          const oldSupplierDoc = await Supplier.findById(oldSupplier);
+          const oldSupplierDoc = await supplierRepository.findById(oldSupplier);
           if (oldSupplierDoc) {
             const oldAmountPaid = invoice.payment?.amount || invoice.payment?.paidAmount || 0;
             
@@ -575,37 +475,29 @@ router.put('/:id', [
               const advanceToRemove = Math.max(0, oldAmountPaid - oldTotal);
               
               // Reverse: restore pendingBalance, remove from advanceBalance
-              await Supplier.findByIdAndUpdate(
-                oldSupplier,
-                {
-                  $inc: {
-                    pendingBalance: pendingRestored,
-                    advanceBalance: -advanceToRemove
-                  }
-                },
-                { new: true }
-              );
+              await supplierRepository.updateById(oldSupplier, {
+                $inc: {
+                  pendingBalance: pendingRestored,
+                  advanceBalance: -advanceToRemove
+                }
+              });
             }
             
             // Remove old invoice total from pendingBalance
-            await Supplier.findByIdAndUpdate(
-              oldSupplier,
-              { $inc: { pendingBalance: -oldTotal } },
-              { new: true }
-            );
+            await supplierRepository.updateById(oldSupplier, {
+              $inc: { pendingBalance: -oldTotal }
+            });
           }
         }
         
         // Step 2: Apply new invoice's impact on supplier balance
         if (updatedInvoice.supplier) {
-          const newSupplier = await Supplier.findById(updatedInvoice.supplier);
+          const newSupplier = await supplierRepository.findById(updatedInvoice.supplier);
           if (newSupplier) {
             // Add new invoice total to pendingBalance
-            await Supplier.findByIdAndUpdate(
-              updatedInvoice.supplier,
-              { $inc: { pendingBalance: updatedInvoice.pricing.total } },
-              { new: true }
-            );
+          await supplierRepository.updateById(updatedInvoice.supplier, {
+            $inc: { pendingBalance: updatedInvoice.pricing.total }
+          });
             
             // Record new payment (handles overpayments correctly)
             const newAmountPaid = updatedInvoice.payment?.amount || updatedInvoice.payment?.paidAmount || 0;
@@ -643,7 +535,7 @@ router.delete('/:id', [
   requirePermission('delete_purchase_invoices')
 ], async (req, res) => {
   try {
-    const invoice = await PurchaseInvoice.findById(req.params.id);
+    const invoice = await purchaseInvoiceRepository.findById(req.params.id);
     if (!invoice) {
       return res.status(404).json({ message: 'Purchase invoice not found' });
     }
@@ -698,7 +590,7 @@ router.delete('/:id', [
     if (invoice.supplier && invoice.pricing && invoice.pricing.total > 0) {
       try {
         const Supplier = require('../models/Supplier');
-        const supplierExists = await Supplier.findById(invoice.supplier);
+        const supplierExists = await supplierRepository.findById(invoice.supplier);
         
         if (supplierExists) {
           const amountPaid = invoice.payment?.amount || invoice.payment?.paidAmount || 0;
@@ -708,24 +600,18 @@ router.delete('/:id', [
             const pendingRestored = Math.min(amountPaid, invoice.pricing.total);
             const advanceToRemove = Math.max(0, amountPaid - invoice.pricing.total);
             
-            await Supplier.findByIdAndUpdate(
-              invoice.supplier,
-              {
-                $inc: {
-                  pendingBalance: pendingRestored,
-                  advanceBalance: -advanceToRemove
-                }
-              },
-              { new: true }
-            );
+            await supplierRepository.updateById(invoice.supplier, {
+              $inc: {
+                pendingBalance: pendingRestored,
+                advanceBalance: -advanceToRemove
+              }
+            });
           }
           
           // Remove invoice total from pendingBalance
-          const updateResult = await Supplier.findByIdAndUpdate(
-            invoice.supplier,
-            { $inc: { pendingBalance: -invoice.pricing.total } },
-            { new: true }
-          );
+          const updateResult = await supplierRepository.updateById(invoice.supplier, {
+            $inc: { pendingBalance: -invoice.pricing.total }
+          });
         } else {
         }
       } catch (error) {
@@ -735,7 +621,7 @@ router.delete('/:id', [
     }
     
     // Delete the invoice
-    await PurchaseInvoice.findByIdAndDelete(req.params.id);
+    await purchaseInvoiceRepository.delete(req.params.id);
     
     
     res.json({ 
@@ -755,7 +641,7 @@ router.put('/:id/confirm', [
   auth
 ], async (req, res) => {
   try {
-    const invoice = await PurchaseInvoice.findById(req.params.id);
+    const invoice = await purchaseInvoiceRepository.findById(req.params.id);
     if (!invoice) {
       return res.status(404).json({ message: 'Purchase invoice not found' });
     }
@@ -779,7 +665,7 @@ router.put('/:id/cancel', [
   auth
 ], async (req, res) => {
   try {
-    const invoice = await PurchaseInvoice.findById(req.params.id);
+    const invoice = await purchaseInvoiceRepository.findById(req.params.id);
     if (!invoice) {
       return res.status(404).json({ message: 'Purchase invoice not found' });
     }
@@ -850,7 +736,7 @@ router.post('/export/pdf', [auth, requirePermission('view_purchase_invoices')], 
     // Fetch supplier name if supplier filter is applied
     let supplierName = null;
     if (filters.supplier) {
-      const supplier = await Supplier.findById(filters.supplier).lean();
+      const supplier = await supplierRepository.findById(filters.supplier, { lean: true });
       if (supplier) {
         supplierName = supplier.companyName || 
                       supplier.name || 
@@ -859,12 +745,15 @@ router.post('/export/pdf', [auth, requirePermission('view_purchase_invoices')], 
       }
     }
     
-    const invoices = await PurchaseInvoice.find(filter)
-      .populate('supplier', 'companyName name firstName lastName email phone')
-      .populate('items.product', 'name')
-      .populate('createdBy', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .lean();
+    const invoices = await purchaseInvoiceRepository.findAll(filter, {
+      populate: [
+        { path: 'supplier', select: 'companyName name firstName lastName email phone' },
+        { path: 'items.product', select: 'name' },
+        { path: 'createdBy', select: 'firstName lastName email' }
+      ],
+      sort: { createdAt: -1 },
+      lean: true
+    });
     
     if (invoices.length > 0) {
     }

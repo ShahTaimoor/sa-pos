@@ -1,8 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const AccountCategory = require('../models/AccountCategory');
+const AccountCategory = require('../models/AccountCategory'); // Still needed for static methods
 const { auth, requirePermission } = require('../middleware/auth');
 const { validateAccountCategory } = require('../middleware/validation');
+const accountCategoryRepository = require('../repositories/AccountCategoryRepository');
+const chartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
 
 // Get all account categories
 router.get('/', auth, async (req, res) => {
@@ -11,12 +13,11 @@ router.get('/', auth, async (req, res) => {
     
     let categories;
     if (grouped === 'true') {
-      categories = await AccountCategory.getAllCategoriesGrouped();
+      categories = await accountCategoryRepository.getAllCategoriesGrouped();
     } else if (accountType) {
-      categories = await AccountCategory.getCategoriesByType(accountType);
+      categories = await accountCategoryRepository.getCategoriesByType(accountType);
     } else {
-      categories = await AccountCategory.find({ isActive: true })
-        .sort({ accountType: 1, displayOrder: 1, name: 1 });
+      categories = await accountCategoryRepository.findActive();
     }
     
     res.json({
@@ -36,7 +37,7 @@ router.get('/', auth, async (req, res) => {
 // Get single account category
 router.get('/:id', auth, async (req, res) => {
   try {
-    const category = await AccountCategory.findById(req.params.id);
+    const category = await accountCategoryRepository.findById(req.params.id);
     
     if (!category) {
       return res.status(404).json({
@@ -69,7 +70,7 @@ router.post('/', auth, validateAccountCategory, async (req, res) => {
     
     let category;
     try {
-      category = await AccountCategory.create(categoryData);
+      category = await accountCategoryRepository.create(categoryData);
     } catch (err) {
       if (err.code === 11000) {
         const duplicateField = Object.keys(err.keyPattern || {})[0];
@@ -107,7 +108,7 @@ router.post('/', auth, validateAccountCategory, async (req, res) => {
 // Update account category
 router.put('/:id', auth, validateAccountCategory, async (req, res) => {
   try {
-    const category = await AccountCategory.findById(req.params.id);
+    const category = await accountCategoryRepository.findById(req.params.id);
     
     if (!category) {
       return res.status(404).json({
@@ -128,7 +129,7 @@ router.put('/:id', auth, validateAccountCategory, async (req, res) => {
       updatedBy: req.user.id
     };
     
-    const updatedCategory = await AccountCategory.findByIdAndUpdate(
+    const updatedCategory = await accountCategoryRepository.updateById(
       req.params.id,
       updateData,
       { new: true, runValidators: true }
@@ -160,7 +161,7 @@ router.put('/:id', auth, validateAccountCategory, async (req, res) => {
 // Delete account category
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const category = await AccountCategory.findById(req.params.id);
+    const category = await accountCategoryRepository.findById(req.params.id);
     
     if (!category) {
       return res.status(404).json({
@@ -177,8 +178,7 @@ router.delete('/:id', auth, async (req, res) => {
     }
     
     // Check if any accounts are using this category
-    const ChartOfAccounts = require('../models/ChartOfAccounts');
-    const accountsUsingCategory = await ChartOfAccounts.countDocuments({
+    const accountsUsingCategory = await chartOfAccountsRepository.count({
       accountCategory: category._id
     });
     
@@ -189,7 +189,7 @@ router.delete('/:id', auth, async (req, res) => {
       });
     }
     
-    await AccountCategory.findByIdAndDelete(req.params.id);
+    await accountCategoryRepository.hardDelete(req.params.id);
     
     res.json({
       success: true,

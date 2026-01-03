@@ -215,7 +215,7 @@ export const fuzzySearch = (items, searchTerm, searchFields, options = {}) => {
           bestMatch = match;
         }
       } catch (error) {
-        console.warn('Error accessing field in fuzzy search:', error);
+        // Error accessing field in fuzzy search - silent fail
       }
     }
 

@@ -25,9 +25,13 @@ setInterval(() => {
  * Generate idempotency key from request
  */
 const generateIdempotencyKey = (req) => {
-  // Use custom idempotency key if provided
-  if (req.headers['idempotency-key']) {
-    return req.headers['idempotency-key'];
+  // Use custom idempotency key if provided (Express normalizes headers to lowercase)
+  // Check both lowercase and any case variations
+  const idempotencyKeyHeader = req.headers['idempotency-key'] || 
+                                req.headers['Idempotency-Key'] ||
+                                req.headers['IDEMPOTENCY-KEY'];
+  if (idempotencyKeyHeader) {
+    return idempotencyKeyHeader;
   }
 
   // Generate key from request body for POST/PUT/PATCH
@@ -137,8 +141,19 @@ const preventDuplicates = (options = {}) => {
       return originalJson(body);
     };
 
-    // Clean up on error
+    // Set up timeout to clean up stale in-progress requests
+    const timeoutId = setTimeout(() => {
+      const entry = idempotencyStore.get(idempotencyKey);
+      // Only delete if still in progress (no response cached yet)
+      if (entry && entry.inProgress && !entry.response) {
+        idempotencyStore.delete(idempotencyKey);
+      }
+    }, windowMs * 2);
+
+    // Clean up on request completion
     res.on('finish', () => {
+      clearTimeout(timeoutId);
+      // Remove failed requests from cache
       if (res.statusCode >= 400) {
         idempotencyStore.delete(idempotencyKey);
       }
@@ -153,7 +168,7 @@ const preventDuplicates = (options = {}) => {
  * Prevents double-click submissions
  */
 const preventPOSDuplicates = preventDuplicates({
-  windowMs: 10000, // 10 second window for POS
+  windowMs: 5000, // 5 second window for POS (reduced from 10s)
   requireIdempotencyKey: false // Auto-generate from request body
 });
 

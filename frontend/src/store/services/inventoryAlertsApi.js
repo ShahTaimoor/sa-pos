@@ -3,11 +3,22 @@ import { api } from '../api';
 export const inventoryAlertsApi = api.injectEndpoints({
   endpoints: (builder) => ({
     getLowStockAlerts: builder.query({
-      query: (params) => ({
-        url: 'inventory-alerts',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'inventory-alerts',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: [{ type: 'Inventory', id: 'LOW_STOCK_ALERTS' }],
     }),
     getAlertSummary: builder.query({
@@ -31,7 +42,12 @@ export const inventoryAlertsApi = api.injectEndpoints({
         data: {},
         params,
       }),
-      invalidatesTags: ['PurchaseOrders', 'Inventory'],
+      invalidatesTags: [
+        { type: 'Orders', id: 'PO_LIST' },
+        { type: 'Inventory', id: 'LIST' },
+        { type: 'Inventory', id: 'LOW_STOCK_ALERTS' },
+        { type: 'Inventory', id: 'ALERT_SUMMARY' },
+      ],
     }),
   }),
   overrideExisting: false,

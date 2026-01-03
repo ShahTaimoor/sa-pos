@@ -47,7 +47,7 @@ export const useAdvancedSearch = (options = {}) => {
           setSearchHistory(JSON.parse(saved));
         }
       } catch (error) {
-        console.error('Error loading search history:', error);
+        // Error loading search history - silent fail
       }
     }
   }, [enableHistory]);
@@ -60,7 +60,7 @@ export const useAdvancedSearch = (options = {}) => {
         setFilterPresets(JSON.parse(saved));
       }
     } catch (error) {
-      console.error('Error loading filter presets:', error);
+      // Error loading filter presets - silent fail
     }
   }, []);
 
@@ -75,7 +75,7 @@ export const useAdvancedSearch = (options = {}) => {
       try {
         localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(updated));
       } catch (error) {
-        console.error('Error saving search history:', error);
+        // Error saving search history - silent fail
       }
       
       return updated;
@@ -201,7 +201,7 @@ export const useAdvancedSearch = (options = {}) => {
       try {
         localStorage.setItem('filterPresets', JSON.stringify(updated));
       } catch (error) {
-        console.error('Error saving filter preset:', error);
+        // Error saving filter preset - silent fail
       }
       return updated;
     });
@@ -227,7 +227,7 @@ export const useAdvancedSearch = (options = {}) => {
       try {
         localStorage.setItem('filterPresets', JSON.stringify(updated));
       } catch (error) {
-        console.error('Error deleting filter preset:', error);
+        // Error deleting filter preset - silent fail
       }
       return updated;
     });
@@ -239,7 +239,7 @@ export const useAdvancedSearch = (options = {}) => {
     try {
       localStorage.removeItem(SEARCH_HISTORY_KEY);
     } catch (error) {
-      console.error('Error clearing search history:', error);
+      // Error clearing search history - silent fail
     }
   }, []);
 

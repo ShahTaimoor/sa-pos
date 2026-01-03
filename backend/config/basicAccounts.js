@@ -148,7 +148,7 @@ const basicAccounts = [
     isSystemAccount: true
   },
   {
-    accountCode: '4100',
+    accountCode: '4001',
     accountName: 'Sales Revenue',
     accountType: 'revenue',
     accountCategory: 'sales_revenue',
@@ -178,7 +178,7 @@ const basicAccounts = [
     isSystemAccount: true
   },
   {
-    accountCode: '5100',
+    accountCode: '5001',
     accountName: 'Cost of Goods Sold',
     accountType: 'expense',
     accountCategory: 'cost_of_goods_sold',

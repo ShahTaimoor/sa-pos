@@ -1196,24 +1196,51 @@ export const PLStatements = () => {
             </tr>
             <tr class="line-item">
               <td>Interest Income</td>
-              <td class="amount">${formatCurrency(statement.interestIncome || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.interestIncome || 0, totalRevenue)}%</td>
+              <td class="amount">${formatCurrency(statement.otherIncome?.interestIncome || 0)}</td>
+              <td class="amount">${calculatePercentage(statement.otherIncome?.interestIncome || 0, totalRevenue)}%</td>
             </tr>
             <tr class="line-item">
-              <td>Interest Expense</td>
-              <td class="amount">${formatCurrency(statement.interestExpense || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.interestExpense || 0, totalRevenue)}%</td>
+              <td>Rental Income</td>
+              <td class="amount">${formatCurrency(statement.otherIncome?.rentalIncome || 0)}</td>
+              <td class="amount">${calculatePercentage(statement.otherIncome?.rentalIncome || 0, totalRevenue)}%</td>
             </tr>
             <tr class="line-item">
               <td>Other Income</td>
-              <td class="amount">${formatCurrency(otherIncome)}</td>
-              <td class="amount">${calculatePercentage(otherIncome, totalRevenue)}%</td>
+              <td class="amount">${formatCurrency(statement.otherIncome?.other?.amount || 0)}</td>
+              <td class="amount">${calculatePercentage(statement.otherIncome?.other?.amount || 0, totalRevenue)}%</td>
+            </tr>
+            <tr class="line-item">
+              <td>Interest Expense</td>
+              <td class="amount">${formatCurrency(statement.otherExpenses?.interestExpense || 0)}</td>
+              <td class="amount">${calculatePercentage(statement.otherExpenses?.interestExpense || 0, totalRevenue)}%</td>
+            </tr>
+            <tr class="line-item">
+              <td>Depreciation</td>
+              <td class="amount">${formatCurrency(statement.otherExpenses?.depreciation || 0)}</td>
+              <td class="amount">${calculatePercentage(statement.otherExpenses?.depreciation || 0, totalRevenue)}%</td>
+            </tr>
+            <tr class="line-item">
+              <td>Amortization</td>
+              <td class="amount">${formatCurrency(statement.otherExpenses?.amortization || 0)}</td>
+              <td class="amount">${calculatePercentage(statement.otherExpenses?.amortization || 0, totalRevenue)}%</td>
             </tr>
             <tr class="line-item">
               <td>Other Expenses</td>
-              <td class="amount">${formatCurrency(otherExpenses)}</td>
-              <td class="amount">${calculatePercentage(otherExpenses, totalRevenue)}%</td>
+              <td class="amount">${formatCurrency(statement.otherExpenses?.other?.amount || 0)}</td>
+              <td class="amount">${calculatePercentage(statement.otherExpenses?.other?.amount || 0, totalRevenue)}%</td>
             </tr>
+            
+            <!-- SALES TAX -->
+            ${statement.salesTax && statement.salesTax.amount > 0 ? `
+            <tr class="section-header">
+              <td colspan="3">TAXES</td>
+            </tr>
+            <tr class="line-item">
+              <td>Sales Tax</td>
+              <td class="amount">${formatCurrency(statement.salesTax.amount)}</td>
+              <td class="amount">${calculatePercentage(statement.salesTax.amount, totalRevenue)}%</td>
+            </tr>
+            ` : ''}
             
             <!-- NET INCOME -->
             <tr class="net-income ${netIncome >= 0 ? '' : 'negative-net'}">
@@ -1377,10 +1404,14 @@ export const PLStatements = () => {
       ['OPERATING INCOME', formatCurrency(operatingIncome), `${calculatePercentage(operatingIncome, totalRevenue)}%`],
       [''],
       ['OTHER INCOME & EXPENSES', '', ''],
-      ['Interest Income', formatCurrency(statement.interestIncome || 0), `${calculatePercentage(statement.interestIncome || 0, totalRevenue)}%`],
-      ['Interest Expense', formatCurrency(statement.interestExpense || 0), `${calculatePercentage(statement.interestExpense || 0, totalRevenue)}%`],
-      ['Other Income', formatCurrency(otherIncome), `${calculatePercentage(otherIncome, totalRevenue)}%`],
-      ['Other Expenses', formatCurrency(otherExpenses), `${calculatePercentage(otherExpenses, totalRevenue)}%`],
+      ['Interest Income', formatCurrency(statement.otherIncome?.interestIncome || 0), `${calculatePercentage(statement.otherIncome?.interestIncome || 0, totalRevenue)}%`],
+      ['Rental Income', formatCurrency(statement.otherIncome?.rentalIncome || 0), `${calculatePercentage(statement.otherIncome?.rentalIncome || 0, totalRevenue)}%`],
+      ['Other Income', formatCurrency(statement.otherIncome?.other?.amount || 0), `${calculatePercentage(statement.otherIncome?.other?.amount || 0, totalRevenue)}%`],
+      ['Interest Expense', formatCurrency(statement.otherExpenses?.interestExpense || 0), `${calculatePercentage(statement.otherExpenses?.interestExpense || 0, totalRevenue)}%`],
+      ['Depreciation', formatCurrency(statement.otherExpenses?.depreciation || 0), `${calculatePercentage(statement.otherExpenses?.depreciation || 0, totalRevenue)}%`],
+      ['Amortization', formatCurrency(statement.otherExpenses?.amortization || 0), `${calculatePercentage(statement.otherExpenses?.amortization || 0, totalRevenue)}%`],
+      ['Other Expenses', formatCurrency(statement.otherExpenses?.other?.amount || 0), `${calculatePercentage(statement.otherExpenses?.other?.amount || 0, totalRevenue)}%`],
+      ...(statement.salesTax && statement.salesTax.amount > 0 ? [['SALES TAX', formatCurrency(statement.salesTax.amount), `${calculatePercentage(statement.salesTax.amount, totalRevenue)}%`]] : []),
       [''],
       ['NET INCOME', formatCurrency(netIncome), `${calculatePercentage(netIncome, totalRevenue)}%`],
       [''],

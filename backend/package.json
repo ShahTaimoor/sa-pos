@@ -6,10 +6,12 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "configure-atlas": "node configure-atlas.js"
+    "configure-atlas": "node configure-atlas.js",
+    "migrate:soft-delete": "node migrations/addSoftDeleteFields.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "csv-parser": "^3.2.0",
     "csv-writer": "^1.6.0",

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Filter, X } from 'lucide-react';
+import { Search, Filter, X, Calendar } from 'lucide-react';
 
 const ReturnFilters = ({ filters, onFilterChange, isLoading }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -119,47 +119,37 @@ const ReturnFilters = ({ filters, onFilterChange, isLoading }) => {
           </div>
         </div>
 
-        {/* Advanced Filters Toggle */}
-        <div className="border-t pt-4">
-          <button
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex items-center text-sm text-gray-600 hover:text-gray-800"
-          >
-            <Filter className="h-4 w-4 mr-2" />
-            {showAdvanced ? 'Hide' : 'Show'} Advanced Filters
-          </button>
+        {/* Date Range - Always Visible */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 border-t pt-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              <Calendar className="inline h-4 w-4 mr-1" />
+              From Date
+            </label>
+            <input
+              type="date"
+              value={filters.startDate}
+              onChange={(e) => handleInputChange('startDate', e.target.value)}
+              className="input"
+              disabled={isLoading}
+            />
+          </div>
 
-          {showAdvanced && (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Date Range */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Start Date
-                </label>
-                <input
-                  type="date"
-                  value={filters.startDate}
-                  onChange={(e) => handleInputChange('startDate', e.target.value)}
-                  className="input"
-                  disabled={isLoading}
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  End Date
-                </label>
-                <input
-                  type="date"
-                  value={filters.endDate}
-                  onChange={(e) => handleInputChange('endDate', e.target.value)}
-                  className="input"
-                  disabled={isLoading}
-                />
-              </div>
-            </div>
-          )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              <Calendar className="inline h-4 w-4 mr-1" />
+              To Date
+            </label>
+            <input
+              type="date"
+              value={filters.endDate}
+              onChange={(e) => handleInputChange('endDate', e.target.value)}
+              className="input"
+              disabled={isLoading}
+            />
+          </div>
         </div>
+
 
         {/* Active Filters Display */}
         {hasActiveFilters && (

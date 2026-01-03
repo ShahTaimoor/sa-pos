@@ -14,39 +14,19 @@ const axiosBaseQuery = ({ baseUrl = '' } = {}) => {
     headers: {
       'Content-Type': 'application/json',
     },
+    withCredentials: true, // Enable sending cookies (HTTP-only cookies for auth)
   });
 
-  // Request interceptor to add auth token, idempotency key, and sanitize data
+  // Request interceptor to add idempotency key and sanitize data
+  // Note: Auth token is handled via HTTP-only cookies (sent automatically with withCredentials: true)
   axiosInstance.interceptors.request.use(
     (config) => {
-      const token = localStorage.getItem('token');
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
+      // Token is in HTTP-only cookie, sent automatically by browser
+      // No need to read from localStorage
 
-      // Add idempotency key for POST/PUT/PATCH requests if not already present
-      if (['POST', 'PUT', 'PATCH'].includes(config.method?.toUpperCase())) {
-        if (!config.headers['Idempotency-Key'] && !config.headers['idempotency-key']) {
-          // Generate idempotency key from request data (synchronous)
-          const dataString = JSON.stringify(config.data || {});
-          const urlString = config.url || '';
-          const methodString = config.method || '';
-          const combined = dataString + urlString + methodString + Date.now();
-
-          // Simple hash function (synchronous)
-          let hash = 0;
-          for (let i = 0; i < combined.length; i++) {
-            const char = combined.charCodeAt(i);
-            hash = ((hash << 5) - hash) + char;
-            hash = hash & hash; // Convert to 32-bit integer
-          }
-
-          // Convert to hex string and use first 32 characters
-          const hashHex = Math.abs(hash).toString(16).padStart(8, '0');
-          const idempotencyKey = `${hashHex}-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-          config.headers['Idempotency-Key'] = idempotencyKey.substring(0, 64);
-        }
-      }
+      // Don't generate idempotency keys automatically - let the backend handle duplicate detection
+      // The frontend guard (isSubmittingRef/isSubmitting) prevents duplicate clicks
+      // Backend duplicate prevention middleware can be disabled or kept as a safety net
 
       // Ensure relative URLs combine with baseURL
       if (config.url && config.url.startsWith('/')) {
@@ -81,8 +61,8 @@ const axiosBaseQuery = ({ baseUrl = '' } = {}) => {
     (error) => {
       // Handle authentication errors
       if (error.response?.status === 401) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
+        // Token is in HTTP-only cookie, backend should clear it on logout
+        // Just redirect to login
         window.location.href = '/login';
         return Promise.reject(error);
       }

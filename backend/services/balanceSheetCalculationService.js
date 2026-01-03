@@ -1,11 +1,14 @@
-const BalanceSheet = require('../models/BalanceSheet');
-const Sales = require('../models/Sales');
-const Product = require('../models/Product');
-const Customer = require('../models/Customer');
-const Inventory = require('../models/Inventory');
-const Payment = require('../models/Payment');
-const ChartOfAccounts = require('../models/ChartOfAccounts');
-const Transaction = require('../models/Transaction');
+const BalanceSheetRepository = require('../repositories/BalanceSheetRepository');
+const SalesRepository = require('../repositories/SalesRepository');
+const ProductRepository = require('../repositories/ProductRepository');
+const CustomerRepository = require('../repositories/CustomerRepository');
+const InventoryRepository = require('../repositories/InventoryRepository');
+const PaymentRepository = require('../repositories/PaymentRepository');
+const ChartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
+const TransactionRepository = require('../repositories/TransactionRepository');
+const FinancialStatementRepository = require('../repositories/FinancialStatementRepository');
+const AccountingService = require('./accountingService');
+const BalanceSheet = require('../models/BalanceSheet'); // Keep for model instance methods
 
 class BalanceSheetCalculationService {
   constructor() {
@@ -14,6 +17,16 @@ class BalanceSheetCalculationService {
       quarterly: 3,
       yearly: 12
     };
+    this.accountCodes = null; // Cache for account codes
+  }
+
+  // Get account codes dynamically (similar to P&L service)
+  async getAccountCodes() {
+    if (this.accountCodes) {
+      return this.accountCodes;
+    }
+    this.accountCodes = await AccountingService.getDefaultAccountCodes();
+    return this.accountCodes;
   }
 
   // Get basic balance sheet statistics for a period
@@ -26,12 +39,12 @@ class BalanceSheetCalculationService {
     }
 
     const [total, byStatus, latest] = await Promise.all([
-      BalanceSheet.countDocuments(filter),
-      BalanceSheet.aggregate([
+      BalanceSheetRepository.count(filter),
+      BalanceSheetRepository.aggregate([
         { $match: filter },
         { $group: { _id: '$status', count: { $sum: 1 } } }
       ]),
-      BalanceSheet.findOne(filter).sort({ statementDate: -1 })
+      BalanceSheetRepository.findOne(filter, { sort: { statementDate: -1 } })
     ]);
 
     const statusCounts = byStatus.reduce((acc, s) => {
@@ -61,7 +74,7 @@ class BalanceSheetCalculationService {
       const statementNumber = await this.generateStatementNumber(date, periodType);
       
       // Check if balance sheet already exists for this period
-      const existingBalanceSheet = await BalanceSheet.findOne({
+      const existingBalanceSheet = await BalanceSheetRepository.findOne({
         statementDate: { $gte: new Date(date.getFullYear(), date.getMonth(), 1) },
         periodType
       });
@@ -132,9 +145,12 @@ class BalanceSheetCalculationService {
     }
 
     // Find all existing statement numbers with this prefix
-    const existingSheets = await BalanceSheet.find({
+    const existingSheets = await BalanceSheetRepository.findAll({
       statementNumber: { $regex: `^${prefix}-` }
-    }).select('statementNumber').lean();
+    }, {
+      select: 'statementNumber',
+      lean: true
+    });
 
     // Extract sequence numbers and find the maximum
     let maxSequence = 0;
@@ -155,12 +171,12 @@ class BalanceSheetCalculationService {
     const statementNumber = `${prefix}-${String(nextSequence).padStart(3, '0')}`;
 
     // Double-check that this number doesn't exist (safety check)
-    const exists = await BalanceSheet.findOne({ statementNumber });
+    const exists = await BalanceSheetRepository.findOne({ statementNumber });
     if (exists) {
       // If it exists, try incrementing until we find a free number
       let attemptSequence = nextSequence + 1;
       let attemptNumber = `${prefix}-${String(attemptSequence).padStart(3, '0')}`;
-      while (await BalanceSheet.findOne({ statementNumber: attemptNumber })) {
+      while (await BalanceSheetRepository.findOne({ statementNumber: attemptNumber })) {
         attemptSequence++;
         attemptNumber = `${prefix}-${String(attemptSequence).padStart(3, '0')}`;
       }
@@ -248,38 +264,52 @@ class BalanceSheetCalculationService {
   // Calculate cash and cash equivalents
   async calculateCashAndCashEquivalents(statementDate) {
     try {
-      // Get cash from accounting transactions
-      const Transaction = require('../models/Transaction');
+      // Get account codes dynamically
+      const accountCodes = await this.getAccountCodes();
       
-      // Calculate cash account balance (1001)
-      const cashTransactions = await Transaction.find({
-        createdAt: { $lte: statementDate },
-        accountCode: '1001',
-        status: 'completed'
+      // Calculate cash account balance (dynamic lookup)
+      const cashAccountCode = accountCodes.cash || '1001';
+      const cashBalance = await this.calculateAccountBalance(cashAccountCode, statementDate);
+
+      // Calculate bank account balance (dynamic lookup)
+      const bankAccountCode = accountCodes.bank || '1002';
+      const bankBalance = await this.calculateAccountBalance(bankAccountCode, statementDate);
+
+      // Try to find separate cash on hand account
+      const cashOnHandAccount = await ChartOfAccountsRepository.findOne({
+        accountName: { $regex: /cash.*hand|petty.*cash/i },
+        accountType: 'asset',
+        accountCategory: 'current_assets',
+        isActive: true
       });
 
-      let cashBalance = 0;
-      cashTransactions.forEach(transaction => {
-        cashBalance += transaction.debitAmount - transaction.creditAmount;
+      let cashOnHand = 0;
+      let pettyCash = 0;
+
+      if (cashOnHandAccount) {
+        cashOnHand = await this.calculateAccountBalance(cashOnHandAccount.accountCode, statementDate);
+      } else {
+        // If no separate account, use cash balance for cash on hand
+        cashOnHand = Math.max(0, cashBalance);
+      }
+
+      // Petty cash might be in a separate account or part of cash
+      const pettyCashAccount = await ChartOfAccountsRepository.findOne({
+        accountName: { $regex: /petty.*cash/i },
+        accountType: 'asset',
+        accountCategory: 'current_assets',
+        isActive: true
       });
 
-      // Calculate bank account balance (1002)
-      const bankTransactions = await Transaction.find({
-        createdAt: { $lte: statementDate },
-        accountCode: '1002',
-        status: 'completed'
-      });
-
-      let bankBalance = 0;
-      bankTransactions.forEach(transaction => {
-        bankBalance += transaction.debitAmount - transaction.creditAmount;
-      });
+      if (pettyCashAccount && pettyCashAccount.accountCode !== cashOnHandAccount?.accountCode) {
+        pettyCash = await this.calculateAccountBalance(pettyCashAccount.accountCode, statementDate);
+      }
 
       return {
-        cashOnHand: 0, // Would need to be tracked separately
-        bankAccounts: bankBalance,
-        pettyCash: cashBalance,
-        total: cashBalance + bankBalance
+        cashOnHand: cashOnHand,
+        bankAccounts: Math.max(0, bankBalance),
+        pettyCash: pettyCash,
+        total: cashOnHand + Math.max(0, bankBalance) + pettyCash
       };
     } catch (error) {
       console.error('Error calculating cash and cash equivalents:', error);
@@ -290,19 +320,12 @@ class BalanceSheetCalculationService {
   // Calculate accounts receivable
   async calculateAccountsReceivable(statementDate) {
     try {
-      // Get accounts receivable from accounting transactions
-      const Transaction = require('../models/Transaction');
+      // Get account codes dynamically
+      const accountCodes = await this.getAccountCodes();
       
-      const arTransactions = await Transaction.find({
-        createdAt: { $lte: statementDate },
-        accountCode: '1201', // Accounts Receivable
-        status: 'completed'
-      });
-
-      let arBalance = 0;
-      arTransactions.forEach(transaction => {
-        arBalance += transaction.debitAmount - transaction.creditAmount;
-      });
+      // Calculate accounts receivable balance (dynamic lookup)
+      const arAccountCode = accountCodes.accountsReceivable || '1201';
+      const arBalance = await this.calculateAccountBalance(arAccountCode, statementDate);
 
       // Allowance for doubtful accounts (typically 2-5% of receivables)
       const allowancePercentage = 0.03; // 3%
@@ -328,24 +351,45 @@ class BalanceSheetCalculationService {
   // Calculate inventory
   async calculateInventory(statementDate) {
     try {
-      // Get inventory value from accounting transactions
-      const Transaction = require('../models/Transaction');
+      // Get account codes dynamically
+      const accountCodes = await this.getAccountCodes();
       
-      const inventoryTransactions = await Transaction.find({
-        createdAt: { $lte: statementDate },
-        accountCode: '1301', // Inventory
-        status: 'completed'
+      // Calculate inventory balance (dynamic lookup)
+      const inventoryAccountCode = accountCodes.inventory || '1301';
+      const inventoryBalance = await this.calculateAccountBalance(inventoryAccountCode, statementDate);
+
+      // Try to find separate inventory accounts for breakdown
+      const rawMaterialsAccount = await ChartOfAccountsRepository.findOne({
+        accountName: { $regex: /raw.*material/i },
+        accountType: 'asset',
+        accountCategory: 'inventory',
+        isActive: true
       });
 
-      let inventoryBalance = 0;
-      inventoryTransactions.forEach(transaction => {
-        inventoryBalance += transaction.debitAmount - transaction.creditAmount;
+      const workInProgressAccount = await ChartOfAccountsRepository.findOne({
+        accountName: { $regex: /work.*progress|wip/i },
+        accountType: 'asset',
+        accountCategory: 'inventory',
+        isActive: true
       });
+
+      let rawMaterials = 0;
+      let workInProgress = 0;
+
+      if (rawMaterialsAccount) {
+        rawMaterials = await this.calculateAccountBalance(rawMaterialsAccount.accountCode, statementDate);
+      }
+
+      if (workInProgressAccount) {
+        workInProgress = await this.calculateAccountBalance(workInProgressAccount.accountCode, statementDate);
+      }
+
+      const finishedGoods = Math.max(0, inventoryBalance) - rawMaterials - workInProgress;
 
       return {
-        rawMaterials: 0,
-        workInProgress: 0,
-        finishedGoods: Math.max(0, inventoryBalance),
+        rawMaterials: Math.max(0, rawMaterials),
+        workInProgress: Math.max(0, workInProgress),
+        finishedGoods: Math.max(0, finishedGoods),
         total: Math.max(0, inventoryBalance)
       };
     } catch (error) {
@@ -361,58 +405,249 @@ class BalanceSheetCalculationService {
 
   // Calculate prepaid expenses
   async calculatePrepaidExpenses(statementDate) {
-    // This would typically come from expense tracking
-    // For now, return 0 (would need to be configured)
-    return 0;
+    try {
+      // Find prepaid expense accounts
+      const prepaidExpenseAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'asset',
+        accountCategory: 'prepaid_expenses',
+        isActive: true,
+        allowDirectPosting: true
+      });
+
+      let totalPrepaid = 0;
+      for (const account of prepaidExpenseAccounts) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        totalPrepaid += balance;
+      }
+
+      // Also check for accounts with "prepaid" in the name
+      const prepaidByName = await ChartOfAccountsRepository.findAll({
+        accountType: 'asset',
+        accountName: { $regex: /prepaid/i },
+        isActive: true,
+        accountCategory: { $ne: 'prepaid_expenses' } // Avoid double counting
+      });
+
+      for (const account of prepaidByName) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        totalPrepaid += balance;
+      }
+
+      return Math.max(0, totalPrepaid);
+    } catch (error) {
+      console.error('Error calculating prepaid expenses:', error);
+      return 0;
+    }
   }
 
   // Calculate property, plant, and equipment
   async calculatePropertyPlantEquipment(statementDate) {
-    // This would typically come from asset management system
-    // For now, return default values (would need to be configured)
-    return {
-      land: 0,
-      buildings: 0,
-      equipment: 0,
-      vehicles: 0,
-      furnitureAndFixtures: 0,
-      computerEquipment: 0,
-      total: 0
-    };
+    try {
+      // Find fixed asset accounts
+      const fixedAssetAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'asset',
+        accountCategory: 'fixed_assets',
+        isActive: true,
+        allowDirectPosting: true
+      });
+
+      let land = 0;
+      let buildings = 0;
+      let equipment = 0;
+      let vehicles = 0;
+      let furnitureAndFixtures = 0;
+      let computerEquipment = 0;
+
+      for (const account of fixedAssetAccounts) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const accountName = (account.accountName || '').toLowerCase();
+
+        if (accountName.includes('land')) {
+          land += balance;
+        } else if (accountName.includes('building') || accountName.includes('property')) {
+          buildings += balance;
+        } else if (accountName.includes('vehicle') || accountName.includes('car') || accountName.includes('truck')) {
+          vehicles += balance;
+        } else if (accountName.includes('furniture') || accountName.includes('fixture')) {
+          furnitureAndFixtures += balance;
+        } else if (accountName.includes('computer') || accountName.includes('software') || accountName.includes('it')) {
+          computerEquipment += balance;
+        } else if (accountName.includes('equipment') || accountName.includes('machinery')) {
+          equipment += balance;
+        } else {
+          // Default to equipment
+          equipment += balance;
+        }
+      }
+
+      const total = land + buildings + equipment + vehicles + furnitureAndFixtures + computerEquipment;
+
+      return {
+        land: Math.max(0, land),
+        buildings: Math.max(0, buildings),
+        equipment: Math.max(0, equipment),
+        vehicles: Math.max(0, vehicles),
+        furnitureAndFixtures: Math.max(0, furnitureAndFixtures),
+        computerEquipment: Math.max(0, computerEquipment),
+        total: Math.max(0, total)
+      };
+    } catch (error) {
+      console.error('Error calculating property, plant, and equipment:', error);
+      return {
+        land: 0,
+        buildings: 0,
+        equipment: 0,
+        vehicles: 0,
+        furnitureAndFixtures: 0,
+        computerEquipment: 0,
+        total: 0
+      };
+    }
   }
 
   // Calculate accumulated depreciation
   async calculateAccumulatedDepreciation(statementDate) {
-    // This would typically come from depreciation calculations
-    // For now, return 0 (would need to be configured)
-    return 0;
+    try {
+      // Find accumulated depreciation accounts (contra-asset accounts)
+      const depreciationAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'asset',
+        accountName: { $regex: /accumulated.*depreciation|depreciation.*accumulated/i },
+        isActive: true
+      });
+
+      let totalDepreciation = 0;
+      for (const account of depreciationAccounts) {
+        // Accumulated depreciation is a contra-asset (credit balance)
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        totalDepreciation += Math.abs(balance); // Use absolute value
+      }
+
+      // Also check for depreciation expense accounts that might track accumulated amounts
+      const depreciationExpenseAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'expense',
+        accountName: { $regex: /depreciation/i },
+        isActive: true
+      });
+
+      // Sum depreciation expenses from transactions (this period's depreciation)
+      // Note: This is current period depreciation, not accumulated
+      // For accumulated, we'd need to sum all historical depreciation
+      // For now, we'll use the contra-asset accounts which should track accumulated depreciation
+
+      return Math.max(0, totalDepreciation);
+    } catch (error) {
+      console.error('Error calculating accumulated depreciation:', error);
+      return 0;
+    }
   }
 
   // Calculate intangible assets
   async calculateIntangibleAssets(statementDate) {
-    // This would typically come from asset management system
-    // For now, return default values (would need to be configured)
-    return {
-      goodwill: 0,
-      patents: 0,
-      trademarks: 0,
-      software: 0,
-      total: 0
-    };
+    try {
+      // Find intangible asset accounts
+      const intangibleAssetAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'asset',
+        accountCategory: 'other_assets',
+        isActive: true,
+        $or: [
+          { accountName: { $regex: /goodwill|patent|trademark|intangible/i } },
+          { accountName: { $regex: /software.*asset|licens/i } }
+        ]
+      });
+
+      let goodwill = 0;
+      let patents = 0;
+      let trademarks = 0;
+      let software = 0;
+
+      for (const account of intangibleAssetAccounts) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const accountName = (account.accountName || '').toLowerCase();
+
+        if (accountName.includes('goodwill')) {
+          goodwill += balance;
+        } else if (accountName.includes('patent')) {
+          patents += balance;
+        } else if (accountName.includes('trademark') || accountName.includes('brand')) {
+          trademarks += balance;
+        } else if (accountName.includes('software') || accountName.includes('license')) {
+          software += balance;
+        } else {
+          // Default to software
+          software += balance;
+        }
+      }
+
+      const total = goodwill + patents + trademarks + software;
+
+      return {
+        goodwill: Math.max(0, goodwill),
+        patents: Math.max(0, patents),
+        trademarks: Math.max(0, trademarks),
+        software: Math.max(0, software),
+        total: Math.max(0, total)
+      };
+    } catch (error) {
+      console.error('Error calculating intangible assets:', error);
+      return {
+        goodwill: 0,
+        patents: 0,
+        trademarks: 0,
+        software: 0,
+        total: 0
+      };
+    }
   }
 
   // Calculate long-term investments
   async calculateLongTermInvestments(statementDate) {
-    // This would typically come from investment tracking
-    // For now, return 0 (would need to be configured)
-    return 0;
+    try {
+      // Find long-term investment accounts
+      const investmentAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'asset',
+        accountName: { $regex: /investment|securities|stock.*investment|bond.*investment/i },
+        isActive: true,
+        allowDirectPosting: true
+      });
+
+      let totalInvestments = 0;
+      for (const account of investmentAccounts) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        totalInvestments += balance;
+      }
+
+      return Math.max(0, totalInvestments);
+    } catch (error) {
+      console.error('Error calculating long-term investments:', error);
+      return 0;
+    }
   }
 
   // Calculate other assets
   async calculateOtherAssets(statementDate) {
-    // This would typically come from other asset tracking
-    // For now, return 0 (would need to be configured)
-    return 0;
+    try {
+      // Find other asset accounts that don't fit into main categories
+      const otherAssetAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'asset',
+        accountCategory: 'other_assets',
+        isActive: true,
+        allowDirectPosting: true,
+        accountName: { 
+          $not: { $regex: /goodwill|patent|trademark|intangible|investment|securities/i }
+        }
+      });
+
+      let totalOtherAssets = 0;
+      for (const account of otherAssetAccounts) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        totalOtherAssets += balance;
+      }
+
+      return Math.max(0, totalOtherAssets);
+    } catch (error) {
+      console.error('Error calculating other assets:', error);
+      return 0;
+    }
   }
 
   // Calculate liabilities
@@ -484,19 +719,12 @@ class BalanceSheetCalculationService {
   // Calculate accounts payable
   async calculateAccountsPayable(statementDate) {
     try {
-      // Get accounts payable from accounting transactions
-      const Transaction = require('../models/Transaction');
+      // Get account codes dynamically
+      const accountCodes = await this.getAccountCodes();
       
-      const apTransactions = await Transaction.find({
-        createdAt: { $lte: statementDate },
-        accountCode: '2001', // Accounts Payable
-        status: 'completed'
-      });
-
-      let apBalance = 0;
-      apTransactions.forEach(transaction => {
-        apBalance += transaction.creditAmount - transaction.debitAmount;
-      });
+      // Calculate accounts payable balance (dynamic lookup)
+      const apAccountCode = accountCodes.accountsPayable || '2001';
+      const apBalance = await this.calculateAccountBalance(apAccountCode, statementDate);
 
       return {
         tradePayables: Math.max(0, apBalance),
@@ -515,29 +743,133 @@ class BalanceSheetCalculationService {
 
   // Calculate accrued expenses
   async calculateAccruedExpenses(statementDate) {
-    // This would typically come from expense tracking system
-    // For now, return default values (would need to be configured)
-    return {
-      salariesPayable: 0,
-      utilitiesPayable: 0,
-      rentPayable: 0,
-      taxesPayable: 0,
-      interestPayable: 0,
-      otherAccruedExpenses: 0,
-      total: 0
-    };
+    try {
+      // Find accrued expense accounts
+      const accruedExpenseAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'liability',
+        accountCategory: 'accrued_expenses',
+        isActive: true,
+        allowDirectPosting: true
+      });
+
+      let salariesPayable = 0;
+      let utilitiesPayable = 0;
+      let rentPayable = 0;
+      let taxesPayable = 0;
+      let interestPayable = 0;
+      let otherAccruedExpenses = 0;
+
+      for (const account of accruedExpenseAccounts) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const accountName = (account.accountName || '').toLowerCase();
+
+        if (accountName.includes('salary') || accountName.includes('wage')) {
+          salariesPayable += balance;
+        } else if (accountName.includes('utilit')) {
+          utilitiesPayable += balance;
+        } else if (accountName.includes('rent')) {
+          rentPayable += balance;
+        } else if (accountName.includes('tax')) {
+          taxesPayable += balance;
+        } else if (accountName.includes('interest')) {
+          interestPayable += balance;
+        } else {
+          otherAccruedExpenses += balance;
+        }
+      }
+
+      // Also check for sales tax payable
+      const salesTaxPayableAccount = await ChartOfAccountsRepository.findOne({
+        accountCode: '2120',
+        accountName: { $regex: /sales.*tax.*payable/i },
+        isActive: true
+      });
+
+      if (salesTaxPayableAccount) {
+        const salesTaxBalance = await this.calculateAccountBalance(salesTaxPayableAccount.accountCode, statementDate);
+        taxesPayable += Math.max(0, salesTaxBalance);
+      }
+
+      const total = salariesPayable + utilitiesPayable + rentPayable + 
+                   taxesPayable + interestPayable + otherAccruedExpenses;
+
+      return {
+        salariesPayable: Math.max(0, salariesPayable),
+        utilitiesPayable: Math.max(0, utilitiesPayable),
+        rentPayable: Math.max(0, rentPayable),
+        taxesPayable: Math.max(0, taxesPayable),
+        interestPayable: Math.max(0, interestPayable),
+        otherAccruedExpenses: Math.max(0, otherAccruedExpenses),
+        total: Math.max(0, total)
+      };
+    } catch (error) {
+      console.error('Error calculating accrued expenses:', error);
+      return {
+        salariesPayable: 0,
+        utilitiesPayable: 0,
+        rentPayable: 0,
+        taxesPayable: 0,
+        interestPayable: 0,
+        otherAccruedExpenses: 0,
+        total: 0
+      };
+    }
   }
 
   // Calculate short-term debt
   async calculateShortTermDebt(statementDate) {
-    // This would typically come from debt tracking system
-    // For now, return default values (would need to be configured)
-    return {
-      creditLines: 0,
-      shortTermLoans: 0,
-      creditCardDebt: 0,
-      total: 0
-    };
+    try {
+      // Find short-term debt accounts
+      const shortTermDebtAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'liability',
+        accountCategory: 'current_liabilities',
+        isActive: true,
+        allowDirectPosting: true,
+        $or: [
+          { accountName: { $regex: /credit.*line|line.*credit/i } },
+          { accountName: { $regex: /short.*term.*loan|short.*term.*debt/i } },
+          { accountName: { $regex: /credit.*card/i } },
+          { accountCode: { $regex: /^21[3-9]/ } } // Common range for short-term debt
+        ]
+      });
+
+      let creditLines = 0;
+      let shortTermLoans = 0;
+      let creditCardDebt = 0;
+
+      for (const account of shortTermDebtAccounts) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const accountName = (account.accountName || '').toLowerCase();
+
+        if (accountName.includes('credit') && accountName.includes('line')) {
+          creditLines += balance;
+        } else if (accountName.includes('credit') && accountName.includes('card')) {
+          creditCardDebt += balance;
+        } else if (accountName.includes('short') && (accountName.includes('term') || accountName.includes('loan'))) {
+          shortTermLoans += balance;
+        } else {
+          // Default to short-term loans
+          shortTermLoans += balance;
+        }
+      }
+
+      const total = creditLines + shortTermLoans + creditCardDebt;
+
+      return {
+        creditLines: Math.max(0, creditLines),
+        shortTermLoans: Math.max(0, shortTermLoans),
+        creditCardDebt: Math.max(0, creditCardDebt),
+        total: Math.max(0, total)
+      };
+    } catch (error) {
+      console.error('Error calculating short-term debt:', error);
+      return {
+        creditLines: 0,
+        shortTermLoans: 0,
+        creditCardDebt: 0,
+        total: 0
+      };
+    }
   }
 
   // Calculate deferred revenue
@@ -564,35 +896,130 @@ class BalanceSheetCalculationService {
 
   // Calculate long-term debt
   async calculateLongTermDebt(statementDate) {
-    // This would typically come from debt tracking system
-    // For now, return default values (would need to be configured)
-    return {
-      mortgages: 0,
-      longTermLoans: 0,
-      bondsPayable: 0,
-      total: 0
-    };
+    try {
+      // Find long-term debt accounts
+      const longTermDebtAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'liability',
+        accountCategory: 'long_term_liabilities',
+        isActive: true,
+        allowDirectPosting: true
+      });
+
+      let mortgages = 0;
+      let longTermLoans = 0;
+      let bondsPayable = 0;
+
+      for (const account of longTermDebtAccounts) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const accountName = (account.accountName || '').toLowerCase();
+
+        if (accountName.includes('mortgage')) {
+          mortgages += balance;
+        } else if (accountName.includes('bond')) {
+          bondsPayable += balance;
+        } else if (accountName.includes('loan') || accountName.includes('debt')) {
+          longTermLoans += balance;
+        } else {
+          // Default to long-term loans
+          longTermLoans += balance;
+        }
+      }
+
+      const total = mortgages + longTermLoans + bondsPayable;
+
+      return {
+        mortgages: Math.max(0, mortgages),
+        longTermLoans: Math.max(0, longTermLoans),
+        bondsPayable: Math.max(0, bondsPayable),
+        total: Math.max(0, total)
+      };
+    } catch (error) {
+      console.error('Error calculating long-term debt:', error);
+      return {
+        mortgages: 0,
+        longTermLoans: 0,
+        bondsPayable: 0,
+        total: 0
+      };
+    }
   }
 
   // Calculate deferred tax liabilities
   async calculateDeferredTaxLiabilities(statementDate) {
-    // This would typically come from tax calculations
-    // For now, return 0 (would need to be configured)
-    return 0;
+    try {
+      // Find deferred tax liability accounts
+      const deferredTaxAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'liability',
+        accountCategory: 'long_term_liabilities',
+        isActive: true,
+        $or: [
+          { accountName: { $regex: /deferred.*tax/i } },
+          { accountName: { $regex: /tax.*deferred/i } }
+        ]
+      });
+
+      let totalDeferredTax = 0;
+      for (const account of deferredTaxAccounts) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        totalDeferredTax += balance;
+      }
+
+      return Math.max(0, totalDeferredTax);
+    } catch (error) {
+      console.error('Error calculating deferred tax liabilities:', error);
+      return 0;
+    }
   }
 
   // Calculate pension liabilities
   async calculatePensionLiabilities(statementDate) {
-    // This would typically come from HR/payroll system
-    // For now, return 0 (would need to be configured)
-    return 0;
+    try {
+      // Find pension liability accounts
+      const pensionAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'liability',
+        accountName: { $regex: /pension|retirement|benefit.*plan/i },
+        isActive: true,
+        allowDirectPosting: true
+      });
+
+      let totalPension = 0;
+      for (const account of pensionAccounts) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        totalPension += balance;
+      }
+
+      return Math.max(0, totalPension);
+    } catch (error) {
+      console.error('Error calculating pension liabilities:', error);
+      return 0;
+    }
   }
 
   // Calculate other long-term liabilities
   async calculateOtherLongTermLiabilities(statementDate) {
-    // This would typically come from other liability tracking
-    // For now, return 0 (would need to be configured)
-    return 0;
+    try {
+      // Find other long-term liability accounts
+      const otherLiabilityAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'liability',
+        accountCategory: 'long_term_liabilities',
+        isActive: true,
+        allowDirectPosting: true,
+        accountName: { 
+          $not: { $regex: /mortgage|loan|bond|deferred.*tax|pension|retirement/i }
+        }
+      });
+
+      let totalOtherLiabilities = 0;
+      for (const account of otherLiabilityAccounts) {
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        totalOtherLiabilities += balance;
+      }
+
+      return Math.max(0, totalOtherLiabilities);
+    } catch (error) {
+      console.error('Error calculating other long-term liabilities:', error);
+      return 0;
+    }
   }
 
   // Calculate equity
@@ -680,7 +1107,7 @@ class BalanceSheetCalculationService {
         return 0;
       }
       
-      const account = await ChartOfAccounts.findOne({ 
+      const account = await ChartOfAccountsRepository.findOne({ 
         accountCode: normalizedAccountCode, 
         isActive: true 
       });
@@ -692,7 +1119,7 @@ class BalanceSheetCalculationService {
       let balance = account.openingBalance || 0;
 
       // Calculate balance from transactions up to statement date
-      const transactions = await Transaction.aggregate([
+      const transactions = await TransactionRepository.aggregate([
         {
           $match: {
             accountCode: normalizedAccountCode,
@@ -734,7 +1161,7 @@ class BalanceSheetCalculationService {
       
       // Get all owner equity accounts from Chart of Accounts
       // Exclude system accounts (parent accounts) as they don't have direct balances
-      const ownerEquityAccounts = await ChartOfAccounts.find({
+      const ownerEquityAccounts = await ChartOfAccountsRepository.findAll({
         accountType: 'equity',
         accountCategory: 'owner_equity',
         isActive: true,
@@ -806,7 +1233,7 @@ class BalanceSheetCalculationService {
       let beginningRetainedEarnings = 0;
 
       if (previousPeriod) {
-        const previousBalanceSheet = await BalanceSheet.findOne({
+        const previousBalanceSheet = await BalanceSheetRepository.findOne({
           statementDate: previousPeriod,
           periodType
         });
@@ -846,7 +1273,7 @@ class BalanceSheetCalculationService {
       
       // Get equity accounts that are not owner_equity or retained_earnings
       // Exclude system accounts (parent accounts) as they don't have direct balances
-      const otherEquityAccounts = await ChartOfAccounts.find({
+      const otherEquityAccounts = await ChartOfAccountsRepository.findAll({
         accountType: 'equity',
         accountCategory: { $nin: ['owner_equity', 'retained_earnings'] },
         isActive: true,
@@ -917,10 +1344,23 @@ class BalanceSheetCalculationService {
   // Calculate current period earnings
   async calculateCurrentPeriodEarnings(statementDate, periodType) {
     try {
-      // This would typically be integrated with P&L calculation
-      // For now, calculate based on orders
+      // Integrate with P&L service for accurate net income
       const startDate = this.getPreviousPeriod(statementDate, periodType);
       
+      // Try to find existing P&L statement for this period
+      const plStatement = await FinancialStatement.findOne({
+        type: 'profit_loss',
+        'period.startDate': startDate,
+        'period.endDate': statementDate,
+        status: { $in: ['draft', 'review', 'approved', 'published'] }
+      }).sort({ createdAt: -1 });
+
+      if (plStatement && plStatement.netIncome && plStatement.netIncome.amount !== undefined) {
+        // Use actual net income from P&L statement
+        return plStatement.netIncome.amount;
+      }
+
+      // Fallback: Calculate from orders if P&L not available
       const orders = await Sales.find({
         createdAt: { $gte: startDate, $lte: statementDate },
         orderType: 'sale',
@@ -931,13 +1371,13 @@ class BalanceSheetCalculationService {
       let totalCosts = 0;
 
       for (const order of orders) {
-        totalRevenue += order.total;
+        totalRevenue += order.pricing?.total || order.total || 0;
         
         // Calculate cost of goods sold
         for (const item of order.items) {
           const product = await Product.findById(item.product);
           if (product) {
-            totalCosts += item.quantity * (product.cost || 0);
+            totalCosts += item.quantity * (item.unitCost || product.pricing?.cost || 0);
           }
         }
       }
@@ -956,15 +1396,43 @@ class BalanceSheetCalculationService {
 
   // Calculate dividends paid
   async calculateDividendsPaid(statementDate, periodType) {
-    // This would typically come from dividend tracking
-    // For now, return 0 (would need to be configured)
-    return 0;
+    try {
+      // Find dividend accounts
+      const dividendAccounts = await ChartOfAccountsRepository.findAll({
+        accountType: 'equity',
+        accountName: { $regex: /dividend/i },
+        isActive: true,
+        allowDirectPosting: true
+      });
+
+      const startDate = this.getPreviousPeriod(statementDate, periodType);
+      let totalDividends = 0;
+
+      // Sum dividends from transactions in the period
+      for (const account of dividendAccounts) {
+        const dividendTransactions = await TransactionRepository.findAll({
+          accountCode: account.accountCode,
+          createdAt: { $gte: startDate, $lte: statementDate },
+          status: 'completed',
+          debitAmount: { $gt: 0 } // Dividends reduce equity (debit)
+        });
+
+        dividendTransactions.forEach(transaction => {
+          totalDividends += transaction.debitAmount || 0;
+        });
+      }
+
+      return Math.max(0, totalDividends);
+    } catch (error) {
+      console.error('Error calculating dividends paid:', error);
+      return 0;
+    }
   }
 
   // Get balance sheet comparison data
   async getComparisonData(balanceSheetId, comparisonType = 'previous') {
     try {
-      const currentBalanceSheet = await BalanceSheet.findById(balanceSheetId);
+      const currentBalanceSheet = await BalanceSheetRepository.findById(balanceSheetId);
       if (!currentBalanceSheet) {
         throw new Error('Balance sheet not found');
       }
@@ -973,15 +1441,17 @@ class BalanceSheetCalculationService {
       
       switch (comparisonType) {
         case 'previous':
-          comparisonBalanceSheet = await BalanceSheet.findOne({
+          comparisonBalanceSheet = await BalanceSheetRepository.findOne({
             statementDate: { $lt: currentBalanceSheet.statementDate },
             periodType: currentBalanceSheet.periodType
-          }).sort({ statementDate: -1 });
+          }, {
+            sort: { statementDate: -1 }
+          });
           break;
         case 'year_ago':
           const yearAgo = new Date(currentBalanceSheet.statementDate);
           yearAgo.setFullYear(yearAgo.getFullYear() - 1);
-          comparisonBalanceSheet = await BalanceSheet.findOne({
+          comparisonBalanceSheet = await BalanceSheetRepository.findOne({
             statementDate: { $gte: yearAgo, $lt: new Date(yearAgo.getTime() + 24 * 60 * 60 * 1000) },
             periodType: currentBalanceSheet.periodType
           });

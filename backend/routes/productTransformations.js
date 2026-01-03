@@ -1,12 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const { body, param, query, validationResult } = require('express-validator');
-const ProductTransformation = require('../models/ProductTransformation');
-const ProductVariant = require('../models/ProductVariant');
-const Product = require('../models/Product');
-const Inventory = require('../models/Inventory');
-const StockMovement = require('../models/StockMovement');
+const ProductTransformation = require('../models/ProductTransformation'); // Still needed for new ProductTransformation()
+const ProductVariant = require('../models/ProductVariant'); // Still needed for model reference
+const Product = require('../models/Product'); // Still needed for model reference
+const Inventory = require('../models/Inventory'); // Still needed for new Inventory()
+const StockMovement = require('../models/StockMovement'); // Still needed for new StockMovement()
 const { auth, requirePermission } = require('../middleware/auth');
+const productTransformationRepository = require('../repositories/ProductTransformationRepository');
+const productVariantRepository = require('../repositories/ProductVariantRepository');
+const productRepository = require('../repositories/ProductRepository');
+const inventoryRepository = require('../repositories/InventoryRepository');
+const stockMovementRepository = require('../repositories/StockMovementRepository');
 
 // @route   GET /api/product-transformations
 // @desc    Get all product transformations with filters
@@ -40,11 +45,14 @@ router.get('/', [
       if (endDate) filter.transformationDate.$lte = new Date(endDate);
     }
 
-    const transformations = await ProductTransformation.find(filter)
-      .populate('baseProduct', 'name description pricing')
-      .populate('targetVariant', 'variantName displayName pricing transformationCost')
-      .populate('performedBy', 'firstName lastName')
-      .sort({ transformationDate: -1 });
+    const transformations = await productTransformationRepository.findWithFilter(filter, {
+      sort: { transformationDate: -1 },
+      populate: [
+        { path: 'baseProduct', select: 'name description pricing' },
+        { path: 'targetVariant', select: 'variantName displayName pricing transformationCost' },
+        { path: 'performedBy', select: 'firstName lastName' }
+      ]
+    });
 
     res.json({
       success: true,
@@ -71,10 +79,13 @@ router.get('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const transformation = await ProductTransformation.findById(req.params.id)
-      .populate('baseProduct', 'name description pricing inventory')
-      .populate('targetVariant', 'variantName displayName pricing transformationCost inventory')
-      .populate('performedBy', 'firstName lastName email');
+    const transformation = await productTransformationRepository.findById(req.params.id, {
+      populate: [
+        { path: 'baseProduct', select: 'name description pricing inventory' },
+        { path: 'targetVariant', select: 'variantName displayName pricing transformationCost inventory' },
+        { path: 'performedBy', select: 'firstName lastName email' }
+      ]
+    });
 
     if (!transformation) {
       return res.status(404).json({ message: 'Product transformation not found' });
@@ -111,14 +122,15 @@ router.post('/', [
     const { baseProduct, targetVariant, quantity, unitTransformationCost, notes } = req.body;
 
     // Get base product
-    const baseProductDoc = await Product.findById(baseProduct);
+    const baseProductDoc = await productRepository.findById(baseProduct);
     if (!baseProductDoc) {
       return res.status(404).json({ message: 'Base product not found' });
     }
 
     // Get target variant
-    const variantDoc = await ProductVariant.findById(targetVariant)
-      .populate('baseProduct');
+    const variantDoc = await productVariantRepository.findById(targetVariant, {
+      populate: [{ path: 'baseProduct' }]
+    });
     
     if (!variantDoc) {
       return res.status(404).json({ message: 'Target variant not found' });
@@ -132,7 +144,7 @@ router.post('/', [
     }
 
     // Check base product stock
-    const baseInventory = await Inventory.findOne({ product: baseProduct });
+    const baseInventory = await inventoryRepository.findByProduct(baseProduct);
     if (!baseInventory || baseInventory.currentStock < quantity) {
       return res.status(400).json({ 
         message: `Insufficient stock. Available: ${baseInventory?.currentStock || 0}, Required: ${quantity}` 
@@ -140,7 +152,7 @@ router.post('/', [
     }
 
     // Get or create variant inventory
-    let variantInventory = await Inventory.findOne({ product: targetVariant });
+    let variantInventory = await inventoryRepository.findByProduct(targetVariant);
     if (!variantInventory) {
       variantInventory = new Inventory({
         product: targetVariant,
@@ -260,10 +272,13 @@ router.post('/', [
     });
     await variantMovement.save();
 
-    const populatedTransformation = await ProductTransformation.findById(transformation._id)
-      .populate('baseProduct', 'name description pricing')
-      .populate('targetVariant', 'variantName displayName pricing')
-      .populate('performedBy', 'firstName lastName');
+    const populatedTransformation = await productTransformationRepository.findById(transformation._id, {
+      populate: [
+        { path: 'baseProduct', select: 'name description pricing' },
+        { path: 'targetVariant', select: 'variantName displayName pricing' },
+        { path: 'performedBy', select: 'firstName lastName' }
+      ]
+    });
 
     res.status(201).json({
       success: true,
@@ -290,7 +305,7 @@ router.put('/:id/cancel', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const transformation = await ProductTransformation.findById(req.params.id);
+    const transformation = await productTransformationRepository.findById(req.params.id);
     if (!transformation) {
       return res.status(404).json({ message: 'Product transformation not found' });
     }

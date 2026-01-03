@@ -92,7 +92,7 @@ export const LoadingPage = ({ message = 'Loading...' }) => (
 
 export const LoadingInline = ({ message = 'Loading...' }) => (
   <span className="inline-flex items-center justify-center py-1">
-    <LoadingSpinner size="sm" className="mr-2" />
+    <LoadingSpinner size="sm" inline={true} className="mr-2" />
     <span className="text-gray-600">{message}</span>
   </span>
 );

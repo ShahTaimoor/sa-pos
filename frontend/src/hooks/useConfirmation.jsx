@@ -48,7 +48,7 @@ export const useConfirmation = () => {
       await confirmation.onConfirm();
       hideConfirmation();
     } catch (error) {
-      console.error('Confirmation action failed:', error);
+      // Confirmation action failed - error handled by caller
       setLoading(false);
     }
   }, [confirmation.onConfirm, hideConfirmation, setLoading]);

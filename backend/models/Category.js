@@ -33,6 +33,17 @@ const categorySchema = new mongoose.Schema({
   metadata: {
     type: Map,
     of: String
+  },
+  
+  // Soft Delete Fields
+  isDeleted: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  deletedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true,

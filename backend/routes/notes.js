@@ -1,9 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const Note = require('../models/Note');
-const User = require('../models/User');
 const { auth, requirePermission } = require('../middleware/auth');
 const { body, validationResult, query } = require('express-validator');
+const noteService = require('../services/noteService');
 
 // @route   GET /api/notes
 // @desc    Get notes for an entity
@@ -22,59 +21,11 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { entityType, entityId, isPrivate, search, tags, limit = 50, page = 1 } = req.query;
-    const userId = req.user.id;
-    
-    // Build query
-    const query = { status: 'active' };
-    
-    if (entityType && entityId) {
-      query.entityType = entityType;
-      query.entityId = entityId;
-    }
-    
-    // Privacy filter: show public notes or private notes created by current user
-    if (isPrivate !== undefined) {
-      query.isPrivate = isPrivate === 'true';
-    } else {
-      // Default: show all notes user has access to
-      query.$or = [
-        { isPrivate: false },
-        { isPrivate: true, createdBy: userId }
-      ];
-    }
-    
-    // Search filter
-    if (search) {
-      query.$text = { $search: search };
-    }
-    
-    // Tags filter
-    if (tags) {
-      const tagArray = tags.split(',').map(t => t.trim().toLowerCase());
-      query.tags = { $in: tagArray };
-    }
-    
-    // Execute query with pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const notes = await Note.find(query)
-      .populate('createdBy', 'name username email')
-      .populate('mentions.userId', 'name username email')
-      .sort({ isPinned: -1, createdAt: -1 })
-      .limit(parseInt(limit))
-      .skip(skip)
-      .lean();
-    
-    const total = await Note.countDocuments(query);
+    const { notes, pagination } = await noteService.getNotes(req.query, req.user.id);
     
     res.json({
       notes,
-      pagination: {
-        total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / parseInt(limit))
-      }
+      pagination
     });
   } catch (error) {
     console.error('Get notes error:', error);
@@ -87,22 +38,15 @@ router.get('/', [
 // @access  Private
 router.get('/:id', auth, async (req, res) => {
   try {
-    const note = await Note.findById(req.params.id)
-      .populate('createdBy', 'name username email')
-      .populate('mentions.userId', 'name username email')
-      .populate('history.editedBy', 'name username email');
-    
-    if (!note) {
-      return res.status(404).json({ message: 'Note not found' });
-    }
-    
-    // Check access: private notes only visible to creator
-    if (note.isPrivate && note.createdBy._id.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Access denied to private note' });
-    }
-    
+    const note = await noteService.getNoteById(req.params.id, req.user.id);
     res.json(note);
   } catch (error) {
+    if (error.message === 'Note not found') {
+      return res.status(404).json({ message: error.message });
+    }
+    if (error.message === 'Access denied to private note') {
+      return res.status(403).json({ message: error.message });
+    }
     console.error('Get note error:', error);
     res.status(500).json({ message: 'Failed to fetch note', error: error.message });
   }
@@ -127,29 +71,7 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { entityType, entityId, content, htmlContent, isPrivate, tags, isPinned } = req.body;
-    
-    // Create note
-    const note = new Note({
-      entityType,
-      entityId,
-      content,
-      htmlContent: htmlContent || content,
-      isPrivate: isPrivate || false,
-      tags: tags || [],
-      isPinned: isPinned || false,
-      createdBy: req.user.id
-    });
-    
-    // Extract mentions
-    const users = await User.find({}).select('name username email');
-    note.extractMentions(users);
-    
-    await note.save();
-    
-    // Populate before returning
-    await note.populate('createdBy', 'name username email');
-    await note.populate('mentions.userId', 'name username email');
+    const note = await noteService.createNote(req.body, req.user.id);
     
     res.status(201).json(note);
   } catch (error) {
@@ -176,40 +98,16 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const note = await Note.findById(req.params.id);
-    
-    if (!note) {
-      return res.status(404).json({ message: 'Note not found' });
-    }
-    
-    // Check permissions: only creator can edit
-    if (note.createdBy.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Only the note creator can edit this note' });
-    }
-    
-    // Add to history before updating
-    note.addHistoryEntry(req.user.id, req.body.changeReason);
-    
-    // Update fields
-    if (req.body.content !== undefined) note.content = req.body.content;
-    if (req.body.htmlContent !== undefined) note.htmlContent = req.body.htmlContent;
-    if (req.body.isPrivate !== undefined) note.isPrivate = req.body.isPrivate;
-    if (req.body.tags !== undefined) note.tags = req.body.tags;
-    if (req.body.isPinned !== undefined) note.isPinned = req.body.isPinned;
-    
-    // Re-extract mentions
-    const users = await User.find({}).select('name username email');
-    note.extractMentions(users);
-    
-    await note.save();
-    
-    // Populate before returning
-    await note.populate('createdBy', 'name username email');
-    await note.populate('mentions.userId', 'name username email');
-    await note.populate('history.editedBy', 'name username email');
+    const note = await noteService.updateNote(req.params.id, req.body, req.user.id);
     
     res.json(note);
   } catch (error) {
+    if (error.message === 'Note not found') {
+      return res.status(404).json({ message: error.message });
+    }
+    if (error.message === 'Only the note creator can edit this note') {
+      return res.status(403).json({ message: error.message });
+    }
     console.error('Update note error:', error);
     res.status(500).json({ message: 'Failed to update note', error: error.message });
   }
@@ -220,23 +118,16 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const note = await Note.findById(req.params.id);
+    const result = await noteService.deleteNote(req.params.id, req.user.id);
     
-    if (!note) {
-      return res.status(404).json({ message: 'Note not found' });
-    }
-    
-    // Check permissions: only creator can delete
-    if (note.createdBy.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Only the note creator can delete this note' });
-    }
-    
-    // Soft delete
-    note.status = 'deleted';
-    await note.save();
-    
-    res.json({ message: 'Note deleted successfully' });
+    res.json(result);
   } catch (error) {
+    if (error.message === 'Note not found') {
+      return res.status(404).json({ message: error.message });
+    }
+    if (error.message === 'Only the note creator can delete this note') {
+      return res.status(403).json({ message: error.message });
+    }
     console.error('Delete note error:', error);
     res.status(500).json({ message: 'Failed to delete note', error: error.message });
   }
@@ -247,21 +138,15 @@ router.delete('/:id', auth, async (req, res) => {
 // @access  Private
 router.get('/:id/history', auth, async (req, res) => {
   try {
-    const note = await Note.findById(req.params.id)
-      .populate('history.editedBy', 'name username email')
-      .select('history');
-    
-    if (!note) {
-      return res.status(404).json({ message: 'Note not found' });
-    }
-    
-    // Check access
-    if (note.isPrivate && note.createdBy.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Access denied' });
-    }
-    
-    res.json(note.history);
+    const history = await noteService.getNoteHistory(req.params.id, req.user.id);
+    res.json(history);
   } catch (error) {
+    if (error.message === 'Note not found') {
+      return res.status(404).json({ message: error.message });
+    }
+    if (error.message === 'Access denied') {
+      return res.status(403).json({ message: error.message });
+    }
     console.error('Get note history error:', error);
     res.status(500).json({ message: 'Failed to fetch note history', error: error.message });
   }
@@ -272,24 +157,7 @@ router.get('/:id/history', auth, async (req, res) => {
 // @access  Private
 router.get('/search/users', auth, async (req, res) => {
   try {
-    const { q } = req.query;
-    
-    if (!q || q.length < 2) {
-      return res.json([]);
-    }
-    
-    const users = await User.find({
-      $or: [
-        { name: { $regex: q, $options: 'i' } },
-        { username: { $regex: q, $options: 'i' } },
-        { email: { $regex: q, $options: 'i' } }
-      ],
-      role: { $ne: 'deleted' }
-    })
-    .select('name username email')
-    .limit(10)
-    .lean();
-    
+    const users = await noteService.searchUsers(req.query.q);
     res.json(users);
   } catch (error) {
     console.error('Search users error:', error);

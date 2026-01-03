@@ -4,7 +4,8 @@ const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const backupService = require('../services/backupService');
 const backupScheduler = require('../services/backupScheduler');
-const Backup = require('../models/Backup');
+const Backup = require('../models/Backup'); // Still needed for model reference
+const backupRepository = require('../repositories/BackupRepository');
 
 const router = express.Router();
 
@@ -105,23 +106,17 @@ router.get('/', [
       if (endDate) filter.createdAt.$lte = endDate;
     }
 
-    const backups = await Backup.find(filter)
-      .populate('triggeredBy', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+    const result = await backupRepository.findWithPagination(filter, {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      sort: { createdAt: -1 }
+    });
 
-    const total = await Backup.countDocuments(filter);
+    const { backups, total, pagination } = result;
 
     res.json({
       backups,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page * limit < total,
-        hasPrev: page > 1,
-      },
+      pagination
     });
   } catch (error) {
     console.error('Error fetching backups:', error);
@@ -163,9 +158,12 @@ router.get('/:backupId', [
   try {
     const { backupId } = req.params;
     
-    const backup = await Backup.findById(backupId)
-      .populate('triggeredBy', 'firstName lastName email')
-      .populate('verification.verifiedBy', 'firstName lastName email');
+    const backup = await backupRepository.findById(backupId, {
+      populate: [
+        { path: 'triggeredBy', select: 'firstName lastName email' },
+        { path: 'verification.verifiedBy', select: 'firstName lastName email' }
+      ]
+    });
 
     if (!backup) {
       return res.status(404).json({ message: 'Backup not found' });
@@ -234,7 +232,7 @@ router.delete('/:backupId', [
       return res.status(400).json({ message: 'Delete confirmation is required' });
     }
 
-    const backup = await Backup.findById(backupId);
+    const backup = await backupRepository.findById(backupId);
     if (!backup) {
       return res.status(404).json({ message: 'Backup not found' });
     }
@@ -250,7 +248,7 @@ router.delete('/:backupId', [
     }
 
     // Delete database record
-    await Backup.findByIdAndDelete(backupId);
+    await backupRepository.delete(backupId);
 
     res.json({ message: 'Backup deleted successfully' });
   } catch (error) {
@@ -272,7 +270,7 @@ router.post('/:backupId/verify', [
   try {
     const { backupId } = req.params;
     
-    const backup = await Backup.findById(backupId);
+    const backup = await backupRepository.findById(backupId);
     if (!backup) {
       return res.status(404).json({ message: 'Backup not found' });
     }
@@ -302,7 +300,7 @@ router.post('/:backupId/retry', [
   try {
     const { backupId } = req.params;
     
-    const backup = await Backup.findById(backupId);
+    const backup = await backupRepository.findById(backupId);
     if (!backup) {
       return res.status(404).json({ message: 'Backup not found' });
     }

@@ -2,7 +2,6 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
-const Discount = require('../models/Discount');
 const discountService = require('../services/discountService');
 
 const router = express.Router();
@@ -402,13 +401,7 @@ router.get('/active', [
   sanitizeRequest,
 ], async (req, res) => {
   try {
-    const discounts = await Discount.find({
-      isActive: true,
-      validFrom: { $lte: new Date() },
-      validUntil: { $gte: new Date() }
-    })
-    .select('name code type value description validFrom validUntil applicableTo conditions')
-    .sort({ priority: -1, createdAt: -1 });
+    const discounts = await discountService.getActiveDiscounts();
     
     res.json(discounts);
   } catch (error) {

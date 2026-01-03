@@ -319,24 +319,19 @@ router.get('/:paymentId', [
       });
     }
 
-    const Payment = require('../models/Payment');
-    const payment = await Payment.findById(req.params.paymentId)
-      .populate('orderId', 'orderNumber total customer')
-      .populate('processing.processedBy', 'firstName lastName email');
-
-    if (!payment) {
-      return res.status(404).json({
-        success: false,
-        message: 'Payment not found'
-      });
-    }
+    const payment = await paymentService.getPaymentById(req.params.paymentId);
 
     res.json({
       success: true,
       data: payment
     });
-
   } catch (error) {
+    if (error.message === 'Payment not found') {
+      return res.status(404).json({
+        success: false,
+        message: error.message
+      });
+    }
     console.error('Get payment details error:', error);
     res.status(500).json({
       success: false,

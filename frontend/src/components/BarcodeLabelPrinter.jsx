@@ -58,7 +58,6 @@ export const BarcodeLabelPrinter = ({
       });
       return canvas;
     } catch (error) {
-      console.error('Error generating barcode:', error);
       return null;
     }
   };

@@ -688,7 +688,7 @@ export const Purchase = ({ tabId, editData }) => {
         try {
           refetchProducts();
         } catch (error) {
-          console.warn('Failed to refetch products:', error);
+          // Failed to refetch products - silent fail
         }
       }
       
@@ -701,10 +701,10 @@ export const Purchase = ({ tabId, editData }) => {
               setSelectedSupplier(result.data.data);
             }
           }).catch((error) => {
-            console.warn('Failed to refetch supplier:', error);
+            // Failed to refetch supplier - silent fail
           });
         } catch (error) {
-          console.warn('Failed to call refetchSupplier:', error);
+          // Failed to call refetchSupplier - silent fail
         }
       }
       
@@ -751,7 +751,7 @@ export const Purchase = ({ tabId, editData }) => {
         try {
           refetchProducts();
         } catch (error) {
-          console.warn('Failed to refetch products:', error);
+          // Failed to refetch products - silent fail
         }
       }
       
@@ -767,13 +767,13 @@ export const Purchase = ({ tabId, editData }) => {
           }).catch((error) => {
             // Ignore "Cannot refetch a query that has not been started yet" errors
             if (!error?.message?.includes('has not been started')) {
-              console.warn('Failed to refetch supplier:', error);
+              // Failed to refetch supplier - silent fail
             }
           });
         } catch (error) {
           // Ignore "Cannot refetch a query that has not been started yet" errors
           if (!error?.message?.includes('has not been started')) {
-            console.warn('Failed to call refetchSupplier:', error);
+            // Failed to call refetchSupplier - silent fail
           }
         }
       }
@@ -786,7 +786,7 @@ export const Purchase = ({ tabId, editData }) => {
             searchSuppliers(searchTerm);
           }
         } catch (error) {
-          console.warn('Failed to search suppliers:', error);
+          // Failed to search suppliers - silent fail
         }
       }
     } catch (error) {

@@ -64,7 +64,6 @@ export const BarcodeScanner = ({
         }
       );
     } catch (err) {
-      console.error('Error starting scanner:', err);
       setError(err.message || 'Failed to start camera. Please check permissions.');
       setScanning(false);
     }
@@ -75,7 +74,7 @@ export const BarcodeScanner = ({
       try {
         await html5QrCodeRef.current.stop();
       } catch (err) {
-        console.error('Error stopping scanner:', err);
+        // Error stopping scanner - silent fail
       }
     }
     setScanning(false);

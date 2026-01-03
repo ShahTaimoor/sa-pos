@@ -1,11 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const { body, validationResult } = require('express-validator');
-const DropShipping = require('../models/DropShipping');
-const Supplier = require('../models/Supplier');
-const Customer = require('../models/Customer');
-const Product = require('../models/Product');
+const DropShipping = require('../models/DropShipping'); // Still needed for new DropShipping()
+const Supplier = require('../models/Supplier'); // Still needed for model reference
+const Customer = require('../models/Customer'); // Still needed for model reference
+const Product = require('../models/Product'); // Still needed for model reference
 const { auth, requirePermission } = require('../middleware/auth');
+const dropShippingRepository = require('../repositories/DropShippingRepository');
+const supplierRepository = require('../repositories/SupplierRepository');
+const customerRepository = require('../repositories/CustomerRepository');
+const productRepository = require('../repositories/ProductRepository');
 
 // Helper function to handle validation errors
 const handleValidationErrors = (req, res, next) => {
@@ -83,28 +87,17 @@ router.get('/', auth, async (req, res) => {
       ];
     }
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const result = await dropShippingRepository.findWithPagination(filter, {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      sort: { transactionDate: -1 }
+    });
 
-    const transactions = await DropShipping.find(filter)
-      .populate('supplier', 'companyName contactPerson email phone businessType')
-      .populate('customer', 'displayName firstName lastName email phone businessType')
-      .populate('items.product', 'name description pricing inventory')
-      .populate('createdBy', 'firstName lastName email')
-      .populate('lastModifiedBy', 'firstName lastName email')
-      .sort({ transactionDate: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    const total = await DropShipping.countDocuments(filter);
+    const { transactions, total, pagination } = result;
 
     res.json({
       transactions,
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total,
-        pages: Math.ceil(total / parseInt(limit))
-      }
+      pagination
     });
   } catch (error) {
     console.error('Get drop shipping transactions error:', error);
@@ -126,7 +119,7 @@ router.get('/stats', auth, async (req, res) => {
       if (endDate) filter.transactionDate.$lte = new Date(endDate);
     }
 
-    const stats = await DropShipping.aggregate([
+    const stats = await dropShippingRepository.aggregate([
       { $match: filter },
       {
         $group: {
@@ -140,7 +133,7 @@ router.get('/stats', auth, async (req, res) => {
       }
     ]);
 
-    const statusBreakdown = await DropShipping.aggregate([
+    const statusBreakdown = await dropShippingRepository.aggregate([
       { $match: filter },
       {
         $group: {
@@ -171,12 +164,15 @@ router.get('/stats', auth, async (req, res) => {
 // @access  Private
 router.get('/:id', auth, async (req, res) => {
   try {
-    const transaction = await DropShipping.findById(req.params.id)
-      .populate('supplier', 'companyName contactPerson email phone businessType currentBalance pendingBalance')
-      .populate('customer', 'displayName firstName lastName email phone businessType currentBalance pendingBalance creditLimit')
-      .populate('items.product', 'name description pricing inventory')
-      .populate('createdBy', 'firstName lastName email')
-      .populate('lastModifiedBy', 'firstName lastName email');
+    const transaction = await dropShippingRepository.findById(req.params.id, {
+      populate: [
+        { path: 'supplier', select: 'companyName contactPerson email phone businessType currentBalance pendingBalance' },
+        { path: 'customer', select: 'displayName firstName lastName email phone businessType currentBalance pendingBalance creditLimit' },
+        { path: 'items.product', select: 'name description pricing inventory' },
+        { path: 'createdBy', select: 'firstName lastName email' },
+        { path: 'lastModifiedBy', select: 'firstName lastName email' }
+      ]
+    });
 
     if (!transaction) {
       return res.status(404).json({ message: 'Drop shipping transaction not found' });
@@ -206,19 +202,19 @@ router.post('/', [
 ], async (req, res) => {
   try {
     // Verify supplier and customer exist
-    const supplier = await Supplier.findById(req.body.supplier);
+    const supplier = await supplierRepository.findById(req.body.supplier);
     if (!supplier) {
       return res.status(400).json({ message: 'Supplier not found' });
     }
 
-    const customer = await Customer.findById(req.body.customer);
+    const customer = await customerRepository.findById(req.body.customer);
     if (!customer) {
       return res.status(400).json({ message: 'Customer not found' });
     }
 
     // Verify all products exist
     const productIds = req.body.items.map(item => item.product);
-    const products = await Product.find({ _id: { $in: productIds } });
+    const products = await productRepository.findAll({ _id: { $in: productIds } });
     
     if (products.length !== productIds.length) {
       return res.status(400).json({ message: 'One or more products not found' });
@@ -249,16 +245,14 @@ router.post('/', [
     await transaction.save();
 
     // Update balances for suppliers and customers
-    await Supplier.findByIdAndUpdate(
-      supplier._id,
-      { $inc: { pendingBalance: transaction.supplierTotal } }
-    );
+    await supplierRepository.update(supplier._id, {
+      $inc: { pendingBalance: transaction.supplierTotal }
+    });
 
     if (transaction.customerPayment.method === 'account') {
-      await Customer.findByIdAndUpdate(
-        customer._id,
-        { $inc: { pendingBalance: transaction.customerTotal } }
-      );
+      await customerRepository.update(customer._id, {
+        $inc: { pendingBalance: transaction.customerTotal }
+      });
     }
 
     // Populate and return
@@ -306,7 +300,7 @@ router.put('/:id', [
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const transaction = await DropShipping.findById(req.params.id);
+    const transaction = await dropShippingRepository.findById(req.params.id);
     
     if (!transaction) {
       return res.status(404).json({ message: 'Drop shipping transaction not found' });
@@ -324,7 +318,7 @@ router.put('/:id', [
 
     // If supplier info changed, update it
     if (req.body.supplier && req.body.supplier !== transaction.supplier.toString()) {
-      const supplier = await Supplier.findById(req.body.supplier);
+      const supplier = await supplierRepository.findById(req.body.supplier);
       if (supplier) {
         updateData.supplierInfo = {
           companyName: supplier.companyName,
@@ -337,7 +331,7 @@ router.put('/:id', [
 
     // If customer info changed, update it
     if (req.body.customer && req.body.customer !== transaction.customer.toString()) {
-      const customer = await Customer.findById(req.body.customer);
+      const customer = await customerRepository.findById(req.body.customer);
       if (customer) {
         updateData.customerInfo = {
           displayName: customer.displayName || customer.name,
@@ -355,7 +349,7 @@ router.put('/:id', [
     // Update balances
     if (transaction.supplierTotal !== oldSupplierTotal) {
       const balanceDiff = transaction.supplierTotal - oldSupplierTotal;
-      await Supplier.findByIdAndUpdate(
+      await supplierRepository.update(
         transaction.supplier,
         { $inc: { pendingBalance: balanceDiff } }
       );
@@ -363,7 +357,7 @@ router.put('/:id', [
 
     if (transaction.customerTotal !== oldCustomerTotal && transaction.customerPayment.method === 'account') {
       const balanceDiff = transaction.customerTotal - oldCustomerTotal;
-      await Customer.findByIdAndUpdate(
+      await customerRepository.update(
         transaction.customer,
         { $inc: { pendingBalance: balanceDiff } }
       );
@@ -396,26 +390,26 @@ router.delete('/:id', [
   requirePermission('delete_drop_shipping')
 ], async (req, res) => {
   try {
-    const transaction = await DropShipping.findById(req.params.id);
+    const transaction = await dropShippingRepository.findById(req.params.id);
     
     if (!transaction) {
       return res.status(404).json({ message: 'Drop shipping transaction not found' });
     }
 
     // Reverse balance adjustments
-    await Supplier.findByIdAndUpdate(
+    await supplierRepository.update(
       transaction.supplier,
       { $inc: { pendingBalance: -transaction.supplierTotal } }
     );
 
     if (transaction.customerPayment.method === 'account') {
-      await Customer.findByIdAndUpdate(
+      await customerRepository.update(
         transaction.customer,
         { $inc: { pendingBalance: -transaction.customerTotal } }
       );
     }
 
-    await transaction.deleteOne();
+    await dropShippingRepository.delete(transaction._id);
 
     res.json({ message: 'Drop shipping transaction deleted successfully' });
   } catch (error) {
@@ -433,23 +427,25 @@ router.put('/:id/status', [
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const transaction = await DropShipping.findById(req.params.id);
+    const transaction = await dropShippingRepository.findById(req.params.id);
     
     if (!transaction) {
       return res.status(404).json({ message: 'Drop shipping transaction not found' });
     }
 
-    transaction.status = req.body.status;
-    transaction.lastModifiedBy = req.user._id;
+    const updateData = {
+      status: req.body.status,
+      lastModifiedBy: req.user._id
+    };
 
     // Set delivery date if marked as delivered or completed
     if (req.body.status === 'delivered' || req.body.status === 'completed') {
-      transaction.actualDelivery = new Date();
+      updateData.actualDelivery = new Date();
     }
 
-    await transaction.save();
+    const updatedTransaction = await dropShippingRepository.update(transaction._id, updateData);
 
-    await transaction.populate([
+    await updatedTransaction.populate([
       { path: 'supplier', select: 'companyName contactPerson email phone' },
       { path: 'customer', select: 'displayName firstName lastName email phone' },
       { path: 'items.product', select: 'name description' }
@@ -457,7 +453,7 @@ router.put('/:id/status', [
 
     res.json({
       message: 'Transaction status updated successfully',
-      transaction
+      transaction: updatedTransaction
     });
   } catch (error) {
     console.error('Update status error:', error);

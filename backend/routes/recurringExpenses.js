@@ -1,17 +1,21 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
-const RecurringExpense = require('../models/RecurringExpense');
-const Supplier = require('../models/Supplier');
-const Customer = require('../models/Customer');
-const Bank = require('../models/Bank');
-const CashPayment = require('../models/CashPayment');
-const BankPayment = require('../models/BankPayment');
+const RecurringExpense = require('../models/RecurringExpense'); // Still needed for new RecurringExpense(), static methods, and session
+const Supplier = require('../models/Supplier'); // Still needed for model reference
+const Customer = require('../models/Customer'); // Still needed for model reference
+const Bank = require('../models/Bank'); // Still needed for model reference
+const CashPayment = require('../models/CashPayment'); // Still needed for new CashPayment()
+const BankPayment = require('../models/BankPayment'); // Still needed for new BankPayment()
 const {
   calculateInitialDueDate,
   calculateNextDueDate,
   hasReminderWindowStarted
 } = require('../services/recurringExpenseService');
+const recurringExpenseRepository = require('../repositories/RecurringExpenseRepository');
+const supplierRepository = require('../repositories/SupplierRepository');
+const customerRepository = require('../repositories/CustomerRepository');
+const bankRepository = require('../repositories/BankRepository');
 
 const router = express.Router();
 
@@ -26,21 +30,21 @@ const handleValidation = (req, res) => {
 
 const validateRelatedEntities = async ({ supplier, customer, bank }) => {
   if (supplier) {
-    const supplierExists = await Supplier.exists({ _id: supplier });
+    const supplierExists = await supplierRepository.exists({ _id: supplier });
     if (!supplierExists) {
       throw new Error('Supplier not found');
     }
   }
 
   if (customer) {
-    const customerExists = await Customer.exists({ _id: customer });
+    const customerExists = await customerRepository.exists({ _id: customer });
     if (!customerExists) {
       throw new Error('Customer not found');
     }
   }
 
   if (bank) {
-    const bankDoc = await Bank.findById(bank);
+    const bankDoc = await bankRepository.findById(bank);
     if (!bankDoc) {
       throw new Error('Bank account not found');
     }
@@ -102,12 +106,15 @@ router.get(
         filter.nextDueDate.$lte = end;
       }
 
-      const recurringExpenses = await RecurringExpense.find(filter)
-        .sort({ nextDueDate: 1, name: 1 })
-        .populate('supplier', 'name companyName businessName displayName')
-        .populate('customer', 'name firstName lastName businessName displayName email')
-        .populate('bank', 'bankName accountNumber accountName')
-        .populate('expenseAccount', 'accountName accountCode');
+      const recurringExpenses = await recurringExpenseRepository.findWithFilter(filter, {
+        sort: { nextDueDate: 1, name: 1 },
+        populate: [
+          { path: 'supplier', select: 'name companyName businessName displayName' },
+          { path: 'customer', select: 'name firstName lastName businessName displayName email' },
+          { path: 'bank', select: 'bankName accountNumber accountName' },
+          { path: 'expenseAccount', select: 'accountName accountCode' }
+        ]
+      });
 
       res.json({
         success: true,
@@ -143,14 +150,17 @@ router.get(
     end.setHours(23, 59, 59, 999);
 
     try {
-      const upcomingExpenses = await RecurringExpense.find({
+      const upcomingExpenses = await recurringExpenseRepository.findWithFilter({
         status: 'active',
         nextDueDate: { $lte: end }
-      })
-        .sort({ nextDueDate: 1 })
-        .populate('supplier', 'name companyName businessName displayName')
-        .populate('customer', 'name firstName lastName businessName displayName email')
-        .populate('bank', 'bankName accountNumber accountName');
+      }, {
+        sort: { nextDueDate: 1 },
+        populate: [
+          { path: 'supplier', select: 'name companyName businessName displayName' },
+          { path: 'customer', select: 'name firstName lastName businessName displayName email' },
+          { path: 'bank', select: 'bankName accountNumber accountName' }
+        ]
+      });
 
       const filtered = upcomingExpenses.filter((expense) =>
         hasReminderWindowStarted(
@@ -314,7 +324,7 @@ router.put(
         tags
       } = req.body;
 
-      const recurringExpense = await RecurringExpense.findById(req.params.id);
+      const recurringExpense = await recurringExpenseRepository.findById(req.params.id);
       if (!recurringExpense) {
         return res.status(404).json({
           success: false,
@@ -408,7 +418,7 @@ router.delete(
     }
 
     try {
-      const recurringExpense = await RecurringExpense.findById(req.params.id);
+      const recurringExpense = await recurringExpenseRepository.findById(req.params.id);
       if (!recurringExpense) {
         return res.status(404).json({
           success: false,
@@ -454,7 +464,7 @@ router.post(
 
     try {
       const { paymentDate, paymentType, notes } = req.body;
-      const recurringExpense = await RecurringExpense.findById(req.params.id).session(session);
+      const recurringExpense = await recurringExpenseRepository.findByIdWithSession(req.params.id, { session });
 
       if (!recurringExpense) {
         await session.abortTransaction();
@@ -629,7 +639,7 @@ router.post(
 
     try {
       const { snoozeDays, targetDate } = req.body;
-      const recurringExpense = await RecurringExpense.findById(req.params.id);
+      const recurringExpense = await recurringExpenseRepository.findById(req.params.id);
 
       if (!recurringExpense) {
         return res.status(404).json({

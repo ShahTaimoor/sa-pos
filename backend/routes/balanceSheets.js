@@ -2,8 +2,7 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
-const BalanceSheet = require('../models/BalanceSheet');
-const balanceSheetCalculationService = require('../services/balanceSheetCalculationService');
+const balanceSheetService = require('../services/balanceSheetService');
 
 const router = express.Router();
 
@@ -21,7 +20,7 @@ router.post('/generate', [
   try {
     const { statementDate, periodType = 'monthly' } = req.body;
 
-    const balanceSheet = await balanceSheetCalculationService.generateBalanceSheet(
+    const balanceSheet = await balanceSheetService.generateBalanceSheet(
       statementDate,
       periodType,
       req.user._id
@@ -64,47 +63,19 @@ router.get('/', [
       search
     } = req.query;
 
-    const skip = (page - 1) * limit;
-    const filter = {};
-
-    // Apply filters
-    if (status) filter.status = status;
-    if (periodType) filter.periodType = periodType;
-
-    // Date range filter
-    if (startDate || endDate) {
-      filter.statementDate = {};
-      if (startDate) filter.statementDate.$gte = startDate;
-      if (endDate) filter.statementDate.$lte = endDate;
-    }
-
-    // Search filter
-    if (search) {
-      filter.$or = [
-        { statementNumber: { $regex: search, $options: 'i' } },
-        { 'metadata.notes': { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const balanceSheets = await BalanceSheet.find(filter)
-      .populate([
-        { path: 'metadata.generatedBy', select: 'firstName lastName email' }
-      ])
-      .sort({ statementDate: -1 })
-      .skip(skip)
-      .limit(limit);
-
-    const total = await BalanceSheet.countDocuments(filter);
+    const result = await balanceSheetService.getBalanceSheets({
+      page,
+      limit,
+      status,
+      periodType,
+      startDate,
+      endDate,
+      search
+    });
 
     res.json({
-      balanceSheets,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page * limit < total,
-        hasPrev: page > 1,
-      },
+      balanceSheets: result.balanceSheets,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Error fetching balance sheets:', error);
@@ -125,18 +96,13 @@ router.get('/:balanceSheetId', [
   try {
     const { balanceSheetId } = req.params;
     
-    const balanceSheet = await BalanceSheet.findById(balanceSheetId)
-      .populate([
-        { path: 'metadata.generatedBy', select: 'firstName lastName email' },
-        { path: 'auditTrail.performedBy', select: 'firstName lastName email' }
-      ]);
-
-    if (!balanceSheet) {
-      return res.status(404).json({ message: 'Balance sheet not found' });
-    }
+    const balanceSheet = await balanceSheetService.getBalanceSheetById(balanceSheetId);
 
     res.json(balanceSheet);
   } catch (error) {
+    if (error.message === 'Balance sheet not found') {
+      return res.status(404).json({ message: 'Balance sheet not found' });
+    }
     console.error('Error fetching balance sheet:', error);
     res.status(500).json({ message: 'Server error fetching balance sheet', error: error.message });
   }
@@ -158,30 +124,21 @@ router.put('/:balanceSheetId/status', [
     const { balanceSheetId } = req.params;
     const { status, notes } = req.body;
     
-    const balanceSheet = await BalanceSheet.findById(balanceSheetId);
-    if (!balanceSheet) {
-      return res.status(404).json({ message: 'Balance sheet not found' });
-    }
-
-    // Use the updateStatus method which properly handles status changes with audit trail
-    // This ensures the status change is finalized and properly audited in the correct order
-    await balanceSheet.updateStatus(
-      status,
-      req.user._id,
-      notes || `Status changed to ${status}`
-    );
-
-    // Track approval information in metadata when status is approved
-    if (status === 'approved' && balanceSheet.metadata) {
-      balanceSheet.metadata.approvedBy = req.user._id;
-      balanceSheet.metadata.approvedAt = new Date();
-    }
+    const balanceSheet = await balanceSheetService.updateStatus(balanceSheetId, status, req.user._id, notes);
 
     res.json({
       message: 'Balance sheet status updated successfully',
-      balanceSheet
+      balanceSheet: {
+        statementNumber: balanceSheet.statementNumber,
+        status: balanceSheet.status,
+        approvedBy: balanceSheet.approvedBy,
+        approvedAt: balanceSheet.approvedAt
+      }
     });
   } catch (error) {
+    if (error.message === 'Balance sheet not found') {
+      return res.status(404).json({ message: 'Balance sheet not found' });
+    }
     console.error('Error updating balance sheet status:', error);
     res.status(500).json({ message: 'Server error updating balance sheet status', error: error.message });
   }
@@ -200,44 +157,19 @@ router.put('/:balanceSheetId', [
   try {
     const { balanceSheetId } = req.params;
     
-    const balanceSheet = await BalanceSheet.findById(balanceSheetId);
-    if (!balanceSheet) {
-      return res.status(404).json({ message: 'Balance sheet not found' });
-    }
-
-    // Only allow updates to draft status balance sheets
-    if (balanceSheet.status !== 'draft') {
-      return res.status(400).json({ 
-        message: 'Only draft balance sheets can be updated' 
-      });
-    }
-
-    // Update balance sheet data
-    const updatedData = { ...req.body };
-    delete updatedData._id;
-    delete updatedData.statementNumber;
-    delete updatedData.statementDate;
-    delete updatedData.metadata;
-
-    Object.assign(balanceSheet, updatedData);
-
-    // Add audit trail entry (await to ensure it's saved before continuing)
-    // Note: addAuditEntry saves internally, but we still save afterward to ensure all changes are persisted
-    await balanceSheet.addAuditEntry(
-      'updated',
-      req.user._id,
-      'Balance sheet data updated',
-      updatedData
-    );
-
-    // Save again to ensure all updates are persisted (addAuditEntry already saved audit entry)
-    await balanceSheet.save();
+    const balanceSheet = await balanceSheetService.updateBalanceSheet(balanceSheetId, req.body, req.user._id);
 
     res.json({
       message: 'Balance sheet updated successfully',
       balanceSheet
     });
   } catch (error) {
+    if (error.message === 'Balance sheet not found') {
+      return res.status(404).json({ message: 'Balance sheet not found' });
+    }
+    if (error.message === 'Only draft balance sheets can be updated') {
+      return res.status(400).json({ message: error.message });
+    }
     console.error('Error updating balance sheet:', error);
     res.status(500).json({ message: 'Server error updating balance sheet', error: error.message });
   }
@@ -256,22 +188,16 @@ router.delete('/:balanceSheetId', [
   try {
     const { balanceSheetId } = req.params;
     
-    const balanceSheet = await BalanceSheet.findById(balanceSheetId);
-    if (!balanceSheet) {
+    const result = await balanceSheetService.deleteBalanceSheet(balanceSheetId);
+
+    res.json({ message: result.message });
+  } catch (error) {
+    if (error.message === 'Balance sheet not found') {
       return res.status(404).json({ message: 'Balance sheet not found' });
     }
-
-    // Only allow deletion of draft status balance sheets
-    if (balanceSheet.status !== 'draft') {
-      return res.status(400).json({ 
-        message: 'Only draft balance sheets can be deleted' 
-      });
+    if (error.message === 'Only draft balance sheets can be deleted') {
+      return res.status(400).json({ message: error.message });
     }
-
-    await BalanceSheet.findByIdAndDelete(balanceSheetId);
-
-    res.json({ message: 'Balance sheet deleted successfully' });
-  } catch (error) {
     console.error('Error deleting balance sheet:', error);
     res.status(500).json({ message: 'Server error deleting balance sheet', error: error.message });
   }
@@ -347,11 +273,7 @@ router.get('/latest', [
   try {
     const { periodType = 'monthly' } = req.query;
     
-    const balanceSheet = await BalanceSheet.findOne({ periodType })
-      .populate([
-        { path: 'metadata.generatedBy', select: 'firstName lastName email' }
-      ])
-      .sort({ statementDate: -1 });
+    const balanceSheet = await balanceSheetService.getLatestByPeriodType(periodType);
 
     if (!balanceSheet) {
       return res.status(404).json({ message: 'No balance sheet found' });
@@ -381,12 +303,9 @@ router.post('/:balanceSheetId/audit', [
     const { balanceSheetId } = req.params;
     const { action, details, changes } = req.body;
     
-    const balanceSheet = await BalanceSheet.findById(balanceSheetId);
-    if (!balanceSheet) {
-      return res.status(404).json({ message: 'Balance sheet not found' });
-    }
-
-    // addAuditEntry saves internally, so we can await it and remove the redundant save
+    const balanceSheet = await balanceSheetService.getBalanceSheetById(balanceSheetId);
+    
+    // Use the model's addAuditEntry method (it saves internally)
     await balanceSheet.addAuditEntry(action, req.user._id, details, changes);
 
     res.json({

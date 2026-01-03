@@ -121,7 +121,7 @@ const CreateDiscountModal = ({ isOpen, onClose, onSuccess }) => {
       }).unwrap();
       setCodeSuggestions(response?.suggestions || response?.data?.suggestions || []);
     } catch (error) {
-      console.error('Error generating code suggestions:', error);
+      // Error generating code suggestions - silent fail
     }
   };
 

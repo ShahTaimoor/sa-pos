@@ -4,13 +4,17 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
-const Sales = require('../models/Sales');
-const Product = require('../models/Product');
-const Customer = require('../models/Customer');
+const Sales = require('../models/Sales'); // Still needed for new Sales() and static methods
+const Product = require('../models/Product'); // Still needed for validation
+const Customer = require('../models/Customer'); // Still needed for validation
 const CashReceipt = require('../models/CashReceipt');
 const BankReceipt = require('../models/BankReceipt');
 const Inventory = require('../models/Inventory');
 const StockMovementService = require('../services/stockMovementService');
+const salesService = require('../services/salesService');
+const salesRepository = require('../repositories/SalesRepository');
+const productRepository = require('../repositories/ProductRepository');
+const customerRepository = require('../repositories/CustomerRepository');
 const { auth, requirePermission } = require('../middleware/auth');
 const { preventPOSDuplicates } = require('../middleware/duplicatePrevention');
 
@@ -57,149 +61,12 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    // Check if all orders are requested (no pagination)
-    const getAllOrders = req.query.all === 'true' || req.query.all === true || 
-                        (req.query.limit && parseInt(req.query.limit) >= 999999);
-    
-    const page = getAllOrders ? 1 : (parseInt(req.query.page) || 1);
-    const limit = getAllOrders ? 999999 : (parseInt(req.query.limit) || 20);
-    const skip = getAllOrders ? 0 : ((page - 1) * limit);
-    
-    // Build filter
-    const filter = {};
-    
-    // Search by product name - find orders containing products with matching names
-    if (req.query.productSearch) {
-      const productSearchTerm = req.query.productSearch.trim();
-      
-      // Find products matching the search term
-      const matchingProducts = await Product.find({
-        name: { $regex: productSearchTerm, $options: 'i' }
-      }).select('_id').lean();
-      
-      if (matchingProducts.length > 0) {
-        const productIds = matchingProducts.map(p => p._id);
-        // Find orders that have items with matching products
-        filter['items.product'] = { $in: productIds };
-      } else {
-        // If no products match, return empty result
-        filter._id = { $in: [] };
-      }
-    }
-    
-    // Search functionality - search in order number, customer info, and notes
-    if (req.query.search) {
-      const searchTerm = req.query.search.trim();
-      const searchConditions = [
-        { orderNumber: { $regex: searchTerm, $options: 'i' } },
-        { 'customerInfo.businessName': { $regex: searchTerm, $options: 'i' } },
-        { 'customerInfo.name': { $regex: searchTerm, $options: 'i' } },
-        { 'customerInfo.email': { $regex: searchTerm, $options: 'i' } },
-        { notes: { $regex: searchTerm, $options: 'i' } }
-      ];
-      
-      // If search term looks like it could be a customer name, also search in Customer collection
-      // and match by customer ID
-      const customerMatches = await Customer.find({
-        $or: [
-          { businessName: { $regex: searchTerm, $options: 'i' } },
-          { name: { $regex: searchTerm, $options: 'i' } },
-          { firstName: { $regex: searchTerm, $options: 'i' } },
-          { lastName: { $regex: searchTerm, $options: 'i' } },
-          { email: { $regex: searchTerm, $options: 'i' } }
-        ]
-      }).select('_id').lean();
-      
-      if (customerMatches.length > 0) {
-        const customerIds = customerMatches.map(c => c._id);
-        searchConditions.push({ customer: { $in: customerIds } });
-      }
-      
-      // Combine with existing filter if productSearch was used
-      if (filter['items.product'] || filter._id) {
-        filter.$and = [
-          filter['items.product'] ? { 'items.product': filter['items.product'] } : filter._id,
-          { $or: searchConditions }
-        ];
-        delete filter['items.product'];
-        delete filter._id;
-      } else {
-        filter.$or = searchConditions;
-      }
-    }
-    
-    if (req.query.status) {
-      filter.status = req.query.status;
-    }
-    
-    if (req.query.paymentStatus) {
-      filter['payment.status'] = req.query.paymentStatus;
-    }
-    
-    if (req.query.orderType) {
-      filter.orderType = req.query.orderType;
-    }
-    
-    if (req.query.dateFrom || req.query.dateTo) {
-      filter.createdAt = {};
-      if (req.query.dateFrom) {
-        // Set to start of day (00:00:00) in local timezone
-        const dateFrom = new Date(req.query.dateFrom);
-        dateFrom.setHours(0, 0, 0, 0);
-        filter.createdAt.$gte = dateFrom;
-      }
-      if (req.query.dateTo) {
-        // Set to end of day (23:59:59.999) - add 1 day and use $lt to include entire toDate
-        const dateTo = new Date(req.query.dateTo);
-        dateTo.setDate(dateTo.getDate() + 1);
-        dateTo.setHours(0, 0, 0, 0);
-        filter.createdAt.$lt = dateTo;
-      }
-    }
-    
-    let query = Sales.find(filter)
-      .populate('customer', 'firstName lastName businessName email phone address pendingBalance')
-      .populate('items.product', 'name description pricing')
-      .populate('createdBy', 'firstName lastName')
-      .sort({ createdAt: -1 });
-    
-    // Only apply skip and limit if not getting all orders
-    if (!getAllOrders) {
-      query = query.skip(skip).limit(limit);
-    }
-    
-    const orders = await query;
-    const total = await Sales.countDocuments(filter);
-    
-    // Transform names to uppercase
-    orders.forEach(order => {
-      if (order.customer) {
-        order.customer = transformCustomerToUppercase(order.customer);
-      }
-      if (order.items && Array.isArray(order.items)) {
-        order.items.forEach(item => {
-          if (item.product) {
-            item.product = transformProductToUppercase(item.product);
-          }
-        });
-      }
-    });
+    // Call service to get sales orders
+    const result = await salesService.getSalesOrders(req.query);
     
     res.json({
-      orders,
-      pagination: getAllOrders ? {
-        current: 1,
-        pages: 1,
-        total,
-        hasNext: false,
-        hasPrev: false
-      } : {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page < Math.ceil(total / limit),
-        hasPrev: page > 1
-      }
+      orders: result.orders,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Get orders error:', error);
@@ -276,15 +143,7 @@ router.get('/period-summary', [
 // @access  Private
 router.get('/:id', auth, async (req, res) => {
   try {
-    const order = await Sales.findById(req.params.id)
-      .populate('customer')
-      .populate('items.product', 'name description pricing')
-      .populate('createdBy', 'firstName lastName')
-      .populate('processedBy', 'firstName lastName');
-    
-    if (!order) {
-      return res.status(404).json({ message: 'Order not found' });
-    }
+    const order = await salesService.getSalesOrderById(req.params.id);
     
     // Transform names to uppercase
     if (order.customer) {
@@ -313,12 +172,15 @@ router.get('/customer/:customerId/last-prices', auth, async (req, res) => {
     const { customerId } = req.params;
     
     // Find the most recent order for this customer
-    const lastOrder = await Sales.findOne({ customer: customerId })
-      .populate('items.product', 'name _id')
-      .sort({ createdAt: -1 })
-      .limit(1);
+    const lastOrder = await salesRepository.findByCustomer(customerId, {
+      sort: { createdAt: -1 },
+      limit: 1,
+      populate: [{ path: 'items.product', select: 'name _id' }]
+    });
     
-    if (!lastOrder) {
+    const lastOrderDoc = lastOrder && lastOrder.length > 0 ? lastOrder[0] : null;
+    
+    if (!lastOrderDoc) {
       return res.json({ 
         success: true,
         message: 'No previous orders found for this customer',
@@ -328,7 +190,7 @@ router.get('/customer/:customerId/last-prices', auth, async (req, res) => {
     
     // Extract product prices from last order
     const prices = {};
-    lastOrder.items.forEach(item => {
+    lastOrderDoc.items.forEach(item => {
       if (item.product && item.product._id) {
         prices[item.product._id.toString()] = {
           productId: item.product._id.toString(),
@@ -342,8 +204,8 @@ router.get('/customer/:customerId/last-prices', auth, async (req, res) => {
     res.json({
       success: true,
       message: 'Last order prices retrieved successfully',
-      orderNumber: lastOrder.orderNumber,
-      orderDate: lastOrder.createdAt,
+      orderNumber: lastOrderDoc.orderNumber,
+      orderDate: lastOrderDoc.createdAt,
       prices: prices
     });
   } catch (error) {
@@ -358,7 +220,7 @@ router.get('/customer/:customerId/last-prices', auth, async (req, res) => {
 router.post('/', [
   auth,
   requirePermission('create_orders'),
-  preventPOSDuplicates, // Prevent duplicate POS submissions
+  preventPOSDuplicates, // Backend safety net for duplicate prevention
   body('orderType').isIn(['retail', 'wholesale', 'return', 'exchange']).withMessage('Invalid order type'),
   body('customer').optional().isMongoId().withMessage('Invalid customer ID'),
   body('items').isArray({ min: 1 }).withMessage('Order must have at least one item'),
@@ -392,7 +254,7 @@ router.post('/', [
     // Validate customer if provided
     let customerData = null;
     if (customer) {
-      customerData = await Customer.findById(customer);
+      customerData = await customerRepository.findById(customer);
       if (!customerData) {
         return res.status(400).json({ message: 'Customer not found' });
       }
@@ -405,7 +267,7 @@ router.post('/', [
     let totalTax = 0;
     
     for (const item of items) {
-      const product = await Product.findById(item.product);
+      const product = await productRepository.findById(item.product);
       if (!product) {
         return res.status(400).json({ message: `Product ${item.product} not found` });
       }
@@ -533,7 +395,7 @@ router.post('/', [
     
     for (const item of items) {
       try {
-        const product = await Product.findById(item.product);
+        const product = await productRepository.findById(item.product);
         if (!product) {
           return res.status(400).json({ message: `Product ${item.product} not found during inventory update` });
         }
@@ -720,8 +582,8 @@ router.post('/', [
         orderNumber: order.orderNumber,
         itemsCount: order.items?.length
       });
-      // Don't fail the order creation if stock movement tracking fails
-      // but log it for debugging
+      // Note: Don't fail the order creation if stock movement tracking fails
+      // The error is logged for investigation but doesn't block the order
     }
 
     // Distribute profit for investor-linked products (only if order is confirmed/paid)
@@ -927,6 +789,7 @@ router.put('/:id/status', [
 router.put('/:id', [
   auth,
   requirePermission('edit_orders'),
+  preventPOSDuplicates, // Backend safety net for duplicate prevention
   body('customer').optional().isMongoId().withMessage('Valid customer is required'),
   body('orderType').optional().isIn(['retail', 'wholesale', 'return', 'exchange']).withMessage('Invalid order type'),
   body('notes').optional().trim().isLength({ max: 1000 }).withMessage('Notes too long'),
@@ -983,7 +846,7 @@ router.put('/:id', [
     if (req.body.items && req.body.items.length > 0) {
       // Validate products and stock availability
       for (const item of req.body.items) {
-        const product = await Product.findById(item.product);
+        const product = await productRepository.findById(item.product);
         if (!product) {
           return res.status(400).json({ message: `Product ${item.product} not found` });
         }
@@ -1015,7 +878,7 @@ router.put('/:id', [
       const newOrderItems = [];
       
       for (const item of req.body.items) {
-        const product = await Product.findById(item.product);
+        const product = await productRepository.findById(item.product);
         const itemSubtotal = item.quantity * item.unitPrice;
         const itemDiscount = itemSubtotal * ((item.discountPercent || 0) / 100);
         const itemTaxable = itemSubtotal - itemDiscount;
@@ -1454,9 +1317,7 @@ router.get('/today/summary', [
     const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
     
-    const orders = await Sales.find({
-      createdAt: { $gte: startOfDay, $lt: endOfDay }
-    });
+    const orders = await salesRepository.findByDateRange(startOfDay, endOfDay, { lean: true });
     
     const summary = {
       totalOrders: orders.length,

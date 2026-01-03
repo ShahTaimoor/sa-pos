@@ -211,6 +211,17 @@ const PLStatementDetail = ({ statement, onExport, onShare }) => {
                 </div>
               </div>
               
+              {showDetails && statement.revenue?.salesDiscounts?.details?.length > 0 && (
+                <div className="px-4 py-2 bg-gray-25 border-b border-gray-200">
+                  {statement.revenue.salesDiscounts.details.map((detail, index) => (
+                    <div key={index} className="flex justify-between items-center py-1 text-sm">
+                      <span className="text-gray-600 ml-4 capitalize">{detail.type || 'Discount'}</span>
+                      <span className="text-gray-900">{formatCurrency(detail.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
               <div className="px-4 py-3 bg-blue-50 border-b border-gray-200">
                 <div className="flex justify-between items-center">
                   <span className="font-semibold text-gray-900">Net Sales</span>
@@ -283,6 +294,24 @@ const PLStatementDetail = ({ statement, onExport, onShare }) => {
                 </div>
               </div>
               
+              {showDetails && statement.costOfGoodsSold?.purchaseReturnDetails?.length > 0 && (
+                <div className="px-4 py-2 bg-gray-25 border-b border-gray-200">
+                  {statement.costOfGoodsSold.purchaseReturnDetails.map((returnDetail, index) => (
+                    <div key={index} className="flex justify-between items-center py-1 text-sm">
+                      <span className="text-gray-600 ml-4">
+                        • {returnDetail.supplier || returnDetail.invoiceNumber || 'Return'}
+                        {returnDetail.date && (
+                          <span className="ml-2 text-xs text-gray-500">
+                            ({new Date(returnDetail.date).toLocaleDateString()})
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-gray-900">{formatCurrency(returnDetail.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
               <div className="px-4 py-3 border-b border-gray-200">
                 <div className="flex justify-between items-center">
                   <span className="font-medium text-gray-900">Less: Purchase Discounts</span>
@@ -291,6 +320,24 @@ const PLStatementDetail = ({ statement, onExport, onShare }) => {
                   </span>
                 </div>
               </div>
+              
+              {showDetails && statement.costOfGoodsSold?.purchaseDiscountDetails?.length > 0 && (
+                <div className="px-4 py-2 bg-gray-25 border-b border-gray-200">
+                  {statement.costOfGoodsSold.purchaseDiscountDetails.map((discountDetail, index) => (
+                    <div key={index} className="flex justify-between items-center py-1 text-sm">
+                      <span className="text-gray-600 ml-4">
+                        • {discountDetail.supplier || discountDetail.invoiceNumber || 'Discount'}
+                        {discountDetail.date && (
+                          <span className="ml-2 text-xs text-gray-500">
+                            ({new Date(discountDetail.date).toLocaleDateString()})
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-gray-900">{formatCurrency(discountDetail.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               
               <div className="px-4 py-3 border-b border-gray-200">
                 <div className="flex justify-between items-center">
@@ -303,7 +350,20 @@ const PLStatementDetail = ({ statement, onExport, onShare }) => {
               
               <div className="px-4 py-4 bg-red-50 border-t-2 border-red-200">
                 <div className="flex justify-between items-center">
-                  <span className="text-lg font-bold text-gray-900">Total Cost of Goods Sold</span>
+                  <div>
+                    <span className="text-lg font-bold text-gray-900">Total Cost of Goods Sold</span>
+                    {statement.costOfGoodsSold?.totalCOGS?.calculationMethod && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Calculation Method: <span className="font-medium capitalize">{statement.costOfGoodsSold.totalCOGS.calculationMethod.replace('_', ' ')}</span>
+                        {statement.costOfGoodsSold?.cogsFromInventoryFormula && 
+                         statement.costOfGoodsSold.cogsFromInventoryFormula !== statement.costOfGoodsSold?.totalCOGS?.amount && (
+                          <span className="ml-2">
+                            (Formula: {formatCurrency(statement.costOfGoodsSold.cogsFromInventoryFormula)})
+                          </span>
+                        )}
+                      </p>
+                    )}
+                  </div>
                   <span className="text-xl font-bold text-red-600">
                     {formatCurrency(statement.costOfGoodsSold?.totalCOGS?.amount)}
                   </span>
@@ -344,9 +404,33 @@ const PLStatementDetail = ({ statement, onExport, onShare }) => {
               {showDetails && statement.operatingExpenses?.sellingExpenses?.details?.length > 0 && (
                 <div className="px-4 py-2 bg-gray-25">
                   {statement.operatingExpenses.sellingExpenses.details.map((detail, index) => (
-                    <div key={index} className="flex justify-between items-center py-1 text-sm">
-                      <span className="text-gray-600 ml-4">{detail.category.replace('_', ' ')}</span>
-                      <span className="text-gray-900">{formatCurrency(detail.amount)}</span>
+                    <div key={index}>
+                      <div className="flex justify-between items-center py-1 text-sm">
+                        <div className="flex-1">
+                          <span className="text-gray-600 ml-4 font-medium">{detail.category?.replace(/_/g, ' ') || 'Category'}</span>
+                          {/* Budget Variance */}
+                          {detail.budget && (
+                            <div className="ml-4 mt-1 text-xs">
+                              <span className="text-gray-500">Budget: {formatCurrency(detail.budget.amount)}</span>
+                              <span className={`ml-2 ${detail.budget.variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                Variance: {formatCurrency(detail.budget.variance)} ({formatPercent(Math.abs(detail.budget.variancePercent))})
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-gray-900 font-medium">{formatCurrency(detail.amount)}</span>
+                      </div>
+                      {/* Subcategories (Transaction Details) */}
+                      {detail.subcategories && detail.subcategories.length > 0 && (
+                        <div className="ml-8 mt-1 space-y-1">
+                          {detail.subcategories.map((subcat, subIndex) => (
+                            <div key={subIndex} className="flex justify-between items-center text-xs text-gray-500">
+                              <span className="ml-2">• {subcat.name || subcat.transactionId || 'Transaction'}</span>
+                              <span>{formatCurrency(subcat.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -362,9 +446,33 @@ const PLStatementDetail = ({ statement, onExport, onShare }) => {
               {showDetails && statement.operatingExpenses?.administrativeExpenses?.details?.length > 0 && (
                 <div className="px-4 py-2 bg-gray-25">
                   {statement.operatingExpenses.administrativeExpenses.details.map((detail, index) => (
-                    <div key={index} className="flex justify-between items-center py-1 text-sm">
-                      <span className="text-gray-600 ml-4">{detail.category.replace('_', ' ')}</span>
-                      <span className="text-gray-900">{formatCurrency(detail.amount)}</span>
+                    <div key={index}>
+                      <div className="flex justify-between items-center py-1 text-sm">
+                        <div className="flex-1">
+                          <span className="text-gray-600 ml-4 font-medium">{detail.category?.replace(/_/g, ' ') || 'Category'}</span>
+                          {/* Budget Variance */}
+                          {detail.budget && (
+                            <div className="ml-4 mt-1 text-xs">
+                              <span className="text-gray-500">Budget: {formatCurrency(detail.budget.amount)}</span>
+                              <span className={`ml-2 ${detail.budget.variance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                Variance: {formatCurrency(detail.budget.variance)} ({formatPercent(Math.abs(detail.budget.variancePercent))})
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-gray-900 font-medium">{formatCurrency(detail.amount)}</span>
+                      </div>
+                      {/* Subcategories (Transaction Details) */}
+                      {detail.subcategories && detail.subcategories.length > 0 && (
+                        <div className="ml-8 mt-1 space-y-1">
+                          {detail.subcategories.map((subcat, subIndex) => (
+                            <div key={subIndex} className="flex justify-between items-center text-xs text-gray-500">
+                              <span className="ml-2">• {subcat.name || subcat.transactionId || 'Transaction'}</span>
+                              <span>{formatCurrency(subcat.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -404,18 +512,94 @@ const PLStatementDetail = ({ statement, onExport, onShare }) => {
             </h2>
             <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
               <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
-                <span className="font-medium text-gray-900">Other Income</span>
-                <span className="float-right font-semibold text-green-600">
-                  {formatCurrency(statement.otherIncome?.totalOtherIncome?.amount)}
-                </span>
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-gray-900">Other Income</span>
+                  <span className="font-semibold text-green-600">
+                    {formatCurrency(statement.otherIncome?.totalOtherIncome?.amount)}
+                  </span>
+                </div>
               </div>
               
+              {showDetails && (
+                <div className="px-4 py-2 bg-gray-25 border-b border-gray-200">
+                  {statement.otherIncome?.interestIncome > 0 && (
+                    <div className="flex justify-between items-center py-1 text-sm">
+                      <span className="text-gray-600 ml-4">Interest Income</span>
+                      <span className="text-gray-900">{formatCurrency(statement.otherIncome.interestIncome)}</span>
+                    </div>
+                  )}
+                  {statement.otherIncome?.rentalIncome > 0 && (
+                    <div className="flex justify-between items-center py-1 text-sm">
+                      <span className="text-gray-600 ml-4">Rental Income</span>
+                      <span className="text-gray-900">{formatCurrency(statement.otherIncome.rentalIncome)}</span>
+                    </div>
+                  )}
+                  {statement.otherIncome?.other?.amount > 0 && (
+                    <div className="flex justify-between items-center py-1 text-sm">
+                      <span className="text-gray-600 ml-4">Other Income</span>
+                      <span className="text-gray-900">{formatCurrency(statement.otherIncome.other.amount)}</span>
+                    </div>
+                  )}
+                  {statement.otherIncome?.other?.details?.length > 0 && (
+                    <div className="ml-8 mt-1 space-y-1">
+                      {statement.otherIncome.other.details.map((detail, index) => (
+                        <div key={index} className="flex justify-between items-center text-xs text-gray-500">
+                          <span className="ml-2">• {detail.source || detail.description || 'Other'}</span>
+                          <span>{formatCurrency(detail.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              
               <div className="px-4 py-3 border-b border-gray-200">
-                <span className="font-medium text-gray-900">Other Expenses</span>
-                <span className="float-right font-semibold text-red-600">
-                  {formatCurrency(statement.otherExpenses?.totalOtherExpenses?.amount)}
-                </span>
+                <div className="flex justify-between items-center">
+                  <span className="font-medium text-gray-900">Other Expenses</span>
+                  <span className="font-semibold text-red-600">
+                    {formatCurrency(statement.otherExpenses?.totalOtherExpenses?.amount)}
+                  </span>
+                </div>
               </div>
+              
+              {showDetails && (
+                <div className="px-4 py-2 bg-gray-25 border-b border-gray-200">
+                  {statement.otherExpenses?.interestExpense > 0 && (
+                    <div className="flex justify-between items-center py-1 text-sm">
+                      <span className="text-gray-600 ml-4">Interest Expense</span>
+                      <span className="text-gray-900">{formatCurrency(statement.otherExpenses.interestExpense)}</span>
+                    </div>
+                  )}
+                  {statement.otherExpenses?.depreciation > 0 && (
+                    <div className="flex justify-between items-center py-1 text-sm">
+                      <span className="text-gray-600 ml-4">Depreciation</span>
+                      <span className="text-gray-900">{formatCurrency(statement.otherExpenses.depreciation)}</span>
+                    </div>
+                  )}
+                  {statement.otherExpenses?.amortization > 0 && (
+                    <div className="flex justify-between items-center py-1 text-sm">
+                      <span className="text-gray-600 ml-4">Amortization</span>
+                      <span className="text-gray-900">{formatCurrency(statement.otherExpenses.amortization)}</span>
+                    </div>
+                  )}
+                  {statement.otherExpenses?.other?.amount > 0 && (
+                    <div className="flex justify-between items-center py-1 text-sm">
+                      <span className="text-gray-600 ml-4">Other Expenses</span>
+                      <span className="text-gray-900">{formatCurrency(statement.otherExpenses.other.amount)}</span>
+                    </div>
+                  )}
+                  {statement.otherExpenses?.other?.details?.length > 0 && (
+                    <div className="ml-8 mt-1 space-y-1">
+                      {statement.otherExpenses.other.details.map((detail, index) => (
+                        <div key={index} className="flex justify-between items-center text-xs text-gray-500">
+                          <span className="ml-2">• {detail.category || detail.description || 'Other'}</span>
+                          <span>{formatCurrency(detail.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               
               <div className="px-4 py-4 bg-indigo-50 border-t-2 border-indigo-200">
                 <div className="flex justify-between items-center">
@@ -428,10 +612,53 @@ const PLStatementDetail = ({ statement, onExport, onShare }) => {
             </div>
           </div>
 
+          {/* Sales Tax */}
+          {statement.salesTax && statement.salesTax.amount > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <span className="text-lg font-bold text-gray-900">Sales Tax</span>
+                  {showDetails && statement.salesTax.taxableSales > 0 && (
+                    <p className="text-sm text-gray-600 mt-1">
+                      Taxable Sales: {formatCurrency(statement.salesTax.taxableSales)}
+                      {statement.salesTax.taxExemptSales > 0 && (
+                        <span className="ml-4">Tax Exempt: {formatCurrency(statement.salesTax.taxExemptSales)}</span>
+                      )}
+                    </p>
+                  )}
+                </div>
+                <div className="text-right">
+                  <span className="text-xl font-bold text-blue-600">
+                    {formatCurrency(statement.salesTax.amount)}
+                  </span>
+                  {statement.salesTax.taxableSales > 0 && (
+                    <p className="text-sm text-blue-700">
+                      {formatPercent((statement.salesTax.amount / statement.salesTax.taxableSales) * 100)} effective rate
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Income Tax */}
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
             <div className="flex justify-between items-center">
-              <span className="text-lg font-bold text-gray-900">Income Tax</span>
+              <div>
+                <span className="text-lg font-bold text-gray-900">Income Tax</span>
+                {showDetails && statement.incomeTax?.current > 0 && statement.incomeTax?.deferred > 0 && (
+                  <div className="mt-2 space-y-1 text-sm text-gray-600">
+                    <div className="flex justify-between">
+                      <span>Current Tax:</span>
+                      <span className="font-medium">{formatCurrency(statement.incomeTax.current)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Deferred Tax:</span>
+                      <span className="font-medium">{formatCurrency(statement.incomeTax.deferred)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="text-right">
                 <span className="text-xl font-bold text-gray-900">
                   {formatCurrency(statement.incomeTax?.total?.amount)}

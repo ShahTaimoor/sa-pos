@@ -2,10 +2,12 @@ const express = require('express');
 const { body } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
-const Supplier = require('../models/Supplier');
-const Product = require('../models/Product');
+const Supplier = require('../models/Supplier'); // Still needed for model reference
+const Product = require('../models/Product'); // Still needed for model reference
 const StockMovementService = require('../services/stockMovementService');
 const SupplierBalanceService = require('../services/supplierBalanceService');
+const supplierRepository = require('../repositories/SupplierRepository');
+const productRepository = require('../repositories/ProductRepository');
 
 const router = express.Router();
 
@@ -27,7 +29,7 @@ router.post('/', [
     const { supplier, items, reason = 'Purchase return' } = req.body;
 
     // Validate supplier
-    const supplierDoc = await Supplier.findById(supplier);
+    const supplierDoc = await supplierRepository.findById(supplier);
     if (!supplierDoc) {
       return res.status(404).json({ message: 'Supplier not found' });
     }
@@ -35,7 +37,7 @@ router.post('/', [
     // Validate products and perform stock movements
     let totalAmount = 0;
     for (const item of items) {
-      const product = await Product.findById(item.product);
+      const product = await productRepository.findById(item.product);
       if (!product) {
         return res.status(404).json({ message: `Product not found: ${item.product}` });
       }

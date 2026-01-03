@@ -97,11 +97,11 @@ export const PeriodComparisonSection = ({
 
       {/* Period Labels */}
       {!isLoading && comparisons.length > 0 && (
-        <div className="flex items-center space-x-4 text-sm text-gray-600">
+        <div className="text-sm text-gray-600">
           <span>
             <strong>Current:</strong> {getPeriodLabel(periodType === 'custom' ? 'custom' : `current-${periodType}`, new Date())}
           </span>
-          <span>vs</span>
+          <span className="mx-2">vs</span>
           <span>
             <strong>Previous:</strong> {getPeriodLabel(periodType === 'custom' ? 'custom' : `last-${periodType}`, new Date())}
           </span>
@@ -117,7 +117,7 @@ export const PeriodComparisonSection = ({
 
       {/* Comparison Cards */}
       {!isLoading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {comparisons.map((comparison, index) => (
             <PeriodComparisonCard
               key={index}

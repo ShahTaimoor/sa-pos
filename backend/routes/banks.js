@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
-const Bank = require('../models/Bank');
+const bankService = require('../services/bankService');
 
 // @route   GET /api/banks
 // @desc    Get all banks
@@ -18,15 +18,9 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { isActive } = req.query;
-    const filter = {};
-    
-    if (isActive !== undefined) {
-      filter.isActive = isActive === 'true';
-    }
-
-    const banks = await Bank.find(filter)
-      .sort({ bankName: 1, accountNumber: 1 });
+    const banks = await bankService.getBanks({
+      isActive: req.query.isActive
+    });
 
     res.json({
       success: true,
@@ -50,20 +44,19 @@ router.get('/:id', [
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    const bank = await Bank.findById(req.params.id);
-
-    if (!bank) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Bank not found' 
-      });
-    }
+    const bank = await bankService.getBankById(req.params.id);
 
     res.json({
       success: true,
       data: bank
     });
   } catch (error) {
+    if (error.message === 'Bank not found') {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Bank not found' 
+      });
+    }
     console.error('Get bank error:', error);
     res.status(500).json({ 
       success: false,
@@ -112,25 +105,20 @@ router.post('/', [
       notes
     } = req.body;
 
-    const bankData = {
-      accountName: accountName.trim(),
-      accountNumber: accountNumber.trim(),
-      bankName: bankName.trim(),
-      branchName: branchName ? branchName.trim() : null,
-      branchAddress: branchAddress || null,
+    const bank = await bankService.createBank({
+      accountName,
+      accountNumber,
+      bankName,
+      branchName,
+      branchAddress,
       accountType,
-      routingNumber: routingNumber ? routingNumber.trim() : null,
-      swiftCode: swiftCode ? swiftCode.trim() : null,
-      iban: iban ? iban.trim() : null,
-      openingBalance: parseFloat(openingBalance),
-      currentBalance: parseFloat(openingBalance),
+      routingNumber,
+      swiftCode,
+      iban,
+      openingBalance,
       isActive,
-      notes: notes ? notes.trim() : null,
-      createdBy: req.user._id
-    };
-
-    const bank = new Bank(bankData);
-    await bank.save();
+      notes
+    }, req.user._id);
 
     res.status(201).json({
       success: true,
@@ -171,51 +159,7 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const bank = await Bank.findById(req.params.id);
-    if (!bank) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Bank not found' 
-      });
-    }
-
-    const {
-      accountName,
-      accountNumber,
-      bankName,
-      branchName,
-      branchAddress,
-      accountType,
-      routingNumber,
-      swiftCode,
-      iban,
-      openingBalance,
-      isActive,
-      notes
-    } = req.body;
-
-    // Update fields
-    if (accountName !== undefined) bank.accountName = accountName.trim();
-    if (accountNumber !== undefined) bank.accountNumber = accountNumber.trim();
-    if (bankName !== undefined) bank.bankName = bankName.trim();
-    if (branchName !== undefined) bank.branchName = branchName ? branchName.trim() : null;
-    if (branchAddress !== undefined) bank.branchAddress = branchAddress || null;
-    if (accountType !== undefined) bank.accountType = accountType;
-    if (routingNumber !== undefined) bank.routingNumber = routingNumber ? routingNumber.trim() : null;
-    if (swiftCode !== undefined) bank.swiftCode = swiftCode ? swiftCode.trim() : null;
-    if (iban !== undefined) bank.iban = iban ? iban.trim() : null;
-    if (openingBalance !== undefined) {
-      const newOpeningBalance = parseFloat(openingBalance);
-      const balanceDifference = newOpeningBalance - bank.openingBalance;
-      bank.openingBalance = newOpeningBalance;
-      bank.currentBalance += balanceDifference;
-    }
-    if (isActive !== undefined) bank.isActive = isActive;
-    if (notes !== undefined) bank.notes = notes ? notes.trim() : null;
-    
-    bank.updatedBy = req.user._id;
-
-    await bank.save();
+    const bank = await bankService.updateBank(req.params.id, req.body, req.user._id);
 
     res.json({
       success: true,
@@ -223,6 +167,12 @@ router.put('/:id', [
       data: bank
     });
   } catch (error) {
+    if (error.message === 'Bank not found') {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Bank not found' 
+      });
+    }
     console.error('Update bank error:', error);
     res.status(500).json({ 
       success: false,
@@ -240,35 +190,19 @@ router.delete('/:id', [
   requirePermission('delete_orders')
 ], async (req, res) => {
   try {
-    const bank = await Bank.findById(req.params.id);
-    if (!bank) {
+    const result = await bankService.deleteBank(req.params.id);
+
+    res.json({
+      success: true,
+      message: result.message
+    });
+  } catch (error) {
+    if (error.message === 'Bank not found') {
       return res.status(404).json({ 
         success: false,
         message: 'Bank not found' 
       });
     }
-
-    // Check if bank is being used in any transactions
-    const BankPayment = require('../models/BankPayment');
-    const BankReceipt = require('../models/BankReceipt');
-    
-    const paymentCount = await BankPayment.countDocuments({ bank: bank._id });
-    const receiptCount = await BankReceipt.countDocuments({ bank: bank._id });
-    
-    if (paymentCount > 0 || receiptCount > 0) {
-      return res.status(400).json({ 
-        success: false,
-        message: `Cannot delete bank account. It is being used in ${paymentCount + receiptCount} transaction(s). Consider deactivating it instead.`
-      });
-    }
-
-    await Bank.deleteOne({ _id: bank._id });
-
-    res.json({
-      success: true,
-      message: 'Bank account deleted successfully'
-    });
-  } catch (error) {
     console.error('Delete bank error:', error);
     res.status(500).json({ 
       success: false,

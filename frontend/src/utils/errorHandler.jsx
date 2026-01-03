@@ -135,18 +135,9 @@ export const showErrorToast = (error, options = {}) => {
       ...options
     };
     
-    // Add error type to console for debugging
-    console.error('Error Toast:', {
-      message: safeMessage,
-      severity,
-      type: error?.type,
-      originalError: error
-    });
-    
     return toast.error(safeMessage, toastOptions);
   } catch (e) {
     // Fallback if everything fails
-    console.error('Error in showErrorToast:', e);
     return toast.error('An unexpected error occurred');
   }
 };
@@ -160,7 +151,6 @@ export const showSuccessToast = (message, options = {}) => {
       ...options
     });
   } catch (e) {
-    console.error('Error in showSuccessToast:', e);
     return toast.success('Success');
   }
 };
@@ -175,7 +165,6 @@ export const showWarningToast = (message, options = {}) => {
       ...options
     });
   } catch (e) {
-    console.error('Error in showWarningToast:', e);
     return toast('Warning', {
       icon: '⚠️',
       duration: 4000
@@ -193,7 +182,6 @@ export const showInfoToast = (message, options = {}) => {
       ...options
     });
   } catch (e) {
-    console.error('Error in showInfoToast:', e);
     return toast('Info', {
       icon: 'ℹ️',
       duration: 3000
@@ -210,15 +198,6 @@ export const handleApiError = (error, context = '') => {
     // Ensure message is a string
     const safeMessage = typeof message === 'string' ? message : String(message);
     
-    // Log error for debugging
-    console.error(`API Error${context ? ` in ${context}` : ''}:`, {
-      message: safeMessage,
-      severity,
-      type: error?.type,
-      status: error?.status || error?.response?.status,
-      originalError: error
-    });
-    
     // Show appropriate toast
     showErrorToast(error);
     
@@ -232,7 +211,6 @@ export const handleApiError = (error, context = '') => {
     };
   } catch (e) {
     // Fallback if everything fails
-    console.error('Error in handleApiError:', e);
     showErrorToast({ message: 'An unexpected error occurred' });
     return {
       message: 'An unexpected error occurred',
@@ -292,7 +270,6 @@ export const createErrorBoundary = (Component, fallback = null) => {
     }
     
     componentDidCatch(error, errorInfo) {
-      console.error('Error Boundary caught an error:', error, errorInfo);
       handleApiError(error, 'Error Boundary');
     }
     

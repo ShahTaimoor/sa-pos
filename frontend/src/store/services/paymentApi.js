@@ -8,7 +8,11 @@ export const paymentApi = api.injectEndpoints({
         method: 'post',
         data: paymentData,
       }),
-      invalidatesTags: ['Sales', 'Orders'],
+      invalidatesTags: [
+        { type: 'Sales', id: 'LIST' },
+        { type: 'Sales', id: 'PAYMENT_HISTORY' },
+        { type: 'Orders', id: 'LIST' },
+      ],
     }),
     processRefund: builder.mutation({
       query: ({ paymentId, ...refundData }) => ({
@@ -16,7 +20,11 @@ export const paymentApi = api.injectEndpoints({
         method: 'post',
         data: refundData,
       }),
-      invalidatesTags: ['Sales', 'Orders'],
+      invalidatesTags: [
+        { type: 'Sales', id: 'LIST' },
+        { type: 'Sales', id: 'PAYMENT_HISTORY' },
+        { type: 'Orders', id: 'LIST' },
+      ],
     }),
     voidTransaction: builder.mutation({
       query: ({ transactionId, reason }) => ({
@@ -24,7 +32,11 @@ export const paymentApi = api.injectEndpoints({
         method: 'post',
         data: { reason },
       }),
-      invalidatesTags: ['Sales', 'Orders'],
+      invalidatesTags: [
+        { type: 'Sales', id: 'LIST' },
+        { type: 'Sales', id: 'PAYMENT_HISTORY' },
+        { type: 'Orders', id: 'LIST' },
+      ],
     }),
     getPaymentHistory: builder.query({
       query: (filters = {}) => ({

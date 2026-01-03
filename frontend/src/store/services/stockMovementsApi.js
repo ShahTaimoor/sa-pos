@@ -3,11 +3,22 @@ import { api } from '../api';
 export const stockMovementsApi = api.injectEndpoints({
   endpoints: (builder) => ({
     getStockMovements: builder.query({
-      query: (params) => ({
-        url: 'stock-movements',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'stock-movements',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: (result) => {
         const list = result?.data?.movements || result?.movements || result?.items || [];
         return list.length
@@ -42,7 +53,11 @@ export const stockMovementsApi = api.injectEndpoints({
         method: 'post',
         data,
       }),
-      invalidatesTags: ['Inventory', 'Products'],
+      invalidatesTags: [
+        { type: 'Inventory', id: 'LIST' },
+        { type: 'Inventory', id: 'MOVEMENTS_LIST' },
+        { type: 'Products', id: 'LIST' },
+      ],
     }),
     reverseMovement: builder.mutation({
       query: ({ id, ...data }) => ({
@@ -50,14 +65,29 @@ export const stockMovementsApi = api.injectEndpoints({
         method: 'post',
         data,
       }),
-      invalidatesTags: ['Inventory', 'Products'],
+      invalidatesTags: [
+        { type: 'Inventory', id: 'LIST' },
+        { type: 'Inventory', id: 'MOVEMENTS_LIST' },
+        { type: 'Products', id: 'LIST' },
+      ],
     }),
     getStats: builder.query({
-      query: (params) => ({
-        url: 'stock-movements/stats/overview',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'stock-movements/stats/overview',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: [{ type: 'Reports', id: 'STOCK_MOVEMENTS_STATS' }],
     }),
   }),

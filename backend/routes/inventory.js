@@ -3,9 +3,9 @@ const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const inventoryService = require('../services/inventoryService');
-const Inventory = require('../models/Inventory');
-const StockAdjustment = require('../models/StockAdjustment');
-const Product = require('../models/Product');
+const inventoryRepository = require('../repositories/InventoryRepository');
+const productRepository = require('../repositories/ProductRepository');
+const stockAdjustmentRepository = require('../repositories/StockAdjustmentRepository');
 
 const router = express.Router();
 
@@ -111,10 +111,13 @@ router.get('/', [
       ];
     }
     
-    const allProducts = await Product.find(productFilter).select('_id name description pricing category status inventory');
+    const allProducts = await productRepository.findAll(productFilter, {
+      select: '_id name description pricing category status inventory',
+      lean: true
+    });
     
     // Get existing inventory records
-    const existingInventory = await Inventory.aggregate(pipeline);
+    const existingInventory = await inventoryRepository.aggregate(pipeline);
     
     // Create a map of existing inventory records by product ID
     const inventoryMap = new Map();
@@ -487,32 +490,26 @@ router.get('/adjustments', [
 ], async (req, res) => {
   try {
     const { page = 1, limit = 10, status, type } = req.query;
-    const skip = (page - 1) * limit;
 
     const filter = {};
     if (status) filter.status = status;
     if (type) filter.type = type;
 
-    const adjustments = await StockAdjustment.find(filter)
-      .populate('requestedBy', 'firstName lastName')
-      .populate('approvedBy', 'firstName lastName')
-      .populate('completedBy', 'firstName lastName')
-      .populate('adjustments.product', 'name description')
-      .sort({ requestedDate: -1 })
-      .skip(skip)
-      .limit(limit);
-
-    const total = await StockAdjustment.countDocuments(filter);
+    const { adjustments, total, pagination } = await stockAdjustmentRepository.findWithPagination(filter, {
+      page,
+      limit,
+      sort: { requestedDate: -1 },
+      populate: [
+        { path: 'requestedBy', select: 'firstName lastName' },
+        { path: 'approvedBy', select: 'firstName lastName' },
+        { path: 'completedBy', select: 'firstName lastName' },
+        { path: 'adjustments.product', select: 'name description' }
+      ]
+    });
 
     res.json({
       adjustments,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page * limit < total,
-        hasPrev: page > 1,
-      },
+      pagination
     });
   } catch (error) {
     console.error('Error fetching stock adjustments:', error);
@@ -533,7 +530,7 @@ router.put('/adjustments/:adjustmentId/approve', [
   try {
     const { adjustmentId } = req.params;
 
-    const adjustment = await StockAdjustment.approveAdjustment(adjustmentId, req.user.id);
+    const adjustment = await stockAdjustmentRepository.approveAdjustment(adjustmentId, req.user.id);
     
     res.json({
       message: 'Stock adjustment approved successfully',
@@ -558,7 +555,7 @@ router.put('/adjustments/:adjustmentId/complete', [
   try {
     const { adjustmentId } = req.params;
 
-    const adjustment = await StockAdjustment.completeAdjustment(adjustmentId, req.user.id);
+    const adjustment = await stockAdjustmentRepository.completeAdjustment(adjustmentId, req.user.id);
     
     res.json({
       message: 'Stock adjustment completed successfully',

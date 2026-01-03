@@ -1,7 +1,9 @@
 const crypto = require('crypto');
-const Payment = require('../models/Payment');
-const Transaction = require('../models/Transaction');
-const Sales = require('../models/Sales');
+const PaymentRepository = require('../repositories/PaymentRepository');
+const SalesRepository = require('../repositories/SalesRepository');
+const TransactionRepository = require('../repositories/TransactionRepository');
+const Payment = require('../models/Payment'); // Still needed for model methods
+const Transaction = require('../models/Transaction'); // Still needed for model methods
 
 class PaymentService {
   constructor() {
@@ -59,7 +61,7 @@ class PaymentService {
       } = paymentData;
 
       // Validate order exists and get details
-      const order = await Sales.findById(orderId);
+      const order = await SalesRepository.findById(orderId);
       if (!order) {
         throw new Error('Order not found');
       }
@@ -70,17 +72,14 @@ class PaymentService {
       }
 
       // Check if order is already paid
-      const existingPayments = await Payment.find({ orderId });
-      const totalPaid = existingPayments.reduce((sum, payment) => {
-        return sum + (payment.status === 'completed' ? payment.amount : 0);
-      }, 0);
+      const totalPaid = await PaymentRepository.calculateTotalPaid(orderId);
 
       if (totalPaid >= order.total) {
         throw new Error('Order is already fully paid');
       }
 
       // Create payment record
-      const payment = new Payment({
+      const paymentData = {
         paymentId: this.generatePaymentId(),
         orderId,
         paymentMethod,
@@ -102,9 +101,9 @@ class PaymentService {
           userAgent: metadata.userAgent,
           riskScore: await this.calculateRiskScore(paymentData, order)
         }
-      });
+      };
 
-      await payment.save();
+      const payment = await PaymentRepository.create(paymentData);
 
       // Process payment through gateway
       const gatewayService = this.gateways.get(gateway);
@@ -113,7 +112,7 @@ class PaymentService {
       }
 
       // Create transaction record
-      const transaction = new Transaction({
+      const transactionData = {
         transactionId: this.generateTransactionId(),
         orderId,
         paymentId: payment._id,
@@ -146,9 +145,9 @@ class PaymentService {
           initiatedAt: new Date(),
           processedBy: user._id
         }
-      });
+      };
 
-      await transaction.save();
+      const transaction = await TransactionRepository.create(transactionData);
 
       // Process through gateway
       const gatewayResult = await gatewayService.processPayment({
@@ -192,8 +191,8 @@ class PaymentService {
 
       return {
         success: true,
-        payment,
-        transaction,
+        payment: updatedPayment,
+        transaction: updatedTransaction,
         gatewayResult
       };
 
@@ -208,7 +207,7 @@ class PaymentService {
     try {
       const { amount, reason } = refundData;
 
-      const payment = await Payment.findById(paymentId);
+      const payment = await PaymentRepository.findById(paymentId);
       if (!payment) {
         throw new Error('Payment not found');
       }
@@ -237,15 +236,16 @@ class PaymentService {
         }
       });
 
-      // Create refund record
+      // Create refund record (using model method)
       const refund = payment.processRefund(amount, reason, user._id);
       refund.status = gatewayResult.status;
       refund.gatewayResponse = gatewayResult.response;
 
-      await payment.save();
+      // Update payment with refund
+      await PaymentRepository.update(payment._id, payment.toObject());
 
       // Create refund transaction
-      const refundTransaction = new Transaction({
+      const refundTransactionData = {
         transactionId: this.generateTransactionId(),
         orderId: payment.orderId,
         paymentId: payment._id,
@@ -270,9 +270,9 @@ class PaymentService {
           reason,
           reference: payment.paymentId
         }
-      });
+      };
 
-      await refundTransaction.save();
+      const refundTransaction = await TransactionRepository.create(refundTransactionData);
 
       return {
         success: true,
@@ -317,16 +317,16 @@ class PaymentService {
       await transaction.void(user._id, reason);
 
       // Update payment status
-      const payment = await Payment.findById(transaction.paymentId);
-      if (payment) {
-        payment.status = 'cancelled';
-        await payment.save();
+      if (transaction.paymentId) {
+        await PaymentRepository.update(transaction.paymentId, { status: 'cancelled' });
       }
+
+      const updatedPayment = transaction.paymentId ? await PaymentRepository.findById(transaction.paymentId) : null;
 
       return {
         success: true,
         transaction,
-        payment
+        payment: updatedPayment
       };
 
     } catch (error) {
@@ -362,24 +362,21 @@ class PaymentService {
         if (endDate) query.createdAt.$lte = new Date(endDate);
       }
 
-      const payments = await Payment.find(query)
-        .populate('orderId', 'orderNumber total customer')
-        .populate('processing.processedBy', 'firstName lastName email')
-        .sort({ createdAt: -1 })
-        .limit(limit * 1)
-        .skip((page - 1) * limit);
+      const populate = [
+        { path: 'orderId', select: 'orderNumber total customer' },
+        { path: 'processing.processedBy', select: 'firstName lastName email' }
+      ];
 
-      const total = await Payment.countDocuments(query);
+      const { payments, total, pagination } = await PaymentRepository.findWithPagination(query, {
+        page,
+        limit,
+        sort: { createdAt: -1 },
+        populate
+      });
 
       return {
         payments,
-        pagination: {
-          current: page,
-          pages: Math.ceil(total / limit),
-          total,
-          hasNext: page < Math.ceil(total / limit),
-          hasPrev: page > 1
-        }
+        pagination
       };
 
     } catch (error) {
@@ -407,15 +404,15 @@ class PaymentService {
   // Update order payment status
   async updateOrderPaymentStatus(orderId) {
     try {
-      const order = await Sales.findById(orderId);
+      const order = await SalesRepository.findById(orderId);
       if (!order) return;
 
-      const payments = await Payment.find({ orderId, status: 'completed' });
-      const totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);
+      const completedPayments = await PaymentRepository.findByStatus('completed');
+      const orderPayments = completedPayments.filter(p => p.orderId.toString() === orderId.toString());
+      const totalPaid = orderPayments.reduce((sum, payment) => sum + payment.amount, 0);
 
       if (totalPaid >= order.total) {
-        order.status = 'paid';
-        await order.save();
+        await SalesRepository.update(orderId, { status: 'paid' });
       }
     } catch (error) {
       console.error('Update order payment status error:', error);
@@ -449,10 +446,10 @@ class PaymentService {
 
     // Customer history (if available)
     if (order.customer) {
-      const customerPayments = await Payment.find({ 
-        'metadata.customerId': order.customer,
-        status: 'completed'
-      });
+      const completedPayments = await PaymentRepository.findByStatus('completed');
+      const customerPayments = completedPayments.filter(p => 
+        p.metadata && p.metadata.customerId && p.metadata.customerId.toString() === order.customer.toString()
+      );
       
       if (customerPayments.length === 0) riskScore += 15; // New customer
     }

@@ -25,7 +25,6 @@ const DiscountSelector = ({
           const result = await checkApplicableDiscounts({ orderData, customerData }).unwrap();
           setApplicableDiscounts(result?.data?.applicableDiscounts || []);
         } catch (error) {
-          console.error('Error fetching applicable discounts:', error);
           // Don't show error toast for this as it's not critical
           setApplicableDiscounts([]);
         }

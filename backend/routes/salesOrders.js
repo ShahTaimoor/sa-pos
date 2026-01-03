@@ -4,9 +4,11 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const PDFDocument = require('pdfkit');
-const SalesOrder = require('../models/SalesOrder');
+const SalesOrder = require('../models/SalesOrder'); // Still needed for new SalesOrder() and static methods
 const { auth, requirePermission } = require('../middleware/auth');
 const inventoryService = require('../services/inventoryService');
+const salesOrderRepository = require('../repositories/SalesOrderRepository');
+const customerRepository = require('../repositories/CustomerRepository');
 
 const router = express.Router();
 
@@ -69,16 +71,11 @@ router.get('/', [
       ];
       
       // Search in Customer collection and match by customer ID
-      const Customer = require('../models/Customer');
-      const customerMatches = await Customer.find({
-        $or: [
-          { businessName: { $regex: searchTerm, $options: 'i' } },
-          { name: { $regex: searchTerm, $options: 'i' } },
-          { firstName: { $regex: searchTerm, $options: 'i' } },
-          { lastName: { $regex: searchTerm, $options: 'i' } },
-          { email: { $regex: searchTerm, $options: 'i' } }
-        ]
-      }).select('_id').lean();
+      const customerMatches = await customerRepository.search(searchTerm, { 
+        limit: 1000,
+        select: '_id',
+        lean: true
+      });
       
       if (customerMatches.length > 0) {
         const customerIds = customerMatches.map(c => c._id);
@@ -122,20 +119,20 @@ router.get('/', [
     }
     
     
-    let query = SalesOrder.find(filter)
-      .populate('customer', 'businessName name firstName lastName email phone businessType customerTier currentBalance pendingBalance advanceBalance')
-      .populate('items.product', 'name description pricing inventory')
-      .populate('createdBy', 'firstName lastName email')
-      .populate('lastModifiedBy', 'firstName lastName email')
-      .sort({ createdAt: -1 });
+    const result = await salesOrderRepository.findWithPagination(filter, {
+      page,
+      limit,
+      getAll: getAllSalesOrders,
+      sort: { createdAt: -1 },
+      populate: [
+        { path: 'customer', select: 'businessName name firstName lastName email phone businessType customerTier paymentTerms currentBalance pendingBalance' },
+        { path: 'items.product', select: 'name description pricing inventory' },
+        { path: 'createdBy', select: 'firstName lastName email' },
+        { path: 'lastModifiedBy', select: 'firstName lastName email' }
+      ]
+    });
     
-    // Only apply skip and limit if not getting all sales orders
-    if (!getAllSalesOrders) {
-      query = query.skip(skip).limit(limit);
-    }
-    
-    const salesOrders = await query;
-    const total = await SalesOrder.countDocuments(filter);
+    const salesOrders = result.salesOrders;
     
     // Transform names to uppercase and add displayName to each customer
     salesOrders.forEach(so => {
@@ -154,19 +151,7 @@ router.get('/', [
     
     res.json({
       salesOrders,
-      pagination: getAllSalesOrders ? {
-        current: 1,
-        pages: 1,
-        total,
-        hasNext: false,
-        hasPrev: false
-      } : {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page < Math.ceil(total / limit),
-        hasPrev: page > 1
-      }
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Get sales orders error:', error);
@@ -179,12 +164,15 @@ router.get('/', [
 // @access  Private
 router.get('/:id', auth, async (req, res) => {
   try {
-    const salesOrder = await SalesOrder.findById(req.params.id)
-      .populate('customer', 'businessName name firstName lastName email phone businessType customerTier paymentTerms currentBalance pendingBalance')
-      .populate('items.product', 'name description pricing inventory')
-      .populate('createdBy', 'firstName lastName email')
-      .populate('lastModifiedBy', 'firstName lastName email')
-      .populate('conversions.convertedBy', 'firstName lastName email');
+    const salesOrder = await salesOrderRepository.findById(req.params.id, {
+      populate: [
+        { path: 'customer', select: 'businessName name firstName lastName email phone businessType customerTier paymentTerms currentBalance pendingBalance' },
+        { path: 'items.product', select: 'name description pricing inventory' },
+        { path: 'createdBy', select: 'firstName lastName email' },
+        { path: 'lastModifiedBy', select: 'firstName lastName email' },
+        { path: 'conversions.convertedBy', select: 'firstName lastName email' }
+      ]
+    });
     
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
@@ -296,7 +284,7 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const salesOrder = await SalesOrder.findById(req.params.id);
+    const salesOrder = await salesOrderRepository.findById(req.params.id);
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
     }
@@ -313,11 +301,12 @@ router.put('/:id', [
       lastModifiedBy: req.user._id
     };
     
-    const updatedSO = await SalesOrder.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).populate([
+    const updatedSO = await salesOrderRepository.update(req.params.id, updateData, {
+      new: true,
+      runValidators: true
+    });
+    
+    await updatedSO.populate([
       { path: 'customer', select: 'displayName firstName lastName email phone businessType customerTier' },
       { path: 'items.product', select: 'name description pricing inventory' },
       { path: 'createdBy', select: 'firstName lastName email' },
@@ -354,7 +343,7 @@ router.put('/:id/confirm', [
   requirePermission('confirm_sales_orders')
 ], async (req, res) => {
   try {
-    const salesOrder = await SalesOrder.findById(req.params.id);
+    const salesOrder = await salesOrderRepository.findById(req.params.id);
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
     }
@@ -451,7 +440,7 @@ router.put('/:id/cancel', [
   requirePermission('cancel_sales_orders')
 ], async (req, res) => {
   try {
-    const salesOrder = await SalesOrder.findById(req.params.id);
+    const salesOrder = await salesOrderRepository.findById(req.params.id);
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
     }
@@ -527,7 +516,7 @@ router.put('/:id/close', [
   requirePermission('close_sales_orders')
 ], async (req, res) => {
   try {
-    const salesOrder = await SalesOrder.findById(req.params.id);
+    const salesOrder = await salesOrderRepository.findById(req.params.id);
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
     }
@@ -561,7 +550,7 @@ router.delete('/:id', [
   requirePermission('delete_sales_orders')
 ], async (req, res) => {
   try {
-    const salesOrder = await SalesOrder.findById(req.params.id);
+    const salesOrder = await salesOrderRepository.findById(req.params.id);
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
     }
@@ -573,7 +562,7 @@ router.delete('/:id', [
       });
     }
     
-    await SalesOrder.findByIdAndDelete(req.params.id);
+    await salesOrderRepository.delete(req.params.id);
     
     res.json({ message: 'Sales order deleted successfully' });
   } catch (error) {
@@ -587,9 +576,12 @@ router.delete('/:id', [
 // @access  Private
 router.get('/:id/convert', auth, async (req, res) => {
   try {
-    const salesOrder = await SalesOrder.findById(req.params.id)
-      .populate('items.product', 'name description pricing inventory')
-      .populate('customer', 'displayName firstName lastName email phone businessType customerTier');
+    const salesOrder = await salesOrderRepository.findById(req.params.id, {
+      populate: [
+        { path: 'items.product', select: 'name description pricing inventory' },
+        { path: 'customer', select: 'displayName firstName lastName email phone businessType customerTier' }
+      ]
+    });
     
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
@@ -653,12 +645,15 @@ router.post('/export/excel', [auth, requirePermission('view_sales_orders')], asy
       filter.soNumber = { $regex: filters.orderNumber, $options: 'i' };
     }
     
-    const salesOrders = await SalesOrder.find(filter)
-      .populate('customer', 'businessName name firstName lastName email phone')
-      .populate('items.product', 'name')
-      .populate('createdBy', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .lean();
+    const salesOrders = await salesOrderRepository.findAll(filter, {
+      populate: [
+        { path: 'customer', select: 'businessName name firstName lastName email phone' },
+        { path: 'items.product', select: 'name' },
+        { path: 'createdBy', select: 'firstName lastName email' }
+      ],
+      sort: { createdAt: -1 },
+      lean: true
+    });
     
     // Prepare Excel data
     const excelData = salesOrders.map(order => {
@@ -791,12 +786,15 @@ router.post('/export/csv', [auth, requirePermission('view_sales_orders')], async
       filter.soNumber = { $regex: filters.orderNumber, $options: 'i' };
     }
     
-    const salesOrders = await SalesOrder.find(filter)
-      .populate('customer', 'businessName name firstName lastName email phone')
-      .populate('items.product', 'name')
-      .populate('createdBy', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .lean();
+    const salesOrders = await salesOrderRepository.findAll(filter, {
+      populate: [
+        { path: 'customer', select: 'businessName name firstName lastName email phone' },
+        { path: 'items.product', select: 'name' },
+        { path: 'createdBy', select: 'firstName lastName email' }
+      ],
+      sort: { createdAt: -1 },
+      lean: true
+    });
     
     // Prepare CSV data
     const csvData = salesOrders.map(order => {
@@ -921,12 +919,15 @@ router.post('/export/pdf', [auth, requirePermission('view_sales_orders')], async
       filter.soNumber = { $regex: filters.orderNumber, $options: 'i' };
     }
     
-    const salesOrders = await SalesOrder.find(filter)
-      .populate('customer', 'businessName name firstName lastName email phone')
-      .populate('items.product', 'name')
-      .populate('createdBy', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .lean();
+    const salesOrders = await salesOrderRepository.findAll(filter, {
+      populate: [
+        { path: 'customer', select: 'businessName name firstName lastName email phone' },
+        { path: 'items.product', select: 'name' },
+        { path: 'createdBy', select: 'firstName lastName email' }
+      ],
+      sort: { createdAt: -1 },
+      lean: true
+    });
     
     // Ensure exports directory exists
     const exportsDir = path.join(__dirname, '../exports');
@@ -1166,12 +1167,15 @@ router.post('/export/json', [auth, requirePermission('view_sales_orders')], asyn
       filter.soNumber = { $regex: filters.orderNumber, $options: 'i' };
     }
     
-    const salesOrders = await SalesOrder.find(filter)
-      .populate('customer', 'businessName name firstName lastName email phone')
-      .populate('items.product', 'name')
-      .populate('createdBy', 'firstName lastName email')
-      .sort({ createdAt: -1 })
-      .lean();
+    const salesOrders = await salesOrderRepository.findAll(filter, {
+      populate: [
+        { path: 'customer', select: 'businessName name firstName lastName email phone' },
+        { path: 'items.product', select: 'name' },
+        { path: 'createdBy', select: 'firstName lastName email' }
+      ],
+      sort: { createdAt: -1 },
+      lean: true
+    });
     
     // Ensure exports directory exists
     const exportsDir = path.join(__dirname, '../exports');

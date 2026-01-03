@@ -25,6 +25,14 @@ import { handleApiError, showSuccessToast, showErrorToast } from '../utils/error
 import { useTab } from '../contexts/TabContext';
 import { getComponentInfo } from '../components/ComponentRegistry';
 
+// Helper function to get local date in YYYY-MM-DD format (avoids timezone issues with toISOString)
+const getLocalDateString = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const OrderCard = ({ order, onDelete, onView, onEdit, onPrint }) => {
   const getStatusColor = (status) => {
     switch (status) {
@@ -130,8 +138,9 @@ const OrderCard = ({ order, onDelete, onView, onEdit, onPrint }) => {
 export const Orders = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [fromDate, setFromDate] = useState(new Date().toISOString().split('T')[0]); // Today
-  const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]); // Today
+  const today = getLocalDateString();
+  const [fromDate, setFromDate] = useState(today); // Today
+  const [toDate, setToDate] = useState(today); // Today
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);

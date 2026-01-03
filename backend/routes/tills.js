@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, query } = require('express-validator');
 const { auth, requireAnyPermission } = require('../middleware/auth');
-const TillSession = require('../models/TillSession');
+const tillService = require('../services/tillService');
 
 const router = express.Router();
 
@@ -14,32 +14,24 @@ router.post('/open', [
   body('notesOpen').optional().isString(),
 ], async (req, res) => {
   try {
-    const existing = await TillSession.findOne({ user: req.user._id, status: 'open' });
-    if (existing) {
-      return res.status(400).json({ message: 'Till already open for this user' });
-    }
-    let session;
-    try {
-      session = await TillSession.create({
-        user: req.user._id,
-        storeId: req.body.storeId || null,
-        deviceId: req.body.deviceId || null,
-        openedAt: new Date(),
-        openingAmount: Number(req.body.openingAmount),
-        notesOpen: req.body.notesOpen || '',
-        status: 'open'
-      });
-    } catch (err) {
-      if (err.code === 11000) {
-        return res.status(400).json({
-          success: false,
-          message: 'Duplicate entry detected'
-        });
-      }
-      throw err;
-    }
+    const session = await tillService.openTill({
+      openingAmount: req.body.openingAmount,
+      storeId: req.body.storeId,
+      deviceId: req.body.deviceId,
+      notesOpen: req.body.notesOpen
+    }, req.user._id);
+    
     res.json({ success: true, data: session });
   } catch (err) {
+    if (err.message === 'Till already open for this user') {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err.message === 'Duplicate entry detected') {
+      return res.status(400).json({
+        success: false,
+        message: err.message
+      });
+    }
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -52,16 +44,17 @@ router.post('/close', [
   body('notesClose').optional().isString(),
 ], async (req, res) => {
   try {
-    const session = await TillSession.findOne({ user: req.user._id, status: 'open' });
-    if (!session) {
-      return res.status(400).json({ message: 'No open till to close' });
-    }
-    session.closeTill(Number(req.body.closingDeclaredAmount),
-      typeof req.body.expectedAmount !== 'undefined' ? Number(req.body.expectedAmount) : undefined,
-      req.body.notesClose);
-    await session.save();
+    const session = await tillService.closeTill({
+      closingDeclaredAmount: req.body.closingDeclaredAmount,
+      expectedAmount: req.body.expectedAmount,
+      notesClose: req.body.notesClose
+    }, req.user._id);
+    
     res.json({ success: true, data: session });
   } catch (err) {
+    if (err.message === 'No open till to close') {
+      return res.status(400).json({ message: err.message });
+    }
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -73,9 +66,7 @@ router.get('/variance', [
 ], async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || '20');
-    const sessions = await TillSession.find({ user: req.user._id })
-      .sort({ createdAt: -1 })
-      .limit(limit);
+    const sessions = await tillService.getSessionsByUser(req.user._id, { limit });
     res.json({ success: true, data: sessions });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });

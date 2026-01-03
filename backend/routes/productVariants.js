@@ -1,10 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const { body, param, query, validationResult } = require('express-validator');
-const ProductVariant = require('../models/ProductVariant');
-const Product = require('../models/Product');
-const Inventory = require('../models/Inventory');
+const ProductVariant = require('../models/ProductVariant'); // Still needed for new ProductVariant()
+const Product = require('../models/Product'); // Still needed for model reference
+const Inventory = require('../models/Inventory'); // Still needed for new Inventory() and findOneAndDelete
 const { auth, requirePermission } = require('../middleware/auth');
+const productVariantRepository = require('../repositories/ProductVariantRepository');
+const productRepository = require('../repositories/ProductRepository');
+const inventoryRepository = require('../repositories/InventoryRepository');
 
 // @route   GET /api/product-variants
 // @desc    Get all product variants with filters
@@ -37,11 +40,14 @@ router.get('/', [
       ];
     }
 
-    const variants = await ProductVariant.find(filter)
-      .populate('baseProduct', 'name description pricing')
-      .populate('createdBy', 'firstName lastName')
-      .populate('lastModifiedBy', 'firstName lastName')
-      .sort({ createdAt: -1 });
+    const variants = await productVariantRepository.findWithFilter(filter, {
+      sort: { createdAt: -1 },
+      populate: [
+        { path: 'baseProduct', select: 'name description pricing' },
+        { path: 'createdBy', select: 'firstName lastName' },
+        { path: 'lastModifiedBy', select: 'firstName lastName' }
+      ]
+    });
 
     res.json({
       success: true,
@@ -68,10 +74,13 @@ router.get('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const variant = await ProductVariant.findById(req.params.id)
-      .populate('baseProduct', 'name description pricing inventory')
-      .populate('createdBy', 'firstName lastName')
-      .populate('lastModifiedBy', 'firstName lastName');
+    const variant = await productVariantRepository.findById(req.params.id, {
+      populate: [
+        { path: 'baseProduct', select: 'name description pricing inventory' },
+        { path: 'createdBy', select: 'firstName lastName' },
+        { path: 'lastModifiedBy', select: 'firstName lastName' }
+      ]
+    });
 
     if (!variant) {
       return res.status(404).json({ message: 'Product variant not found' });
@@ -123,13 +132,13 @@ router.post('/', [
     } = req.body;
 
     // Check if base product exists
-    const baseProductDoc = await Product.findById(baseProduct);
+    const baseProductDoc = await productRepository.findById(baseProduct);
     if (!baseProductDoc) {
       return res.status(404).json({ message: 'Base product not found' });
     }
 
     // Check if variant already exists
-    const existingVariant = await ProductVariant.findOne({
+    const existingVariant = await productVariantRepository.findOne({
       baseProduct,
       variantType,
       variantValue
@@ -169,9 +178,12 @@ router.post('/', [
     });
     await variantInventory.save();
 
-    const populatedVariant = await ProductVariant.findById(variant._id)
-      .populate('baseProduct', 'name description pricing')
-      .populate('createdBy', 'firstName lastName');
+    const populatedVariant = await productVariantRepository.findById(variant._id, {
+      populate: [
+        { path: 'baseProduct', select: 'name description pricing' },
+        { path: 'createdBy', select: 'firstName lastName' }
+      ]
+    });
 
     res.status(201).json({
       success: true,
@@ -204,7 +216,7 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const variant = await ProductVariant.findById(req.params.id);
+    const variant = await productVariantRepository.findById(req.params.id);
     if (!variant) {
       return res.status(404).json({ message: 'Product variant not found' });
     }
@@ -220,9 +232,12 @@ router.put('/:id', [
     variant.lastModifiedBy = req.user._id;
     await variant.save();
 
-    const updatedVariant = await ProductVariant.findById(variant._id)
-      .populate('baseProduct', 'name description pricing')
-      .populate('lastModifiedBy', 'firstName lastName');
+    const updatedVariant = await productVariantRepository.findById(variant._id, {
+      populate: [
+        { path: 'baseProduct', select: 'name description pricing' },
+        { path: 'lastModifiedBy', select: 'firstName lastName' }
+      ]
+    });
 
     res.json({
       success: true,
@@ -249,7 +264,7 @@ router.delete('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const variant = await ProductVariant.findById(req.params.id);
+    const variant = await productVariantRepository.findById(req.params.id);
     if (!variant) {
       return res.status(404).json({ message: 'Product variant not found' });
     }
@@ -262,9 +277,12 @@ router.delete('/:id', [
     }
 
     // Delete inventory record
-    await Inventory.findOneAndDelete({ product: variant._id });
+    const inventoryRecord = await inventoryRepository.findOne({ product: variant._id });
+    if (inventoryRecord) {
+      await inventoryRepository.hardDelete(inventoryRecord._id);
+    }
 
-    await ProductVariant.findByIdAndDelete(req.params.id);
+    await productVariantRepository.hardDelete(req.params.id);
 
     res.json({
       success: true,
@@ -290,12 +308,12 @@ router.get('/base-product/:productId', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const variants = await ProductVariant.find({ 
-      baseProduct: req.params.productId,
-      status: 'active'
-    })
-      .populate('baseProduct', 'name description pricing')
-      .sort({ variantType: 1, variantValue: 1 });
+    const variants = await productVariantRepository.findByBaseProduct(req.params.productId, {
+      sort: { variantType: 1, variantValue: 1 },
+      populate: [
+        { path: 'baseProduct', select: 'name description pricing' }
+      ]
+    });
 
     res.json({
       success: true,

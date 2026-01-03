@@ -2,9 +2,9 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
-const FinancialStatement = require('../models/FinancialStatement');
 const plCalculationService = require('../services/plCalculationService');
 const plExportService = require('../services/plExportService');
+const plStatementService = require('../services/plStatementService');
 const path = require('path');
 
 const router = express.Router();
@@ -46,11 +46,7 @@ router.post('/generate', [
     };
 
     // Check if statement already exists for this period
-    const existingStatement = await FinancialStatement.findOne({
-      type: 'profit_loss',
-      'period.startDate': startDate,
-      'period.endDate': endDate,
-    });
+    const existingStatement = await plStatementService.findExistingStatement(startDate, endDate);
 
     if (existingStatement && existingStatement.status === 'published') {
       return res.status(400).json({ 
@@ -60,7 +56,7 @@ router.post('/generate', [
     }
 
     // Generate new statement
-    const statement = await plCalculationService.generatePLStatement(period, {
+    const statement = await plStatementService.generateStatement(period, {
       companyInfo,
       includeDetails,
       calculateComparisons,
@@ -112,37 +108,18 @@ router.get('/', [
     } = req.query;
     const skip = (page - 1) * limit;
 
-    // Build filter object
-    const filter = { type: 'profit_loss' };
-    
-    if (startDate || endDate) {
-      filter['period.startDate'] = {};
-      if (startDate) filter['period.startDate'].$gte = startDate;
-      if (endDate) filter['period.startDate'].$lte = endDate;
-    }
-    
-    if (periodType) filter['period.type'] = periodType;
-    if (status) filter.status = status;
-
-    const statements = await FinancialStatement.find(filter)
-      .populate('generatedBy', 'firstName lastName email')
-      .populate('approvedBy', 'firstName lastName email')
-      .select('statementId period revenue.totalRevenue grossProfit operatingIncome netIncome status createdAt approvedAt')
-      .sort({ 'period.startDate': -1 })
-      .skip(skip)
-      .limit(limit);
-
-    const total = await FinancialStatement.countDocuments(filter);
+    const result = await plStatementService.getStatements({
+      page,
+      limit,
+      startDate,
+      endDate,
+      periodType,
+      status
+    });
 
     res.json({
-      statements,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page * limit < total,
-        hasPrev: page > 1,
-      },
+      statements: result.statements,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Error fetching P&L statements:', error);
@@ -163,16 +140,13 @@ router.get('/:statementId', [
   try {
     const { statementId } = req.params;
     
-    const statement = await FinancialStatement.findById(statementId)
-      .populate('generatedBy', 'firstName lastName email')
-      .populate('approvedBy', 'firstName lastName email');
-
-    if (!statement) {
-      return res.status(404).json({ message: 'P&L statement not found' });
-    }
+    const statement = await plStatementService.getStatementById(statementId);
 
     res.json(statement);
   } catch (error) {
+    if (error.message === 'P&L statement not found') {
+      return res.status(404).json({ message: 'P&L statement not found' });
+    }
     console.error('Error fetching P&L statement:', error);
     res.status(500).json({ message: 'Server error fetching P&L statement', error: error.message });
   }
@@ -198,48 +172,16 @@ router.put('/:statementId', [
     const { statementId } = req.params;
     const updates = req.body || {};
 
-    const statement = await FinancialStatement.findById(statementId);
-    if (!statement) {
-      return res.status(404).json({ message: 'P&L statement not found' });
-    }
-
-    // Apply allowed updates only
-    if (updates.company) {
-      statement.company = {
-        ...statement.company,
-        ...updates.company,
-      };
-    }
-
-    if (updates.metadata) {
-      statement.metadata = {
-        ...statement.metadata,
-        ...updates.metadata,
-      };
-    }
-
-    if (Array.isArray(updates.notes)) {
-      // Replace or append notes array depending on intent; here we replace for simplicity
-      statement.notes = updates.notes;
-    }
-
-    // Support optional title/description via metadata
-    if (typeof updates.title === 'string') {
-      statement.metadata = statement.metadata || {};
-      statement.metadata.title = updates.title;
-    }
-    if (typeof updates.description === 'string') {
-      statement.metadata = statement.metadata || {};
-      statement.metadata.description = updates.description;
-    }
-
-    await statement.save();
+    const statement = await plStatementService.updateStatement(statementId, updates);
 
     res.json({
       message: 'P&L statement updated successfully',
       statement
     });
   } catch (error) {
+    if (error.message === 'P&L statement not found') {
+      return res.status(404).json({ message: 'P&L statement not found' });
+    }
     console.error('Error updating P&L statement:', error);
     res.status(500).json({ message: 'Server error updating P&L statement', error: error.message });
   }
@@ -261,41 +203,16 @@ router.put('/:statementId/status', [
     const { statementId } = req.params;
     const { status, notes } = req.body;
     
-    const statement = await FinancialStatement.findById(statementId);
-    if (!statement) {
-      return res.status(404).json({ message: 'P&L statement not found' });
-    }
-
-    // Update status
-    statement.status = status;
-    
-    // Add approval information if approving
-    if (status === 'approved' || status === 'published') {
-      statement.approvedBy = req.user._id;
-      statement.approvedAt = new Date();
-    }
-
-    // Add notes if provided
-    if (notes) {
-      statement.notes.push({
-        section: 'status_change',
-        note: notes,
-        date: new Date(),
-      });
-    }
-
-    await statement.save();
+    const statement = await plStatementService.updateStatementStatus(statementId, status, req.user._id, notes);
 
     res.json({
       message: 'P&L statement status updated successfully',
-      statement: {
-        statementId: statement.statementId,
-        status: statement.status,
-        approvedBy: statement.approvedBy,
-        approvedAt: statement.approvedAt,
-      },
+      statement
     });
   } catch (error) {
+    if (error.message === 'P&L statement not found') {
+      return res.status(404).json({ message: 'P&L statement not found' });
+    }
     console.error('Error updating P&L statement status:', error);
     res.status(500).json({ message: 'Server error updating P&L statement status', error: error.message });
   }
@@ -314,22 +231,16 @@ router.delete('/:statementId', [
   try {
     const { statementId } = req.params;
     
-    const statement = await FinancialStatement.findById(statementId);
-    if (!statement) {
+    const result = await plStatementService.deleteStatement(statementId);
+
+    res.json({ message: result.message });
+  } catch (error) {
+    if (error.message === 'P&L statement not found') {
       return res.status(404).json({ message: 'P&L statement not found' });
     }
-
-    // Only allow deletion of draft statements
-    if (statement.status !== 'draft') {
-      return res.status(400).json({ 
-        message: 'Only draft statements can be deleted' 
-      });
+    if (error.message === 'Only draft statements can be deleted') {
+      return res.status(400).json({ message: error.message });
     }
-
-    await FinancialStatement.findByIdAndDelete(statementId);
-
-    res.json({ message: 'P&L statement deleted successfully' });
-  } catch (error) {
     console.error('Error deleting P&L statement:', error);
     res.status(500).json({ message: 'Server error deleting P&L statement', error: error.message });
   }
@@ -429,7 +340,7 @@ router.get('/:statementId/comparison', [
     const { statementId } = req.params;
     const { type = 'previous' } = req.query;
     
-    const comparison = await FinancialStatement.getStatementComparison(statementId, type);
+    const comparison = await plStatementService.getStatementComparison(statementId, type);
 
     res.json(comparison);
   } catch (error) {
@@ -454,7 +365,7 @@ router.post('/:statementId/export', [
     const { statementId } = req.params;
     const { format = 'pdf', includeDetails = true } = req.body;
     
-    const statement = await FinancialStatement.findById(statementId).populate('generatedBy');
+    const statement = await plStatementService.getStatementById(statementId);
     if (!statement) {
       return res.status(404).json({ message: 'P&L statement not found' });
     }
@@ -484,6 +395,9 @@ router.post('/:statementId/export', [
       },
     });
   } catch (error) {
+    if (error.message === 'P&L statement not found') {
+      return res.status(404).json({ message: 'P&L statement not found' });
+    }
     console.error('Error exporting P&L statement:', error);
     res.status(500).json({ message: 'Server error exporting P&L statement', error: error.message });
   }
@@ -502,7 +416,7 @@ router.get('/latest', [
   try {
     const { periodType = 'monthly' } = req.query;
     
-    const statement = await FinancialStatement.getLatestStatement('profit_loss', periodType);
+    const statement = await plStatementService.getLatestStatement(periodType);
 
     if (!statement) {
       return res.status(404).json({ message: 'No P&L statements found' });
@@ -530,7 +444,7 @@ router.get('/:statementId/download', [
     const { statementId } = req.params;
     const { format = 'pdf' } = req.query;
     
-    const statement = await FinancialStatement.findById(statementId);
+    const statement = await plStatementService.getStatementById(statementId);
     if (!statement) {
       return res.status(404).json({ message: 'P&L statement not found' });
     }
@@ -569,6 +483,9 @@ router.get('/:statementId/download', [
     });
 
   } catch (error) {
+    if (error.message === 'P&L statement not found') {
+      return res.status(404).json({ message: 'P&L statement not found' });
+    }
     console.error('Error downloading P&L statement:', error);
     res.status(500).json({ message: 'Server error downloading P&L statement', error: error.message });
   }

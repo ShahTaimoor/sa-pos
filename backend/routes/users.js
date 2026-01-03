@@ -1,8 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const bcrypt = require('bcryptjs');
-const User = require('../models/User');
 const { auth, requirePermission } = require('../middleware/auth');
+const userService = require('../services/userService');
 
 const router = express.Router();
 
@@ -11,10 +10,7 @@ const router = express.Router();
 // @access  Private (Admin only)
 router.get('/', auth, requirePermission('manage_users'), async (req, res) => {
   try {
-    const users = await User.find({})
-      .select('-password -loginAttempts -lockUntil')
-      .populate('permissionHistory.changedBy', 'firstName lastName email')
-      .sort({ createdAt: -1 });
+    const users = await userService.getUsers();
     
     res.json({
       success: true,
@@ -31,18 +27,16 @@ router.get('/', auth, requirePermission('manage_users'), async (req, res) => {
 // @access  Private (Admin only)
 router.get('/:id', auth, requirePermission('manage_users'), async (req, res) => {
   try {
-    const user = await User.findById(req.params.id)
-      .select('-password -loginAttempts -lockUntil');
-    
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+    const user = await userService.getUserById(req.params.id);
     
     res.json({
       success: true,
       data: { user }
     });
   } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ message: 'User not found' });
+    }
     console.error('Get user error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -66,30 +60,8 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const { firstName, lastName, email, role, status, permissions } = req.body;
-    
-    // Check if user exists
-    const user = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    
-    // Check if email is being changed and if it's already taken
-    if (email && email !== user.email) {
-      const existingUser = await User.findOne({ email });
-      if (existingUser) {
-        return res.status(400).json({ message: 'Email already exists' });
-      }
-    }
-    
-    // Store old data for tracking
-    const oldData = {
-      role: user.role,
-      permissions: user.permissions
-    };
-    
-    // Update user
     const updateData = {};
+    const { firstName, lastName, email, role, status, permissions } = req.body;
     if (firstName) updateData.firstName = firstName;
     if (lastName) updateData.lastName = lastName;
     if (email) updateData.email = email;
@@ -97,30 +69,7 @@ router.put('/:id', [
     if (status) updateData.status = status;
     if (permissions) updateData.permissions = permissions;
     
-    const updatedUser = await User.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    ).select('-password -loginAttempts -lockUntil');
-    
-    // Track permission changes if role or permissions changed
-    if (role && role !== oldData.role) {
-      await updatedUser.trackPermissionChange(
-        req.user,
-        'role_changed',
-        oldData,
-        { role: updatedUser.role, permissions: updatedUser.permissions },
-        `Role changed from ${oldData.role} to ${role}`
-      );
-    } else if (permissions && JSON.stringify(permissions) !== JSON.stringify(oldData.permissions)) {
-      await updatedUser.trackPermissionChange(
-        req.user,
-        'permissions_modified',
-        oldData,
-        { role: updatedUser.role, permissions: updatedUser.permissions },
-        'User permissions modified'
-      );
-    }
+    const updatedUser = await userService.updateUser(req.params.id, updateData, req.user);
     
     res.json({
       success: true,
@@ -128,6 +77,12 @@ router.put('/:id', [
       data: { user: updatedUser }
     });
   } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    if (error.message === 'Email already exists') {
+      return res.status(400).json({ message: 'Email already exists' });
+    }
     console.error('Update user error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -139,25 +94,19 @@ router.put('/:id', [
 router.patch('/:id/reset-password', auth, requirePermission('manage_users'), async (req, res) => {
   try {
     const { newPassword } = req.body;
-    
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ message: 'Password must be at least 6 characters long' });
-    }
-    
-    const user = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    
-    // Update password (the pre-save middleware will hash it automatically)
-    user.password = newPassword;
-    await user.save();
+    const result = await userService.resetPassword(req.params.id, newPassword);
     
     res.json({
       success: true,
-      message: 'Password reset successfully'
+      message: result.message
     });
   } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    if (error.message.includes('Password must be at least')) {
+      return res.status(400).json({ message: error.message });
+    }
     console.error('❌ Reset password error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -168,30 +117,16 @@ router.patch('/:id/reset-password', auth, requirePermission('manage_users'), asy
 // @access  Private (Admin only)
 router.get('/:id/activity', auth, requirePermission('manage_users'), async (req, res) => {
   try {
-    const user = await User.findById(req.params.id)
-      .select('lastLogin loginCount loginHistory permissionHistory isActive')
-      .populate('permissionHistory.changedBy', 'firstName lastName email');
-    
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    
-    // Calculate online status (online if logged in within last 30 minutes)
-    const isOnline = user.lastLogin && (Date.now() - user.lastLogin.getTime()) < 30 * 60 * 1000;
+    const activity = await userService.getUserActivity(req.params.id);
     
     res.json({
       success: true,
-      data: {
-        userId: user._id,
-        lastLogin: user.lastLogin,
-        loginCount: user.loginCount,
-        isOnline,
-        isActive: user.isActive,
-        loginHistory: user.loginHistory.slice(0, 5), // Last 5 logins
-        permissionHistory: user.permissionHistory.slice(0, 10) // Last 10 permission changes
-      }
+      data: activity
     });
   } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ message: 'User not found' });
+    }
     console.error('Get user activity error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -203,23 +138,17 @@ router.get('/:id/activity', auth, requirePermission('manage_users'), async (req,
 router.patch('/update-role-permissions', auth, requirePermission('manage_users'), async (req, res) => {
   try {
     const { role, permissions } = req.body;
-    
-    if (!role || !permissions) {
-      return res.status(400).json({ message: 'Role and permissions are required' });
-    }
-    
-        // Update all users with the specified role
-        const result = await User.updateMany(
-          { role: role },
-          { $set: { permissions: permissions } }
-        );
+    const result = await userService.updateRolePermissions(role, permissions);
     
     res.json({
       success: true,
-      message: `Updated ${result.modifiedCount} users with ${role} role`,
+      message: result.message,
       modifiedCount: result.modifiedCount
     });
   } catch (error) {
+    if (error.message === 'Role and permissions are required') {
+      return res.status(400).json({ message: error.message });
+    }
     console.error('Update role permissions error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -230,23 +159,19 @@ router.patch('/update-role-permissions', auth, requirePermission('manage_users')
 // @access  Private (Admin only)
 router.delete('/:id', auth, requirePermission('manage_users'), async (req, res) => {
   try {
-    // Prevent deleting own account
-    if (req.params.id === req.user.userId) {
-      return res.status(400).json({ message: 'Cannot delete your own account' });
-    }
-    
-    const user = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    
-    await User.findByIdAndDelete(req.params.id);
+    const result = await userService.deleteUser(req.params.id, req.user.userId || req.user._id);
     
     res.json({
       success: true,
-      message: 'User deleted successfully'
+      message: result.message
     });
   } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    if (error.message === 'Cannot delete your own account') {
+      return res.status(400).json({ message: error.message });
+    }
     console.error('Delete user error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -257,27 +182,20 @@ router.delete('/:id', auth, requirePermission('manage_users'), async (req, res) 
 // @access  Private (Admin only)
 router.patch('/:id/toggle-status', auth, requirePermission('manage_users'), async (req, res) => {
   try {
-    // Prevent toggling own account status
-    if (req.params.id === req.user.userId) {
-      return res.status(400).json({ message: 'Cannot modify your own account status' });
-    }
-    
-    const user = await User.findById(req.params.id);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    
-    // Toggle status
-    const newStatus = user.status === 'active' ? 'inactive' : 'active';
-    user.status = newStatus;
-    await user.save();
+    const result = await userService.toggleUserStatus(req.params.id, req.user.userId || req.user._id);
     
     res.json({
       success: true,
-      message: `User ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`,
-      data: { user: user.toSafeObject() }
+      message: result.message,
+      data: { user: result.user }
     });
   } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    if (error.message === 'Cannot modify your own account status') {
+      return res.status(400).json({ message: error.message });
+    }
     console.error('Toggle user status error:', error);
     res.status(500).json({ message: 'Server error' });
   }

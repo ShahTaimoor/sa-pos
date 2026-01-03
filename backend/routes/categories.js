@@ -2,7 +2,7 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
-const Category = require('../models/Category');
+const categoryService = require('../services/categoryService');
 
 const router = express.Router();
 
@@ -27,37 +27,12 @@ router.get('/', [
       isActive = true
     } = req.query;
 
-    const skip = (page - 1) * limit;
-    const filter = {};
-
-    // Apply filters
-    if (isActive !== undefined) filter.isActive = isActive;
-
-    // Search filter
-    if (search) {
-      filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const categories = await Category.find(filter)
-      .populate('parentCategory', 'name')
-      .sort({ sortOrder: 1, name: 1 })
-      .skip(skip)
-      .limit(limit);
-
-    const total = await Category.countDocuments(filter);
-
+    // Call service to get categories
+    const result = await categoryService.getCategories(req.query);
+    
     res.json({
-      categories,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page * limit < total,
-        hasPrev: page > 1,
-      },
+      categories: result.categories,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Error fetching categories:', error);
@@ -74,7 +49,7 @@ router.get('/tree', [
   sanitizeRequest,
 ], async (req, res) => {
   try {
-    const categoryTree = await Category.getCategoryTree();
+    const categoryTree = await categoryService.getCategoryTree();
     res.json(categoryTree);
   } catch (error) {
     console.error('Error fetching category tree:', error);
@@ -94,15 +69,7 @@ router.get('/:categoryId', [
 ], async (req, res) => {
   try {
     const { categoryId } = req.params;
-    
-    const category = await Category.findById(categoryId)
-      .populate('parentCategory', 'name')
-      .populate('subcategories', 'name description');
-
-    if (!category) {
-      return res.status(404).json({ message: 'Category not found' });
-    }
-
+    const category = await categoryService.getCategoryById(categoryId);
     res.json(category);
   } catch (error) {
     console.error('Error fetching category:', error);
@@ -125,18 +92,8 @@ router.post('/', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const categoryData = {
-      ...req.body,
-      createdBy: req.user._id
-    };
-
-    const category = new Category(categoryData);
-    await category.save();
-
-    res.status(201).json({
-      message: 'Category created successfully',
-      category
-    });
+    const result = await categoryService.createCategory(req.body, req.user._id);
+    res.status(201).json(result);
   } catch (error) {
     console.error('Error creating category:', error);
     if (error.message === 'Category name already exists') {
@@ -164,22 +121,13 @@ router.put('/:categoryId', [
 ], async (req, res) => {
   try {
     const { categoryId } = req.params;
-    
-    const category = await Category.findById(categoryId);
-    if (!category) {
-      return res.status(404).json({ message: 'Category not found' });
-    }
-
-    // Update category
-    Object.assign(category, req.body);
-    await category.save();
-
-    res.json({
-      message: 'Category updated successfully',
-      category
-    });
+    const result = await categoryService.updateCategory(categoryId, req.body);
+    res.json(result);
   } catch (error) {
     console.error('Error updating category:', error);
+    if (error.message === 'Category not found') {
+      return res.status(404).json({ message: 'Category not found' });
+    }
     if (error.message === 'Category name already exists') {
       res.status(400).json({ message: error.message });
     } else {
@@ -200,36 +148,16 @@ router.delete('/:categoryId', [
 ], async (req, res) => {
   try {
     const { categoryId } = req.params;
-    
-    const category = await Category.findById(categoryId);
-    if (!category) {
-      return res.status(404).json({ message: 'Category not found' });
-    }
-
-    // Check if category has products
-    const Product = require('../models/Product');
-    const productCount = await Product.countDocuments({ category: categoryId });
-    
-    if (productCount > 0) {
-      return res.status(400).json({ 
-        message: `Cannot delete category. It has ${productCount} associated products.` 
-      });
-    }
-
-    // Check if category has subcategories
-    const subcategoryCount = await Category.countDocuments({ parentCategory: categoryId });
-    
-    if (subcategoryCount > 0) {
-      return res.status(400).json({ 
-        message: `Cannot delete category. It has ${subcategoryCount} subcategories.` 
-      });
-    }
-
-    await Category.findByIdAndDelete(categoryId);
-
-    res.json({ message: 'Category deleted successfully' });
+    const result = await categoryService.deleteCategory(categoryId);
+    res.json(result);
   } catch (error) {
     console.error('Error deleting category:', error);
+    if (error.message === 'Category not found') {
+      return res.status(404).json({ message: 'Category not found' });
+    }
+    if (error.message.includes('Cannot delete category')) {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error deleting category', error: error.message });
   }
 });
@@ -243,28 +171,8 @@ router.get('/stats', [
   sanitizeRequest,
 ], async (req, res) => {
   try {
-    const stats = await Category.aggregate([
-      {
-        $group: {
-          _id: null,
-          totalCategories: { $sum: 1 },
-          activeCategories: {
-            $sum: { $cond: ['$isActive', 1, 0] }
-          },
-          inactiveCategories: {
-            $sum: { $cond: ['$isActive', 0, 1] }
-          }
-        }
-      }
-    ]);
-
-    const result = stats[0] || {
-      totalCategories: 0,
-      activeCategories: 0,
-      inactiveCategories: 0
-    };
-
-    res.json(result);
+    const stats = await categoryService.getStats();
+    res.json(stats);
   } catch (error) {
     console.error('Error fetching category stats:', error);
     res.status(500).json({ message: 'Server error fetching category stats', error: error.message });

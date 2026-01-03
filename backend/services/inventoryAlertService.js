@@ -1,6 +1,6 @@
-const Product = require('../models/Product');
-const Inventory = require('../models/Inventory');
-const Sales = require('../models/Sales');
+const ProductRepository = require('../repositories/ProductRepository');
+const InventoryRepository = require('../repositories/InventoryRepository');
+const SalesRepository = require('../repositories/SalesRepository');
 
 class InventoryAlertService {
   /**
@@ -18,15 +18,19 @@ class InventoryAlertService {
       } = options;
 
       // Get all products with their inventory
-      const products = await Product.find({ status: 'active' })
-        .populate('category', 'name')
-        .lean();
+      const products = await ProductRepository.findAll(
+        { status: 'active' },
+        {
+          populate: [{ path: 'category', select: 'name' }],
+          lean: true
+        }
+      );
 
       const alerts = [];
 
       for (const product of products) {
         // Get inventory record
-        const inventory = await Inventory.findOne({ product: product._id });
+        const inventory = await InventoryRepository.findOne({ product: product._id });
         
         if (!inventory) continue;
 
@@ -112,7 +116,7 @@ class InventoryAlertService {
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-      const sales = await Sales.aggregate([
+      const sales = await SalesRepository.aggregate([
         {
           $match: {
             createdAt: { $gte: thirtyDaysAgo },

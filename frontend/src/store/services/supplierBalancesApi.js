@@ -64,7 +64,11 @@ export const supplierBalancesApi = api.injectEndpoints({
         url: 'supplier-balances/fix-all-balances',
         method: 'post',
       }),
-      invalidatesTags: ['Suppliers', 'Accounting'],
+      invalidatesTags: [
+        { type: 'Suppliers', id: 'LIST' },
+        { type: 'Accounting', id: 'SUPPLIER_BALANCE' },
+        { type: 'Reports', id: 'BALANCE_ISSUES' },
+      ],
     }),
   }),
   overrideExisting: false,

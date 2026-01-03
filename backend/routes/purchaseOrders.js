@@ -1,8 +1,10 @@
 const express = require('express');
 const { body, validationResult, query } = require('express-validator');
-const PurchaseOrder = require('../models/PurchaseOrder');
 const { auth, requirePermission } = require('../middleware/auth');
 const inventoryService = require('../services/inventoryService');
+const purchaseOrderService = require('../services/purchaseOrderService');
+const supplierRepository = require('../repositories/SupplierRepository');
+const PurchaseOrder = require('../models/PurchaseOrder'); // Still needed for generatePONumber static method
 
 const router = express.Router();
 
@@ -45,94 +47,12 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    // Check if all purchase orders are requested (no pagination)
-    const getAllPurchaseOrders = req.query.all === 'true' || req.query.all === true || 
-                                (req.query.limit && parseInt(req.query.limit) >= 999999);
-    
-    const page = getAllPurchaseOrders ? 1 : (parseInt(req.query.page) || 1);
-    const limit = getAllPurchaseOrders ? 999999 : (parseInt(req.query.limit) || 20);
-    const skip = getAllPurchaseOrders ? 0 : ((page - 1) * limit);
-
-    // Build filter
-    const filter = {};
-    
-    if (req.query.search) {
-      filter.$or = [
-        { poNumber: { $regex: req.query.search, $options: 'i' } },
-        { notes: { $regex: req.query.search, $options: 'i' } }
-      ];
-    }
-    
-    if (req.query.status) {
-      filter.status = req.query.status;
-    }
-    
-    if (req.query.supplier) {
-      filter.supplier = req.query.supplier;
-    }
-    
-    // Date filtering
-    if (req.query.dateFrom || req.query.dateTo) {
-      filter.createdAt = {};
-      if (req.query.dateFrom) {
-        // Set to start of day (00:00:00) in local timezone
-        const dateFrom = new Date(req.query.dateFrom);
-        dateFrom.setHours(0, 0, 0, 0);
-        filter.createdAt.$gte = dateFrom;
-      }
-      if (req.query.dateTo) {
-        // Set to end of day (23:59:59.999) - add 1 day and use $lt to include entire toDate
-        const dateTo = new Date(req.query.dateTo);
-        dateTo.setDate(dateTo.getDate() + 1);
-        dateTo.setHours(0, 0, 0, 0);
-        filter.createdAt.$lt = dateTo;
-      }
-    }
-    
-    let query = PurchaseOrder.find(filter)
-      .populate('supplier', 'companyName contactPerson email phone businessType currentBalance pendingBalance')
-      .populate('items.product', 'name description pricing inventory')
-      .populate('createdBy', 'firstName lastName email')
-      .populate('lastModifiedBy', 'firstName lastName email')
-      .sort({ createdAt: -1 });
-    
-    // Only apply skip and limit if not getting all purchase orders
-    if (!getAllPurchaseOrders) {
-      query = query.skip(skip).limit(limit);
-    }
-    
-    const purchaseOrders = await query;
-    const total = await PurchaseOrder.countDocuments(filter);
-    
-    // Transform names to uppercase
-    purchaseOrders.forEach(po => {
-      if (po.supplier) {
-        po.supplier = transformSupplierToUppercase(po.supplier);
-      }
-      if (po.items && Array.isArray(po.items)) {
-        po.items.forEach(item => {
-          if (item.product) {
-            item.product = transformProductToUppercase(item.product);
-          }
-        });
-      }
-    });
+    // Call service to get purchase orders
+    const result = await purchaseOrderService.getPurchaseOrders(req.query);
     
     res.json({
-      purchaseOrders,
-      pagination: getAllPurchaseOrders ? {
-        current: 1,
-        pages: 1,
-        total,
-        hasNext: false,
-        hasPrev: false
-      } : {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page < Math.ceil(total / limit),
-        hasPrev: page > 1
-      }
+      purchaseOrders: result.purchaseOrders,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Get purchase orders error:', error);
@@ -145,31 +65,12 @@ router.get('/', [
 // @access  Private
 router.get('/:id', auth, async (req, res) => {
   try {
-    const purchaseOrder = await PurchaseOrder.findById(req.params.id)
-      .populate('supplier', 'companyName contactPerson email phone businessType paymentTerms currentBalance pendingBalance')
-      .populate('items.product', 'name description pricing inventory')
-      .populate('createdBy', 'firstName lastName email')
-      .populate('lastModifiedBy', 'firstName lastName email')
-      .populate('conversions.convertedBy', 'firstName lastName email');
-    
-    if (!purchaseOrder) {
-      return res.status(404).json({ message: 'Purchase order not found' });
-    }
-    
-    // Transform names to uppercase
-    if (purchaseOrder.supplier) {
-      purchaseOrder.supplier = transformSupplierToUppercase(purchaseOrder.supplier);
-    }
-    if (purchaseOrder.items && Array.isArray(purchaseOrder.items)) {
-      purchaseOrder.items.forEach(item => {
-        if (item.product) {
-          item.product = transformProductToUppercase(item.product);
-        }
-      });
-    }
-    
+    const purchaseOrder = await purchaseOrderService.getPurchaseOrderById(req.params.id);
     res.json({ purchaseOrder });
   } catch (error) {
+    if (error.message === 'Purchase order not found') {
+      return res.status(404).json({ message: 'Purchase order not found' });
+    }
     console.error('Get purchase order error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -196,41 +97,7 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const poData = {
-      ...req.body,
-      poNumber: PurchaseOrder.generatePONumber(),
-      createdBy: req.user._id
-    };
-    
-    const purchaseOrder = new PurchaseOrder(poData);
-    await purchaseOrder.save();
-    
-    // Update supplier pending balance for unpaid purchase orders
-    // Note: pricing is calculated in the pre-save hook, so we use the saved purchaseOrder.total
-    if (purchaseOrder.supplier && purchaseOrder.total > 0) {
-      try {
-        const Supplier = require('../models/Supplier');
-        const supplierExists = await Supplier.findById(purchaseOrder.supplier);
-        if (supplierExists) {
-          // For purchase orders, we add to pending balance (money we owe to supplier)
-          const updateResult = await Supplier.findByIdAndUpdate(
-            purchaseOrder.supplier,
-            { $inc: { pendingBalance: purchaseOrder.total } },
-            { new: true }
-          );
-        } else {
-        }
-      } catch (error) {
-        console.error('Error updating supplier pending balance:', error);
-        // Don't fail the purchase order creation if supplier update fails
-      }
-    }
-    
-    await purchaseOrder.populate([
-      { path: 'supplier', select: 'companyName contactPerson email phone businessType' },
-      { path: 'items.product', select: 'name description pricing inventory' },
-      { path: 'createdBy', select: 'firstName lastName email' }
-    ]);
+    const purchaseOrder = await purchaseOrderService.createPurchaseOrder(req.body, req.user._id);
     
     // Transform names to uppercase
     if (purchaseOrder.supplier) {
@@ -284,45 +151,17 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const purchaseOrder = await PurchaseOrder.findById(req.params.id);
-    if (!purchaseOrder) {
-      return res.status(404).json({ message: 'Purchase order not found' });
-    }
-    
-    // Don't allow editing if already confirmed or received
-    if (['confirmed', 'partially_received', 'fully_received'].includes(purchaseOrder.status)) {
-      return res.status(400).json({ 
-        message: 'Cannot edit purchase order that has been confirmed or received' 
-      });
-    }
-    
-    // Store old items and old total for comparison
-    const oldItems = JSON.parse(JSON.stringify(purchaseOrder.items));
-    const oldTotal = purchaseOrder.total;
-    const oldSupplier = purchaseOrder.supplier;
-    
-    const updateData = {
-      ...req.body,
-      lastModifiedBy: req.user._id
-    };
-    
-    const updatedPO = await PurchaseOrder.findByIdAndUpdate(
+    const updatedPO = await purchaseOrderService.updatePurchaseOrder(
       req.params.id,
-      updateData,
-      { new: true, runValidators: true }
+      req.body,
+      req.user._id
     );
     
-    // Note: PurchaseOrder model has a pre-save hook that recalculates total
-    // We need to reload to get the updated total
-    await updatedPO.populate([
-      { path: 'supplier', select: 'companyName contactPerson email phone businessType' },
-      { path: 'items.product', select: 'name description pricing inventory' },
-      { path: 'createdBy', select: 'firstName lastName email' },
-      { path: 'lastModifiedBy', select: 'firstName lastName email' }
-    ]);
+    // Store old items for comparison (for inventory updates)
+    const oldItems = JSON.parse(JSON.stringify(updatedPO.items));
     
     // Adjust inventory if order was confirmed and items changed
-    if (purchaseOrder.status === 'confirmed' && req.body.items && req.body.items.length > 0) {
+    if (updatedPO.status === 'confirmed' && req.body.items && req.body.items.length > 0) {
       try {
         const inventoryService = require('../services/inventoryService');
         
@@ -395,39 +234,7 @@ router.put('/:id', [
       }
     }
     
-    // Adjust supplier balance if total changed or supplier changed
-    // Note: Purchase orders can only be edited if status is 'draft', so balance is always in pendingBalance
-    if (updatedPO.supplier && (updatedPO.total !== oldTotal || oldSupplier?.toString() !== updatedPO.supplier?.toString())) {
-      try {
-        const Supplier = require('../models/Supplier');
-        const supplier = await Supplier.findById(updatedPO.supplier);
-        
-        if (supplier) {
-          // Calculate difference (only draft orders can be edited, so balance is in pendingBalance)
-          const totalDifference = updatedPO.total - oldTotal;
-          
-          if (totalDifference !== 0) {
-            const updateResult = await Supplier.findByIdAndUpdate(
-              updatedPO.supplier,
-              { $inc: { pendingBalance: totalDifference } },
-              { new: true }
-            );
-          }
-          
-          // If supplier changed, remove balance from old supplier
-          if (oldSupplier && oldSupplier.toString() !== updatedPO.supplier.toString()) {
-            await Supplier.findByIdAndUpdate(
-              oldSupplier,
-              { $inc: { pendingBalance: -oldTotal } },
-              { new: true }
-            );
-          }
-        }
-      } catch (error) {
-        console.error('Error adjusting supplier balance on purchase order update:', error);
-        // Don't fail update if balance adjustment fails
-      }
-    }
+    // Note: Supplier balance adjustments are handled in the service layer
     
     res.json({
       message: 'Purchase order updated successfully',
@@ -447,16 +254,7 @@ router.put('/:id/confirm', [
   requirePermission('confirm_purchase_orders')
 ], async (req, res) => {
   try {
-    const purchaseOrder = await PurchaseOrder.findById(req.params.id);
-    if (!purchaseOrder) {
-      return res.status(404).json({ message: 'Purchase order not found' });
-    }
-    
-    if (purchaseOrder.status !== 'draft') {
-      return res.status(400).json({ 
-        message: 'Only draft purchase orders can be confirmed' 
-      });
-    }
+    const purchaseOrder = await purchaseOrderService.confirmPurchaseOrder(req.params.id);
     
     // Update inventory for each item in the purchase order
     const inventoryUpdates = [];
@@ -502,21 +300,15 @@ router.put('/:id/confirm', [
     // Update supplier balance: move from pendingBalance to currentBalance
     if (purchaseOrder.supplier && purchaseOrder.pricing && purchaseOrder.pricing.total > 0) {
       try {
-        const Supplier = require('../models/Supplier');
-        const supplierExists = await Supplier.findById(purchaseOrder.supplier);
-        if (supplierExists) {
+        const supplier = await supplierRepository.findById(purchaseOrder.supplier);
+        if (supplier) {
           // Move amount from pendingBalance to currentBalance (outstanding amount we owe to supplier)
-          const updateResult = await Supplier.findByIdAndUpdate(
-            purchaseOrder.supplier,
-            { 
-              $inc: { 
-                pendingBalance: -purchaseOrder.pricing.total,  // Remove from pending
-                currentBalance: purchaseOrder.pricing.total    // Add to current (outstanding)
-              }
-            },
-            { new: true }
-          );
-        } else {
+          await supplierRepository.update(purchaseOrder.supplier, {
+            $inc: { 
+              pendingBalance: -purchaseOrder.pricing.total,  // Remove from pending
+              currentBalance: purchaseOrder.pricing.total    // Add to current (outstanding)
+            }
+          });
         }
       } catch (error) {
         console.error('Error updating supplier balance on PO confirmation:', error);
@@ -578,20 +370,15 @@ router.put('/:id/cancel', [
   requirePermission('cancel_purchase_orders')
 ], async (req, res) => {
   try {
-    const purchaseOrder = await PurchaseOrder.findById(req.params.id);
-    if (!purchaseOrder) {
-      return res.status(404).json({ message: 'Purchase order not found' });
-    }
+    // Get purchase order before cancellation to check status
+    const purchaseOrderBeforeCancel = await purchaseOrderService.getPurchaseOrderById(req.params.id);
+    const wasConfirmed = purchaseOrderBeforeCancel.status === 'confirmed';
     
-    if (['fully_received', 'cancelled', 'closed'].includes(purchaseOrder.status)) {
-      return res.status(400).json({ 
-        message: 'Cannot cancel purchase order in current status' 
-      });
-    }
+    const purchaseOrder = await purchaseOrderService.cancelPurchaseOrder(req.params.id, req.user._id);
     
-    // If the purchase order was confirmed, reduce inventory and reverse supplier balance
+    // If the purchase order was confirmed, reduce inventory
     const inventoryUpdates = [];
-    if (purchaseOrder.status === 'confirmed') {
+    if (wasConfirmed) {
       for (const item of purchaseOrder.items) {
         try {
           const inventoryUpdate = await inventoryService.updateStock({
@@ -639,21 +426,15 @@ router.put('/:id/cancel', [
       // Reverse supplier balance: move from currentBalance back to pendingBalance
       if (purchaseOrder.supplier && purchaseOrder.pricing && purchaseOrder.pricing.total > 0) {
         try {
-          const Supplier = require('../models/Supplier');
-          const supplierExists = await Supplier.findById(purchaseOrder.supplier);
-          if (supplierExists) {
+          const supplier = await supplierRepository.findById(purchaseOrder.supplier);
+          if (supplier) {
             // Move amount from currentBalance back to pendingBalance (reverse the confirmation)
-            const updateResult = await Supplier.findByIdAndUpdate(
-              purchaseOrder.supplier,
-              { 
-                $inc: { 
-                  pendingBalance: purchaseOrder.pricing.total,  // Add back to pending
-                  currentBalance: -purchaseOrder.pricing.total  // Remove from current
-                }
-              },
-              { new: true }
-            );
-          } else {
+            await supplierRepository.update(purchaseOrder.supplier, {
+              $inc: { 
+                pendingBalance: purchaseOrder.pricing.total,  // Add back to pending
+                currentBalance: -purchaseOrder.pricing.total  // Remove from current
+              }
+            });
           }
         } catch (error) {
           console.error('Error reversing supplier balance on PO cancellation:', error);
@@ -688,28 +469,17 @@ router.put('/:id/close', [
   requirePermission('close_purchase_orders')
 ], async (req, res) => {
   try {
-    const purchaseOrder = await PurchaseOrder.findById(req.params.id);
-    if (!purchaseOrder) {
-      return res.status(404).json({ message: 'Purchase order not found' });
-    }
+    const purchaseOrder = await purchaseOrderService.closePurchaseOrder(req.params.id, req.user._id);
     
-    if (purchaseOrder.status === 'fully_received') {
-      purchaseOrder.status = 'closed';
-      purchaseOrder.lastModifiedBy = req.user._id;
-      
-      await purchaseOrder.save();
-      
-      res.json({
-        message: 'Purchase order closed successfully',
-        purchaseOrder
-      });
-    } else {
-      return res.status(400).json({ 
-        message: 'Only fully received purchase orders can be closed' 
-      });
-    }
+    res.json({
+      message: 'Purchase order closed successfully',
+      purchaseOrder
+    });
   } catch (error) {
     console.error('Close purchase order error:', error);
+    if (error.message === 'Only fully received purchase orders can be closed') {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -722,43 +492,16 @@ router.delete('/:id', [
   requirePermission('delete_purchase_orders')
 ], async (req, res) => {
   try {
-    const purchaseOrder = await PurchaseOrder.findById(req.params.id);
-    if (!purchaseOrder) {
-      return res.status(404).json({ message: 'Purchase order not found' });
-    }
+    // Get purchase order before deletion to check status
+    const purchaseOrder = await purchaseOrderService.getPurchaseOrderById(req.params.id);
+    const wasConfirmed = purchaseOrder.status === 'confirmed';
     
-    // Only allow deletion of draft orders
-    if (purchaseOrder.status !== 'draft') {
-      return res.status(400).json({ 
-        message: 'Only draft purchase orders can be deleted' 
-      });
-    }
-    
-    // Clean up supplier pending balance for draft purchase orders
-    // Note: purchaseOrder.total is used (not pricing.total) - see line 130 for creation logic
-    if (purchaseOrder.supplier && purchaseOrder.total > 0) {
-      try {
-        const Supplier = require('../models/Supplier');
-        const supplierExists = await Supplier.findById(purchaseOrder.supplier);
-        if (supplierExists) {
-          // Remove from pending balance since we're deleting the draft PO
-          // This reverses the balance addition made during PO creation (line 138)
-          const updateResult = await Supplier.findByIdAndUpdate(
-            purchaseOrder.supplier,
-            { $inc: { pendingBalance: -purchaseOrder.total } },
-            { new: true }
-          );
-        } else {
-        }
-      } catch (error) {
-        console.error('Error cleaning up supplier pending balance on PO deletion:', error);
-        // Don't fail the deletion if supplier update fails
-      }
-    }
+    // Delete the purchase order (service handles validation and supplier balance)
+    await purchaseOrderService.deletePurchaseOrder(req.params.id);
     
     // Restore inventory if PO was confirmed (but we only allow deletion of draft orders, so this shouldn't run)
     // Keeping this for safety in case the status check is bypassed
-    if (purchaseOrder.status === 'confirmed') {
+    if (wasConfirmed) {
       try {
         const inventoryService = require('../services/inventoryService');
         for (const item of purchaseOrder.items) {
@@ -784,7 +527,7 @@ router.delete('/:id', [
       }
     }
     
-    await PurchaseOrder.findByIdAndDelete(req.params.id);
+    await purchaseOrderService.deletePurchaseOrder(req.params.id);
     
     res.json({ message: 'Purchase order deleted successfully' });
   } catch (error) {
@@ -798,26 +541,8 @@ router.delete('/:id', [
 // @access  Private
 router.get('/:id/convert', auth, async (req, res) => {
   try {
-    const purchaseOrder = await PurchaseOrder.findById(req.params.id)
-      .populate('items.product', 'name description pricing inventory')
-      .populate('supplier', 'companyName contactPerson email phone businessType');
-    
-    if (!purchaseOrder) {
-      return res.status(404).json({ message: 'Purchase order not found' });
-    }
-    
-    // Filter items that have remaining quantities
-    const availableItems = purchaseOrder.items.filter(item => item.remainingQuantity > 0);
-    
-    res.json({
-      purchaseOrder: {
-        _id: purchaseOrder._id,
-        poNumber: purchaseOrder.poNumber,
-        supplier: purchaseOrder.supplier,
-        status: purchaseOrder.status
-      },
-      availableItems
-    });
+    const result = await purchaseOrderService.getPurchaseOrderForConversion(req.params.id);
+    res.json(result);
   } catch (error) {
     console.error('Get conversion data error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -841,10 +566,7 @@ router.post('/:id/convert', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const purchaseOrder = await PurchaseOrder.findById(req.params.id);
-    if (!purchaseOrder) {
-      return res.status(404).json({ message: 'Purchase order not found' });
-    }
+    const purchaseOrder = await purchaseOrderService.getPurchaseOrderById(req.params.id);
 
     if (purchaseOrder.status === 'cancelled' || purchaseOrder.status === 'closed') {
       return res.status(400).json({ message: 'Cannot convert cancelled or closed purchase order' });

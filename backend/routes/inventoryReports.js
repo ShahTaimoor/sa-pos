@@ -3,8 +3,11 @@ const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const inventoryReportService = require('../services/inventoryReportService');
-const InventoryReport = require('../models/InventoryReport');
-const Product = require('../models/Product');
+const InventoryReport = require('../models/InventoryReport'); // Still needed for model reference
+const Product = require('../models/Product'); // Still needed for model reference
+const inventoryReportRepository = require('../repositories/InventoryReportRepository');
+const productRepository = require('../repositories/ProductRepository');
+const salesRepository = require('../repositories/SalesRepository');
 
 const router = express.Router();
 
@@ -46,8 +49,6 @@ router.post('/generate', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    // Debug: Log the request body to understand what's being sent
-    
     const report = await inventoryReportService.generateInventoryReport(
       req.body,
       req.user._id
@@ -181,7 +182,7 @@ router.put('/:reportId/favorite', [
     const { reportId } = req.params;
     const { isFavorite } = req.body;
 
-    const report = await InventoryReport.findOne({ reportId });
+    const report = await inventoryReportRepository.findByReportId(reportId);
     if (!report) {
       return res.status(404).json({ message: 'Inventory report not found' });
     }
@@ -217,13 +218,14 @@ router.post('/:reportId/export', [
     const { reportId } = req.params;
     const { format } = req.body;
 
-    const report = await InventoryReport.findOne({ reportId });
+    const report = await inventoryReportRepository.findByReportId(reportId);
     if (!report) {
       return res.status(404).json({ message: 'Inventory report not found' });
     }
 
     // Add export record
     await report.addExport(format, req.user._id);
+    await report.save();
 
     res.json({
       message: `Export initiated for ${format.toUpperCase()} format`,
@@ -275,10 +277,11 @@ router.get('/quick/stock-levels', [
       }
     }
 
-    const products = await Product.find(matchCriteria)
-      .populate('category', 'name')
-      .sort({ 'inventory.currentStock': -1 })
-      .limit(parseInt(limit));
+    const products = await productRepository.findAll(matchCriteria, {
+      populate: [{ path: 'category', select: 'name' }],
+      sort: { 'inventory.currentStock': -1 },
+      limit: parseInt(limit)
+    });
 
     const stockLevels = products.map((product, index) => ({
       product: {
@@ -349,11 +352,8 @@ router.get('/quick/turnover-rates', [
         break;
     }
 
-    const Sales = require('../models/Sales');
-    const Product = require('../models/Product');
-
     // Get sales data for the period
-    const salesData = await Sales.aggregate([
+    const salesData = await salesRepository.aggregate([
       {
         $match: {
           createdAt: { $gte: startDate, $lte: endDate },
@@ -373,8 +373,9 @@ router.get('/quick/turnover-rates', [
 
     // Get product details
     const productIds = salesData.map(s => s._id);
-    const products = await Product.find({ _id: { $in: productIds } })
-      .populate('category', 'name');
+    const products = await productRepository.findByIds(productIds, {
+      populate: [{ path: 'category', select: 'name' }]
+    });
 
     const periodDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
     const periodYears = periodDays / 365;
@@ -438,17 +439,15 @@ router.get('/quick/aging-analysis', [
   try {
     const { limit = 10, threshold = 90 } = req.query;
     
-    const Product = require('../models/Product');
-    const Sales = require('../models/Sales');
-
     // Get products with stock
-    const products = await Product.find({ 'inventory.currentStock': { $gt: 0 } })
-      .populate('category', 'name')
-      .limit(parseInt(limit) * 2); // Get more to filter by aging
+    const products = await productRepository.findAll({ 'inventory.currentStock': { $gt: 0 } }, {
+      populate: [{ path: 'category', select: 'name' }],
+      limit: parseInt(limit) * 2 // Get more to filter by aging
+    });
 
     // Get last sold dates for products
     const productIds = products.map(p => p._id);
-    const lastSoldDates = await Sales.aggregate([
+    const lastSoldDates = await salesRepository.aggregate([
       {
         $match: {
           status: 'delivered',
@@ -534,13 +533,12 @@ router.get('/quick/summary', [
   sanitizeRequest,
 ], async (req, res) => {
   try {
-    // Debug: Check total products count
-    const totalProductsCount = await Product.countDocuments();
+    const totalProductsCount = await productRepository.count({});
     
-    const activeProductsCount = await Product.countDocuments({ status: 'active' });
+    const activeProductsCount = await productRepository.count({ status: 'active' });
 
     // Get overall inventory summary
-    const summary = await Product.aggregate([
+    const summary = await productRepository.aggregate([
       {
         $match: {
           status: { $in: ['active', 'inactive'] } // Include both active and inactive products

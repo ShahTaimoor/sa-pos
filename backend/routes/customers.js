@@ -7,9 +7,10 @@ const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
-const Customer = require('../models/Customer');
 const { auth, requirePermission } = require('../middleware/auth');
 const ledgerAccountService = require('../services/ledgerAccountService');
+const customerService = require('../services/customerService');
+const customerRepository = require('../repositories/CustomerRepository');
 const { retryMongoTransaction, isDuplicateKeyError } = require('../utils/retry');
 const { preventDuplicates } = require('../middleware/duplicatePrevention');
 
@@ -142,107 +143,12 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    // Check if all customers are requested (no pagination)
-    const getAllCustomers = req.query.all === 'true' || req.query.all === true || 
-                          (req.query.limit && parseInt(req.query.limit) >= 999999);
-    
-    const page = getAllCustomers ? 1 : (parseInt(req.query.page) || 1);
-    const limit = getAllCustomers ? 999999 : (parseInt(req.query.limit) || 20);
-    const skip = getAllCustomers ? 0 : ((page - 1) * limit);
-    
-    // Build filter
-    const filter = {};
-    
-    if (req.query.search) {
-      filter.$or = [
-        { name: { $regex: req.query.search, $options: 'i' } },
-        { email: { $regex: req.query.search, $options: 'i' } },
-        { businessName: { $regex: req.query.search, $options: 'i' } },
-        { phone: { $regex: req.query.search, $options: 'i' } }
-      ];
-    }
-    
-    if (req.query.businessType) {
-      filter.businessType = req.query.businessType;
-    }
-    
-    if (req.query.status) {
-      filter.status = req.query.status;
-    }
-    
-    if (req.query.customerTier) {
-      filter.customerTier = req.query.customerTier;
-    }
-
-    // Email status filter
-    if (req.query.emailStatus) {
-      switch (req.query.emailStatus) {
-        case 'verified':
-          filter.emailVerified = true;
-          break;
-        case 'unverified':
-          filter.emailVerified = false;
-          filter.email = { $exists: true, $ne: '' };
-          break;
-        case 'no-email':
-          filter.$or = [
-            { email: { $exists: false } },
-            { email: '' },
-            { email: null }
-          ];
-          break;
-      }
-    }
-
-    // Phone status filter
-    if (req.query.phoneStatus) {
-      switch (req.query.phoneStatus) {
-        case 'verified':
-          filter.phoneVerified = true;
-          break;
-        case 'unverified':
-          filter.phoneVerified = false;
-          filter.phone = { $exists: true, $ne: '' };
-          break;
-        case 'no-phone':
-          filter.$or = [
-            { phone: { $exists: false } },
-            { phone: '' },
-            { phone: null }
-          ];
-          break;
-      }
-    }
-    
-    let query = Customer.find(filter)
-      .sort({ createdAt: -1 });
-    
-    // Only apply skip and limit if not getting all customers
-    if (!getAllCustomers) {
-      query = query.skip(skip).limit(limit);
-    }
-    
-    const customers = await query;
-    const total = await Customer.countDocuments(filter);
-    
-    // Transform customer names to uppercase
-    const transformedCustomers = customers.map(transformCustomerToUppercase);
+    // Call service to get customers
+    const result = await customerService.getCustomers(req.query);
     
     res.json({
-      customers: transformedCustomers,
-      pagination: getAllCustomers ? {
-        current: 1,
-        pages: 1,
-        total,
-        hasNext: false,
-        hasPrev: false
-      } : {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page < Math.ceil(total / limit),
-        hasPrev: page > 1
-      }
+      customers: result.customers,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Get customers error:', error);
@@ -258,22 +164,7 @@ router.get('/cities', [
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    const customers = await Customer.find({}, 'addresses');
-    
-    // Extract unique cities from all customer addresses
-    const citiesSet = new Set();
-    customers.forEach(customer => {
-      if (customer.addresses && Array.isArray(customer.addresses)) {
-        customer.addresses.forEach(address => {
-          if (address.city && address.city.trim()) {
-            citiesSet.add(address.city.trim());
-          }
-        });
-      }
-    });
-    
-    const cities = Array.from(citiesSet).sort();
-    
+    const cities = await customerService.getUniqueCities();
     res.json({
       success: true,
       data: cities
@@ -306,60 +197,12 @@ router.get('/by-cities', [
     const citiesParam = req.query.cities;
     const showZeroBalance = req.query.showZeroBalance === 'true';
     
-    // Build filter
-    let filter = {};
+    const citiesArray = citiesParam
+      ? citiesParam.split(',').map(c => c.trim()).filter(c => c)
+      : [];
     
-    if (citiesParam) {
-      const citiesArray = citiesParam.split(',').map(c => c.trim()).filter(c => c);
-      if (citiesArray.length > 0) {
-        filter['addresses.city'] = { $in: citiesArray };
-      }
-    }
-    
-    // Get customers with their addresses
-    let customers = await Customer.find(filter)
-      .select('name businessName addresses currentBalance pendingBalance advanceBalance')
-      .sort({ businessName: 1 });
-    
-    // Filter customers by city and balance
-    const filteredCustomers = customers.filter(customer => {
-      // Check if customer has at least one address matching the selected cities
-      if (citiesParam) {
-        const citiesArray = citiesParam.split(',').map(c => c.trim()).filter(c => c);
-        const hasMatchingCity = customer.addresses && customer.addresses.some(addr => 
-          addr.city && citiesArray.includes(addr.city.trim())
-        );
-        if (!hasMatchingCity) return false;
-      }
-      
-      // Filter by balance if showZeroBalance is false
-      if (!showZeroBalance) {
-        const balance = customer.pendingBalance || 0;
-        return balance > 0;
-      }
-      
-      return true;
-    });
-    
-    // Format response
-    const formattedCustomers = filteredCustomers.map(customer => {
-      // Get the first matching city address or default address
-      const defaultAddress = customer.addresses && customer.addresses.length > 0 
-        ? customer.addresses.find(addr => addr.isDefault) || customer.addresses[0]
-        : null;
-      
-      return {
-        _id: customer._id,
-        accountName: customer.businessName || customer.name,
-        name: customer.name,
-        businessName: customer.businessName,
-        city: defaultAddress?.city || '',
-        balance: customer.pendingBalance || 0,
-        currentBalance: customer.currentBalance || 0,
-        pendingBalance: customer.pendingBalance || 0,
-        advanceBalance: customer.advanceBalance || 0
-      };
-    });
+    // Call service to get customers by cities
+    const formattedCustomers = await customerService.getCustomersByCities(citiesArray, showZeroBalance);
     
     res.json({
       success: true,
@@ -381,14 +224,12 @@ router.get('/by-cities', [
 // @access  Private
 router.get('/:id', [auth, validateCustomerIdParam], async (req, res) => {
   try {
-    const customer = await Customer.findById(req.params.id);
-    
-    if (!customer) {
+    const customer = await customerService.getCustomerById(req.params.id);
+    res.json({ customer });
+  } catch (error) {
+    if (error.message === 'Customer not found') {
       return res.status(404).json({ message: 'Customer not found' });
     }
-    
-    res.json({ customer: transformCustomerToUppercase(customer) });
-  } catch (error) {
     console.error('Get customer error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -401,30 +242,8 @@ router.get('/:id', [auth, validateCustomerIdParam], async (req, res) => {
 router.get('/search/:query', auth, async (req, res) => {
   try {
     const query = req.params.query;
-    
-    const customers = await Customer.find({
-      $or: [
-        { name: { $regex: query, $options: 'i' } },
-        { email: { $regex: query, $options: 'i' } },
-        { businessName: { $regex: query, $options: 'i' } },
-        { phone: { $regex: query, $options: 'i' } }
-      ],
-      status: 'active'
-    })
-    .select('name email businessName businessType customerTier phone pendingBalance advanceBalance creditLimit currentBalance')
-    .limit(10)
-    .lean();
-    
-    // Add displayName to each customer and transform to uppercase
-    const customersWithDisplayName = customers.map(customer => {
-      const transformed = transformCustomerToUppercase(customer);
-      return {
-        ...transformed,
-        displayName: (transformed.businessName || transformed.name || '').toUpperCase()
-      };
-    });
-    
-    res.json({ customers: customersWithDisplayName });
+    const customers = await customerService.searchCustomers(query, 10);
+    res.json({ customers });
   } catch (error) {
     console.error('Search customers error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -443,19 +262,8 @@ router.get('/check-email/:email', auth, async (req, res) => {
       return res.json({ exists: false });
     }
     
-    // Use case-insensitive search to match how emails are stored (lowercase)
-    const emailLower = email.trim().toLowerCase();
-    const query = { email: emailLower };
-    if (excludeId && isValidObjectId(excludeId)) {
-      query._id = { $ne: excludeId };
-    }
-    
-    const existingCustomer = await Customer.findOne(query);
-    
-    res.json({ 
-      exists: !!existingCustomer,
-      email: emailLower
-    });
+    const exists = await customerService.checkEmailExists(email, excludeId);
+    return res.json({ exists });
   } catch (error) {
     console.error('Check email error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -474,18 +282,11 @@ router.get('/check-business-name/:businessName', auth, async (req, res) => {
       return res.json({ exists: false });
     }
     
-    // Use case-insensitive search (business names are stored in uppercase via transform)
-    const businessNameTrimmed = businessName.trim();
-    const query = { businessName: { $regex: new RegExp(`^${businessNameTrimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } };
-    if (excludeId && isValidObjectId(excludeId)) {
-      query._id = { $ne: excludeId };
-    }
-    
-    const existingCustomer = await Customer.findOne(query);
+    const exists = await customerService.checkBusinessNameExists(businessName, excludeId);
     
     res.json({ 
-      exists: !!existingCustomer,
-      businessName: businessNameTrimmed
+      exists,
+      businessName: businessName.trim()
     });
   } catch (error) {
     console.error('Check business name error:', error);
@@ -512,22 +313,7 @@ router.post('/:id/address', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const customer = await Customer.findById(req.params.id);
-    if (!customer) {
-      return res.status(404).json({ message: 'Customer not found' });
-    }
-    
-    // If this is set as default, unset other defaults of the same type
-    if (req.body.isDefault) {
-      customer.addresses.forEach(addr => {
-        if (addr.type === req.body.type || addr.type === 'both') {
-          addr.isDefault = false;
-        }
-      });
-    }
-    
-    customer.addresses.push(req.body);
-    await customer.save();
+    const customer = await customerService.addCustomerAddress(req.params.id, req.body);
     
     res.json({
       message: 'Address added successfully',
@@ -554,18 +340,11 @@ router.put('/:id/credit-limit', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const customer = await Customer.findByIdAndUpdate(
+    const customer = await customerService.updateCustomerCreditLimit(
       req.params.id,
-      { 
-        creditLimit: req.body.creditLimit,
-        lastModifiedBy: req.user._id
-      },
-      { new: true, runValidators: true }
+      req.body.creditLimit,
+      req.user._id
     );
-    
-    if (!customer) {
-      return res.status(404).json({ message: 'Customer not found' });
-    }
     
     res.json({
       message: 'Credit limit updated successfully',
@@ -600,55 +379,14 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const openingBalance = parseOpeningBalance(req.body.openingBalance);
-
-    const customerData = {
-      ...req.body,
-      createdBy: req.user._id
-    };
-
-    // Wrap the transaction operation with retry logic for WriteConflict errors
-    const customerId = await retryMongoTransaction(async () => {
-      return await runWithOptionalTransaction(async (session) => {
-        let newCustomer = new Customer(customerData);
-        applyOpeningBalance(newCustomer, openingBalance);
-        
-        // Use atomic save operation
-        await newCustomer.save(session ? { session } : undefined);
-
-        // Sync ledger account (also wrapped in retry if needed)
-        await ledgerAccountService.syncCustomerLedgerAccount(newCustomer, session ? {
-          session,
-          userId: req.user._id
-        } : {
-          userId: req.user._id
-        });
-
-        return newCustomer._id;
-      }, 'create customer');
-    }, {
-      maxRetries: 5,
-      initialDelay: 100,
-      maxDelay: 3000
+    const result = await customerService.createCustomer(req.body, req.user._id, {
+      openingBalance: req.body.openingBalance
     });
-
-    const customer = await Customer.findById(customerId).populate('ledgerAccount', 'accountCode accountName');
-
-    if (!customer) {
-      console.error('Create customer error: Newly created customer not found after transaction', { customerId });
-      return res.status(500).json({ 
-        success: false,
-        error: {
-          message: 'Customer created but could not be retrieved',
-          code: 'CUSTOMER_RETRIEVAL_ERROR'
-        }
-      });
-    }
 
     res.status(201).json({
       success: true,
-      message: 'Customer created successfully',
-      customer
+      message: result.message,
+      customer: result.customer
     });
   } catch (error) {
     console.error('Create customer error:', {
@@ -750,67 +488,14 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    // Wrap the transaction operation with retry logic for WriteConflict errors
-    const updatedCustomerId = await retryMongoTransaction(async () => {
-      return await runWithOptionalTransaction(async (session) => {
-        const customerQuery = session ? Customer.findById(req.params.id).session(session) : Customer.findById(req.params.id);
-        const customer = await customerQuery;
-
-        if (!customer) {
-          return null;
-        }
-
-        const openingBalance = parseOpeningBalance(req.body.openingBalance);
-
-        Object.assign(customer, {
-          ...req.body,
-          lastModifiedBy: req.user._id
-        });
-        applyOpeningBalance(customer, openingBalance);
-
-        await customer.save(session ? { session } : undefined);
-        await ledgerAccountService.syncCustomerLedgerAccount(customer, session ? {
-          session,
-          userId: req.user._id
-        } : {
-          userId: req.user._id
-        });
-
-        return customer._id;
-      }, 'update customer');
-    }, {
-      maxRetries: 5,
-      initialDelay: 100,
-      maxDelay: 3000
+    const result = await customerService.updateCustomer(req.params.id, req.body, req.user._id, {
+      openingBalance: req.body.openingBalance
     });
-
-    if (!updatedCustomerId) {
-      return res.status(404).json({ 
-        success: false,
-        error: {
-          message: 'Customer not found',
-          code: 'NOT_FOUND'
-        }
-      });
-    }
-
-    const updatedCustomer = await Customer.findById(updatedCustomerId).populate('ledgerAccount', 'accountCode accountName');
-
-    if (!updatedCustomer) {
-      console.error('Update customer error: Customer not found after save', { updatedCustomerId });
-      return res.status(500).json({ 
-        success: false,
-        error: {
-          message: 'Customer updated but could not be retrieved',
-          code: 'CUSTOMER_RETRIEVAL_ERROR'
-        }
-      });
-    }
 
     res.json({
       success: true,
-      message: 'Customer updated successfully',
-      customer: updatedCustomer
+      message: result.message,
+      customer: result.customer
     });
   } catch (error) {
     console.error('Update customer error:', {
@@ -889,7 +574,7 @@ router.put('/:id', [
 });
 
 // @route   DELETE /api/customers/:id
-// @desc    Delete a customer
+// @desc    Delete a customer (soft delete)
 // @access  Private
 router.delete('/:id', [
   auth,
@@ -897,43 +582,59 @@ router.delete('/:id', [
   requirePermission('delete_customers')
 ], async (req, res) => {
   try {
-    const deletionResult = await runWithOptionalTransaction(async (session) => {
-      const customerQuery = session ? Customer.findById(req.params.id).session(session) : Customer.findById(req.params.id);
-      const customer = await customerQuery;
+    const result = await customerService.deleteCustomer(req.params.id, req.user._id);
 
-      if (!customer) {
-        return null;
-      }
-
-      if (customer.ledgerAccount) {
-        await ledgerAccountService.deactivateLedgerAccount(customer.ledgerAccount, session ? {
-          session,
-          userId: req.user?._id
-        } : { userId: req.user?._id });
-      }
-
-      if (session) {
-        await customer.deleteOne({ session });
-      } else {
-        await customer.deleteOne();
-      }
-
-      return true;
-    }, 'delete customer');
-
-    if (!deletionResult) {
-      return res.status(404).json({ message: 'Customer not found' });
-    }
-
-    res.json({ message: 'Customer deleted successfully' });
+    res.json({ message: result.message });
   } catch (error) {
     console.error('Delete customer error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
+// @route   POST /api/customers/:id/restore
+// @desc    Restore soft-deleted customer
+// @access  Private
+router.post('/:id/restore', [
+  auth,
+  validateCustomerIdParam,
+  requirePermission('delete_customers')
+], async (req, res) => {
+  try {
+    const customerRepository = require('../repositories/CustomerRepository');
+    const customer = await customerRepository.findDeletedById(req.params.id);
+    if (!customer) {
+      return res.status(404).json({ message: 'Deleted customer not found' });
+    }
+    
+    await customerRepository.restore(req.params.id);
+    res.json({ message: 'Customer restored successfully' });
+  } catch (error) {
+    console.error('Restore customer error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/customers/deleted
+// @desc    Get all deleted customers
+// @access  Private
+router.get('/deleted', [
+  auth,
+  requirePermission('view_customers')
+], async (req, res) => {
+  try {
+    const customerRepository = require('../repositories/CustomerRepository');
+    const deletedCustomers = await customerRepository.findDeleted({}, {
+      sort: { deletedAt: -1 }
+    });
+    res.json(deletedCustomers);
+  } catch (error) {
+    console.error('Get deleted customers error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // @route   PUT /api/customers/:id/balance
-// @desc    Manually update customer balance (temporary fix endpoint)
+// @desc    Manually update customer balance
 // @access  Private
 router.put('/:id/balance', [
   auth,
@@ -950,33 +651,15 @@ router.put('/:id/balance', [
     }
 
     const { pendingBalance, currentBalance, advanceBalance } = req.body;
-    const updateData = {};
+    const balanceData = {};
+    if (pendingBalance !== undefined) balanceData.pendingBalance = pendingBalance;
+    if (currentBalance !== undefined) balanceData.currentBalance = currentBalance;
+    if (advanceBalance !== undefined) balanceData.advanceBalance = advanceBalance;
 
-    if (pendingBalance !== undefined) updateData.pendingBalance = pendingBalance;
-    if (currentBalance !== undefined) updateData.currentBalance = currentBalance;
-    if (advanceBalance !== undefined) updateData.advanceBalance = advanceBalance;
-
-    const customer = await Customer.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    );
-
-    if (!customer) {
-      return res.status(404).json({ message: 'Customer not found' });
-    }
-
-    res.json({
-      message: 'Customer balance updated successfully',
-      customer: {
-        id: customer._id,
-        name: customer.name,
-        businessName: customer.businessName,
-        pendingBalance: customer.pendingBalance,
-        currentBalance: customer.currentBalance,
-        advanceBalance: customer.advanceBalance
-      }
-    });
+    // Call service to update balance
+    const result = await customerService.updateCustomerBalance(req.params.id, balanceData);
+    
+    res.json(result);
   } catch (error) {
     console.error('Update customer balance error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -1047,11 +730,11 @@ router.post('/import/excel', [
         }
         
         // Check if customer already exists
-        const existingCustomer = await Customer.findOne({ 
+        const customerExists = await customerService.customerExists({ 
           businessName: customerData.businessName.toString().trim()
         });
         
-        if (existingCustomer) {
+        if (customerExists) {
           results.errors.push({
             row: i + 2,
             error: `Customer already exists with business name: ${customerData.businessName}`
@@ -1059,8 +742,8 @@ router.post('/import/excel', [
           continue;
         }
         
-        // Create customer
-        const customer = new Customer({
+        // Create customer using service
+        const customerPayload = {
           name: customerData.name.toString().trim(),
           email: customerData.email ? customerData.email.toString().trim() : undefined,
           phone: customerData.phone.toString().trim() || '',
@@ -1071,11 +754,10 @@ router.post('/import/excel', [
           creditLimit: parseFloat(customerData.creditLimit) || 0,
           paymentTerms: customerData.paymentTerms.toString().toLowerCase(),
           status: customerData.status.toString().toLowerCase(),
-          notes: customerData.notes.toString().trim() || '',
-          createdBy: req.user._id
-        });
+          notes: customerData.notes.toString().trim() || ''
+        };
         
-        await customer.save();
+        await customerService.createCustomer(customerPayload, req.user._id);
         results.success++;
         
       } catch (error) {
@@ -1107,13 +789,8 @@ router.post('/export/excel', [auth, requirePermission('view_customers')], async 
   try {
     const { filters = {} } = req.body;
     
-    // Build query based on filters
-    const query = {};
-    if (filters.businessType) query.businessType = filters.businessType;
-    if (filters.status) query.status = filters.status;
-    if (filters.customerTier) query.customerTier = filters.customerTier;
-    
-    const customers = await Customer.find(query).lean();
+    // Call service to get customers for export
+    const customers = await customerService.getCustomersForExport(filters);
     
     // Prepare Excel data
     const excelData = customers.map(customer => ({

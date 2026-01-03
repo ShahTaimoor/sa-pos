@@ -1,254 +1,177 @@
-/**
- * Keyboard Shortcuts Hook
- * Manages keyboard shortcuts with conflict detection and customization
- */
+import { useEffect, useCallback } from 'react';
 
-import { useEffect, useCallback, useRef } from 'react';
-
-// Default shortcuts configuration
-const DEFAULT_SHORTCUTS = {
+// Default keyboard shortcuts configuration
+export const DEFAULT_SHORTCUTS = {
   'quick-search': {
     keys: ['ctrl+k', 'cmd+k'],
     description: 'Quick search',
-    action: null, // Will be set by context
-    category: 'navigation'
+    category: 'Navigation'
   },
   'new-order': {
     keys: ['ctrl+n', 'cmd+n'],
-    description: 'New order/sale',
-    action: null,
-    category: 'actions'
+    description: 'New order',
+    category: 'Actions'
   },
   'print': {
     keys: ['ctrl+p', 'cmd+p'],
     description: 'Print',
-    action: null,
-    category: 'actions'
+    category: 'Actions'
   },
   'save': {
     keys: ['ctrl+s', 'cmd+s'],
     description: 'Save',
-    action: null,
-    category: 'actions'
+    category: 'Actions'
   },
   'close-modal': {
     keys: ['escape'],
     description: 'Close modal',
-    action: null,
-    category: 'navigation'
+    category: 'Navigation'
   },
   'help': {
     keys: ['f1'],
     description: 'Help',
-    action: null,
-    category: 'navigation'
+    category: 'Navigation'
   },
   'focus-search': {
-    keys: ['f2'],
+    keys: ['ctrl+f', 'cmd+f'],
     description: 'Focus search',
-    action: null,
-    category: 'navigation'
+    category: 'Navigation'
   },
   'new-product': {
-    keys: ['f3'],
+    keys: ['ctrl+shift+p', 'cmd+shift+p'],
     description: 'New product',
-    action: null,
-    category: 'actions'
+    category: 'Actions'
   },
   'new-customer': {
-    keys: ['f4'],
+    keys: ['ctrl+shift+c', 'cmd+shift+c'],
     description: 'New customer',
-    action: null,
-    category: 'actions'
+    category: 'Actions'
   }
 };
 
-/**
- * Normalize key combination string
- */
-const normalizeKey = (key) => {
-  return key.toLowerCase()
-    .replace(/\s+/g, '')
-    .replace('control', 'ctrl')
-    .replace('command', 'cmd')
-    .replace('meta', 'cmd');
-};
-
-/**
- * Parse key combination string to object
- */
-const parseKeyCombination = (keyString) => {
-  const normalized = normalizeKey(keyString);
-  const parts = normalized.split('+');
+// Detect conflicts in keyboard shortcuts
+export const detectConflicts = (shortcuts) => {
+  const conflicts = [];
+  const keyMap = new Map();
   
-  return {
-    ctrl: parts.includes('ctrl'),
-    cmd: parts.includes('cmd'),
-    alt: parts.includes('alt'),
-    shift: parts.includes('shift'),
-    key: parts[parts.length - 1] // Last part is the actual key
-  };
-};
-
-/**
- * Check if key combination matches
- */
-const matchesKeyCombination = (event, combination) => {
-  // Return false if event.key is undefined
-  if (!event.key || !combination.key) {
-    return false;
-  }
-
-  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  const cmdKey = isMac ? event.metaKey : event.ctrlKey;
-  
-  return (
-    (combination.ctrl && event.ctrlKey && !isMac) ||
-    (combination.cmd && cmdKey) ||
-    (!combination.ctrl && !combination.cmd && !event.ctrlKey && !event.metaKey) &&
-    (combination.alt ? event.altKey : !event.altKey) &&
-    (combination.shift ? event.shiftKey : !event.shiftKey) &&
-    event.key.toLowerCase() === combination.key.toLowerCase()
-  );
-};
-
-/**
- * Format key combination for display
- */
-const formatKeyDisplay = (keyString) => {
-  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  const parts = keyString.split('+').map(part => {
-    const normalized = normalizeKey(part);
-    if (normalized === 'ctrl' && isMac) return '⌘';
-    if (normalized === 'ctrl') return 'Ctrl';
-    if (normalized === 'cmd') return '⌘';
-    if (normalized === 'alt') return 'Alt';
-    if (normalized === 'shift') return 'Shift';
-    if (normalized.startsWith('f') && normalized.length <= 3) {
-      return normalized.toUpperCase();
-    }
-    return normalized.toUpperCase();
+  Object.entries(shortcuts).forEach(([id, config]) => {
+    if (!config || !config.keys) return;
+    
+    config.keys.forEach(key => {
+      const normalizedKey = key.toLowerCase().trim();
+      if (keyMap.has(normalizedKey)) {
+        conflicts.push({
+          key: normalizedKey,
+          shortcuts: [keyMap.get(normalizedKey), id]
+        });
+      } else {
+        keyMap.set(normalizedKey, id);
+      }
+    });
   });
   
-  return parts.join(isMac ? '' : '+');
+  return conflicts;
 };
 
-/**
- * useKeyboardShortcuts Hook
- */
-export const useKeyboardShortcuts = (shortcuts = {}, options = {}) => {
-  const {
-    enabled = true,
-    preventDefault = true,
-    stopPropagation = false
-  } = options;
+// Format key display for UI
+export const formatKeyDisplay = (key) => {
+  if (!key) return '';
+  
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  return key
+    .replace(/ctrl/gi, isMac ? '⌘' : 'Ctrl')
+    .replace(/cmd/gi, isMac ? '⌘' : 'Cmd')
+    .replace(/shift/gi, isMac ? '⇧' : 'Shift')
+    .replace(/alt/gi, isMac ? '⌥' : 'Alt')
+    .replace(/escape/gi, 'Esc')
+    .replace(/enter/gi, 'Enter')
+    .replace(/\+/g, ' + ')
+    .toUpperCase();
+};
 
-  const shortcutsRef = useRef({});
-  const handlersRef = useRef({});
-
-  // Update shortcuts ref
+export const useKeyboardShortcuts = (shortcuts, options = {}) => {
+  const { enabled = true, preventDefault = true } = options;
+  
   useEffect(() => {
-    shortcutsRef.current = { ...DEFAULT_SHORTCUTS, ...shortcuts };
-  }, [shortcuts]);
-
-  // Register shortcut handler
-  const registerShortcut = useCallback((id, handler) => {
-    handlersRef.current[id] = handler;
-  }, []);
-
-  // Unregister shortcut handler
-  const unregisterShortcut = useCallback((id) => {
-    delete handlersRef.current[id];
-  }, []);
-
-  // Handle keyboard events
-  useEffect(() => {
-    if (!enabled) return;
-
+    if (!enabled || !shortcuts) return;
+    
     const handleKeyDown = (event) => {
-      // Skip if event.key is undefined
-      if (!event.key) {
-        return;
-      }
-
-      // Skip if typing in input, textarea, or contenteditable
+      if (!event.key) return;
+      
       const target = event.target;
-      if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable ||
-        target.closest('[contenteditable="true"]')
-      ) {
-        // Allow Escape and F keys even in inputs
-        if (event.key !== 'Escape' && !event.key.startsWith('F')) {
-          return;
-        }
-      }
-
-      // Check each shortcut
-      for (const [id, shortcut] of Object.entries(shortcutsRef.current)) {
-        if (!shortcut.action && !handlersRef.current[id]) continue;
-
-        // Check all key combinations for this shortcut
-        for (const keyString of shortcut.keys) {
-          const combination = parseKeyCombination(keyString);
-          
-          if (matchesKeyCombination(event, combination)) {
-            if (preventDefault) {
-              event.preventDefault();
+      const isInputField = target.tagName === 'INPUT' || 
+                          target.tagName === 'TEXTAREA' || 
+                          target.contentEditable === 'true' ||
+                          target.isContentEditable;
+      
+      if (isInputField) return;
+      
+      const key = event.key.toLowerCase();
+      const ctrlKey = event.ctrlKey;
+      const metaKey = event.metaKey;
+      const shiftKey = event.shiftKey;
+      const altKey = event.altKey;
+      
+      // Build shortcut key string
+      let shortcutKey = '';
+      if (metaKey) shortcutKey += 'cmd+';
+      else if (ctrlKey) shortcutKey += 'ctrl+';
+      if (shiftKey) shortcutKey += 'shift+';
+      if (altKey) shortcutKey += 'alt+';
+      shortcutKey += key;
+      
+      // Check if shortcut exists and has an action
+      // shortcuts can be either:
+      // 1. Object with shortcut IDs as keys (from context)
+      // 2. Simple key-value map (direct key -> function)
+      let matchedShortcut = null;
+      
+      if (shortcuts) {
+        // Check if it's a context-style shortcuts object
+        const shortcutEntries = Object.entries(shortcuts);
+        for (const [id, config] of shortcutEntries) {
+          if (config && config.keys && Array.isArray(config.keys)) {
+            if (config.keys.includes(shortcutKey)) {
+              matchedShortcut = config;
+              break;
             }
-            if (stopPropagation) {
-              event.stopPropagation();
+          } else if (typeof config === 'function') {
+            // Simple key-value map
+            if (id === shortcutKey) {
+              matchedShortcut = { action: config };
+              break;
             }
-
-            // Execute handler
-            const handler = handlersRef.current[id] || shortcut.action;
-            if (handler) {
-              handler(event);
-            }
-            
-            return; // Only handle first match
           }
         }
       }
+      
+      if (matchedShortcut && matchedShortcut.action) {
+        if (preventDefault) {
+          event.preventDefault();
+        }
+        matchedShortcut.action(event);
+      }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [enabled, preventDefault, stopPropagation]);
-
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [shortcuts, enabled, preventDefault]);
+  
+  // Register shortcut function (for dynamic registration)
+  const registerShortcut = useCallback((id, config) => {
+    // This would typically update a state or context
+    // For now, it's a placeholder
+  }, []);
+  
+  // Unregister shortcut function
+  const unregisterShortcut = useCallback((id) => {
+    // This would typically update a state or context
+    // For now, it's a placeholder
+  }, []);
+  
   return {
     registerShortcut,
     unregisterShortcut,
     formatKeyDisplay
   };
 };
-
-/**
- * Detect shortcut conflicts
- */
-export const detectConflicts = (shortcuts) => {
-  const conflicts = [];
-  const keyMap = new Map();
-
-  for (const [id, shortcut] of Object.entries(shortcuts)) {
-    for (const keyString of shortcut.keys) {
-      const normalized = normalizeKey(keyString);
-      if (keyMap.has(normalized)) {
-        conflicts.push({
-          key: normalized,
-          shortcuts: [keyMap.get(normalized), id]
-        });
-      } else {
-        keyMap.set(normalized, id);
-      }
-    }
-  }
-
-  return conflicts;
-};
-
-export { DEFAULT_SHORTCUTS, normalizeKey, parseKeyCombination, formatKeyDisplay };
-

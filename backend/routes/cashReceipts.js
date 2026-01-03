@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
-const CashReceipt = require('../models/CashReceipt');
+const cashReceiptService = require('../services/cashReceiptService');
+const CashReceipt = require('../models/CashReceipt'); // Still needed for create/update operations
 const Sales = require('../models/Sales');
 const Customer = require('../models/Customer');
 const Supplier = require('../models/Supplier');
@@ -90,32 +91,23 @@ router.get('/', [
       filter.particular = { $regex: particular, $options: 'i' };
     }
 
-    // Calculate pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // Get cash receipts with pagination
-    const cashReceipts = await CashReceipt.find(filter)
-      .populate({ path: 'order', model: 'Sales', select: 'orderNumber' }) // Explicitly reference Sales model
-      .populate('customer', 'name businessName')
-      .populate('supplier', 'name businessName')
-      .populate('createdBy', 'firstName lastName')
-      .sort({ date: -1, createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    // Get total count for pagination
-    const total = await CashReceipt.countDocuments(filter);
+    const result = await cashReceiptService.getCashReceipts({
+      page,
+      limit,
+      fromDate,
+      toDate,
+      dateFrom,
+      dateTo,
+      voucherCode,
+      amount,
+      particular
+    });
 
     res.json({
       success: true,
       data: {
-        cashReceipts,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / parseInt(limit)),
-          totalItems: total,
-          itemsPerPage: parseInt(limit)
-        }
+        cashReceipts: result.cashReceipts,
+        pagination: result.pagination
       }
     });
   } catch (error) {
@@ -136,24 +128,19 @@ router.get('/:id', [
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    const cashReceipt = await CashReceipt.findById(req.params.id)
-      .populate({ path: 'order', model: 'Sales', select: 'orderNumber' }) // Explicitly reference Sales model
-      .populate('customer', 'name businessName')
-      .populate('supplier', 'name businessName')
-      .populate('createdBy', 'firstName lastName');
-
-    if (!cashReceipt) {
-      return res.status(404).json({ 
-        success: false,
-        message: 'Cash receipt not found' 
-      });
-    }
+    const cashReceipt = await cashReceiptService.getCashReceiptById(req.params.id);
 
     res.json({
       success: true,
       data: cashReceipt
     });
   } catch (error) {
+    if (error.message === 'Cash receipt not found') {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Cash receipt not found' 
+      });
+    }
     console.error('Get cash receipt error:', error);
     res.status(500).json({ 
       success: false,
@@ -441,40 +428,16 @@ router.get('/summary/date-range', [
 
     const { fromDate, toDate } = req.query;
 
-    const filter = {
-      date: {
-        $gte: new Date(fromDate),
-        $lte: new Date(toDate + 'T23:59:59.999Z')
-      }
-    };
-
-    // Get summary data
-    const summary = await CashReceipt.aggregate([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          totalAmount: { $sum: '$amount' },
-          totalCount: { $sum: 1 },
-          averageAmount: { $avg: '$amount' }
-        }
-      }
-    ]);
-
-    const result = summary.length > 0 ? summary[0] : {
-      totalAmount: 0,
-      totalCount: 0,
-      averageAmount: 0
-    };
+    const summary = await cashReceiptService.getSummary(fromDate, toDate);
 
     res.json({
       success: true,
       data: {
         fromDate,
         toDate,
-        totalAmount: result.totalAmount,
-        totalCount: result.totalCount,
-        averageAmount: result.averageAmount
+        totalAmount: summary.totalAmount || 0,
+        totalCount: summary.totalReceipts || 0,
+        averageAmount: summary.averageAmount || 0
       }
     });
   } catch (error) {
@@ -523,7 +486,7 @@ router.post('/batch', [
 
     // Validate all customers exist
     const customerIds = receipts.map(r => r.customer).filter(Boolean);
-    const customers = await Customer.find({ _id: { $in: customerIds } });
+    const customers = await cashReceiptService.getCustomersByIds(customerIds);
     
     if (customers.length !== customerIds.length) {
       return res.status(400).json({ 

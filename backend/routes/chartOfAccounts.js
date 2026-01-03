@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const ChartOfAccounts = require('../models/ChartOfAccounts');
 const AccountingService = require('../services/accountingService');
 const { auth } = require('../middleware/auth');
 const ledgerAccountService = require('../services/ledgerAccountService');
+const chartOfAccountsService = require('../services/chartOfAccountsService');
 
 // @route   GET /api/chart-of-accounts
 // @desc    Get all accounts with optional filters
@@ -17,22 +17,13 @@ router.get('/', auth, async (req, res) => {
       await ledgerAccountService.ensureSupplierLedgerAccounts({ userId: req.user?._id });
     }
     
-    const query = {};
-    if (accountType) query.accountType = accountType;
-    if (accountCategory) query.accountCategory = accountCategory;
-    if (isActive !== undefined) query.isActive = isActive === 'true';
-    if (allowDirectPosting !== undefined) query.allowDirectPosting = allowDirectPosting === 'true';
-    if (search) {
-      query.$or = [
-        { accountCode: { $regex: search, $options: 'i' } },
-        { accountName: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
-      ];
-    }
-    
-    const accounts = await ChartOfAccounts.find(query)
-      .populate('parentAccount', 'accountCode accountName')
-      .sort({ accountCode: 1 });
+    const accounts = await chartOfAccountsService.getAccounts({
+      accountType,
+      accountCategory,
+      isActive,
+      search,
+      allowDirectPosting
+    });
     
     res.json({
       success: true,
@@ -54,7 +45,7 @@ router.get('/', auth, async (req, res) => {
 // @access  Private
 router.get('/hierarchy', auth, async (req, res) => {
   try {
-    const hierarchy = await ChartOfAccounts.getAccountHierarchy();
+    const hierarchy = await chartOfAccountsService.getAccountHierarchy();
     
     res.json({
       success: true,
@@ -75,21 +66,19 @@ router.get('/hierarchy', auth, async (req, res) => {
 // @access  Private
 router.get('/:id', auth, async (req, res) => {
   try {
-    const account = await ChartOfAccounts.findById(req.params.id)
-      .populate('parentAccount', 'accountCode accountName');
-    
-    if (!account) {
-      return res.status(404).json({
-        success: false,
-        message: 'Account not found'
-      });
-    }
+    const account = await chartOfAccountsService.getAccountById(req.params.id);
     
     res.json({
       success: true,
       data: account
     });
   } catch (error) {
+    if (error.message === 'Account not found') {
+      return res.status(404).json({
+        success: false,
+        message: 'Account not found'
+      });
+    }
     console.error('Get account error:', error);
     res.status(500).json({
       success: false,
@@ -120,54 +109,7 @@ router.post('/', auth, async (req, res) => {
       requiresReconciliation
     } = req.body;
 
-    // Validation
-    if (!accountCode || !accountName || !accountType || !accountCategory || !normalBalance) {
-      return res.status(400).json({
-        success: false,
-        message: 'Account code, name, type, category, and normal balance are required'
-      });
-    }
-
-    // Check if account code already exists
-    const existingAccount = await ChartOfAccounts.findOne({ accountCode });
-    if (existingAccount) {
-      return res.status(400).json({
-        success: false,
-        message: 'Account code already exists'
-      });
-    }
-
-    const accountData = {
-      accountCode,
-      accountName,
-      accountType,
-      accountCategory,
-      parentAccount: parentAccount || null,
-      level: level || 0,
-      normalBalance,
-      openingBalance: openingBalance || 0,
-      currentBalance: openingBalance || 0,
-      description,
-      allowDirectPosting: allowDirectPosting !== undefined ? allowDirectPosting : true,
-      isTaxable: isTaxable || false,
-      taxRate: taxRate || 0,
-      requiresReconciliation: requiresReconciliation || false,
-      createdBy: req.user.id
-    };
-
-    let account;
-    try {
-      account = new ChartOfAccounts(accountData);
-      await account.save();
-    } catch (err) {
-      if (err.code === 11000) {
-        return res.status(400).json({
-          success: false,
-          message: 'Account code already exists'
-        });
-      }
-      throw err;
-    }
+    const account = await chartOfAccountsService.createAccount(req.body, req.user.id);
 
     res.status(201).json({
       success: true,
@@ -175,6 +117,13 @@ router.post('/', auth, async (req, res) => {
       data: account
     });
   } catch (error) {
+    if (error.message === 'Account code, name, type, category, and normal balance are required' || 
+        error.message === 'Account code already exists') {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
     console.error('Create account error:', error);
     res.status(500).json({
       success: false,
@@ -189,47 +138,7 @@ router.post('/', auth, async (req, res) => {
 // @access  Private
 router.put('/:id', auth, async (req, res) => {
   try {
-    const account = await ChartOfAccounts.findById(req.params.id);
-    
-    if (!account) {
-      return res.status(404).json({
-        success: false,
-        message: 'Account not found'
-      });
-    }
-
-    // Prevent updating system accounts
-    if (account.isSystemAccount) {
-      return res.status(403).json({
-        success: false,
-        message: 'Cannot modify system accounts'
-      });
-    }
-
-    const {
-      accountName,
-      accountCategory,
-      parentAccount,
-      description,
-      allowDirectPosting,
-      isTaxable,
-      taxRate,
-      requiresReconciliation,
-      isActive
-    } = req.body;
-
-    if (accountName) account.accountName = accountName;
-    if (accountCategory) account.accountCategory = accountCategory;
-    if (parentAccount !== undefined) account.parentAccount = parentAccount;
-    if (description !== undefined) account.description = description;
-    if (allowDirectPosting !== undefined) account.allowDirectPosting = allowDirectPosting;
-    if (isTaxable !== undefined) account.isTaxable = isTaxable;
-    if (taxRate !== undefined) account.taxRate = taxRate;
-    if (requiresReconciliation !== undefined) account.requiresReconciliation = requiresReconciliation;
-    if (isActive !== undefined) account.isActive = isActive;
-    account.updatedBy = req.user.id;
-
-    await account.save();
+    const account = await chartOfAccountsService.updateAccount(req.params.id, req.body, req.user.id);
 
     res.json({
       success: true,
@@ -237,6 +146,18 @@ router.put('/:id', auth, async (req, res) => {
       data: account
     });
   } catch (error) {
+    if (error.message === 'Account not found') {
+      return res.status(404).json({
+        success: false,
+        message: 'Account not found'
+      });
+    }
+    if (error.message === 'Cannot modify system accounts') {
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot modify system accounts'
+      });
+    }
     console.error('Update account error:', error);
     res.status(500).json({
       success: false,
@@ -251,47 +172,31 @@ router.put('/:id', auth, async (req, res) => {
 // @access  Private
 router.delete('/:id', auth, async (req, res) => {
   try {
-    const account = await ChartOfAccounts.findById(req.params.id);
-    
-    if (!account) {
+    const result = await chartOfAccountsService.deleteAccount(req.params.id);
+
+    res.json({
+      success: true,
+      message: result.message
+    });
+  } catch (error) {
+    if (error.message === 'Account not found') {
       return res.status(404).json({
         success: false,
         message: 'Account not found'
       });
     }
-
-    // Prevent deleting system accounts
-    if (account.isSystemAccount) {
+    if (error.message === 'Cannot delete system accounts') {
       return res.status(403).json({
         success: false,
         message: 'Cannot delete system accounts'
       });
     }
-
-    // Check if account has children
-    const childAccounts = await ChartOfAccounts.find({ parentAccount: account._id });
-    if (childAccounts.length > 0) {
+    if (error.message.includes('sub-accounts') || error.message.includes('non-zero balance')) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot delete account with sub-accounts. Delete sub-accounts first.'
+        message: error.message
       });
     }
-
-    // Check if account has balance
-    if (account.currentBalance !== 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot delete account with non-zero balance'
-      });
-    }
-
-    await account.remove();
-
-    res.json({
-      success: true,
-      message: 'Account deleted successfully'
-    });
-  } catch (error) {
     console.error('Delete account error:', error);
     res.status(500).json({
       success: false,
@@ -306,36 +211,11 @@ router.delete('/:id', auth, async (req, res) => {
 // @access  Private
 router.get('/stats/summary', auth, async (req, res) => {
   try {
-    const totalAccounts = await ChartOfAccounts.countDocuments({ isActive: true });
-    const accountsByType = await ChartOfAccounts.aggregate([
-      { $match: { isActive: true } },
-      { $group: { _id: '$accountType', count: { $sum: 1 } } }
-    ]);
-    
-    const totalAssets = await ChartOfAccounts.aggregate([
-      { $match: { accountType: 'asset', isActive: true } },
-      { $group: { _id: null, total: { $sum: '$currentBalance' } } }
-    ]);
-    
-    const totalLiabilities = await ChartOfAccounts.aggregate([
-      { $match: { accountType: 'liability', isActive: true } },
-      { $group: { _id: null, total: { $sum: '$currentBalance' } } }
-    ]);
-    
-    const totalEquity = await ChartOfAccounts.aggregate([
-      { $match: { accountType: 'equity', isActive: true } },
-      { $group: { _id: null, total: { $sum: '$currentBalance' } } }
-    ]);
+    const stats = await chartOfAccountsService.getStats();
 
     res.json({
       success: true,
-      data: {
-        totalAccounts,
-        accountsByType,
-        totalAssets: totalAssets[0]?.total || 0,
-        totalLiabilities: totalLiabilities[0]?.total || 0,
-        totalEquity: totalEquity[0]?.total || 0
-      }
+      data: stats
     });
   } catch (error) {
     console.error('Get account stats error:', error);

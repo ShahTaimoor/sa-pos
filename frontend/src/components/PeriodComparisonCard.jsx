@@ -77,7 +77,7 @@ export const PeriodComparisonCard = ({
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center space-x-3">
           {Icon && (
-            <div className={`${iconColor} p-2 rounded-lg`}>
+            <div className={`${iconColor} p-2`}>
               <Icon className={`${classes.icon} text-white`} />
             </div>
           )}
@@ -106,7 +106,10 @@ export const PeriodComparisonCard = ({
             <TrendingUp className="h-4 w-4 text-green-600" />
           )}
           {isNegative && (
-            <TrendingDown className="h-4 w-4 text-red-600" />
+            <svg className="h-4 w-4 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path d="M3 8c1.5 0 2.5 1 2.5 2.5S4.5 13 3 13m4 0c1.5 0 2.5 1 2.5 2.5S8.5 18 7 18m4 0c1.5 0 2.5 1 2.5 2.5S12.5 23 11 23" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M18 20l-2.5-2.5m2.5 2.5l-2.5 2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           )}
           {isNeutral && (
             <Minus className="h-4 w-4 text-gray-400" />

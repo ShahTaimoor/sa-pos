@@ -47,34 +47,48 @@ import ComparisonChart from '../components/ComparisonChart';
 import { usePeriodComparison } from '../hooks/usePeriodComparison';
 
 const StatCard = ({ title, value, icon: Icon, color, change, changeType }) => (
-  <div className="card h-full">
-    <div className="card-content h-full">
-      <div className="text-center flex flex-col justify-center items-center h-full">
-        <div className="flex justify-center mb-3">
-          <div className={`p-3 rounded-full ${color}`}>
-            <Icon className="h-6 w-6 text-white" />
-          </div>
+  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 h-full">
+    <div className="text-center flex flex-col justify-center items-center h-full">
+      <div className="flex justify-center mb-3">
+        <div className={`p-3 rounded-full ${color}`}>
+          <Icon className="h-6 w-6 text-white" />
         </div>
-        <p className="text-sm font-medium text-gray-600 mb-1">{title}</p>
-        <p className="text-2xl font-semibold text-gray-900 mb-1">{value}</p>
-        <div className="h-5 flex items-center">
-          {change && (
-            <p className={`text-sm ${changeType === 'positive' ? 'text-success-600' : 'text-danger-600'}`}>
+      </div>
+      <p className="text-sm font-medium text-gray-600 mb-1">{title}</p>
+      <p className="text-2xl font-semibold text-gray-900 mb-1">{value}</p>
+      <div className="h-5 flex items-center justify-center space-x-1">
+        {change && (
+          <>
+            {changeType === 'positive' && (
+              <svg className="h-4 w-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+            )}
+            <p className={`text-sm font-medium ${changeType === 'positive' ? 'text-green-600' : 'text-gray-600'}`}>
               {changeType === 'positive' ? '+' : ''}{change}
             </p>
-          )}
-        </div>
+          </>
+        )}
       </div>
     </div>
   </div>
 );
 
+// Helper function to get local date in YYYY-MM-DD format (avoids timezone issues with toISOString)
+const getLocalDateString = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export const Dashboard = () => {
   const navigate = useNavigate();
-  const [fromDate, setFromDate] = useState(new Date().toISOString().split('T')[0]);
-  const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
-  const [activeFromDate, setActiveFromDate] = useState(new Date().toISOString().split('T')[0]);
-  const [activeToDate, setActiveToDate] = useState(new Date().toISOString().split('T')[0]);
+  const today = getLocalDateString();
+  const [fromDate, setFromDate] = useState(today);
+  const [toDate, setToDate] = useState(today);
+  const [activeFromDate, setActiveFromDate] = useState(today);
+  const [activeToDate, setActiveToDate] = useState(today);
 
   // Lazy query for period summary
   const [getPeriodSummary] = useLazyGetPeriodSummaryQuery();
@@ -95,7 +109,7 @@ export const Dashboard = () => {
         }
       };
     } catch (error) {
-      console.error('Error fetching period summary:', error);
+      // Error fetching period summary - silent fail
       return {
         data: {
           data: {
@@ -127,8 +141,9 @@ export const Dashboard = () => {
   );
 
   // All Sales Orders data (for total value calculation)
+  // Use 'all' parameter to get all orders without pagination
   const { data: salesOrdersData, isLoading: salesOrdersLoading } = useGetSalesOrdersQuery(
-    { dateFrom: activeFromDate, dateTo: activeToDate },
+    { dateFrom: activeFromDate, dateTo: activeToDate, all: true },
     { skip: !activeFromDate || !activeToDate }
   );
 
@@ -144,8 +159,9 @@ export const Dashboard = () => {
   );
 
   // Sales Invoices (from Sales page) - actual completed sales
+  // Use 'all' parameter to get all orders without pagination
   const { data: salesInvoicesData, isLoading: salesInvoicesLoading } = useGetOrdersQuery(
-    { dateFrom: activeFromDate, dateTo: activeToDate },
+    { dateFrom: activeFromDate, dateTo: activeToDate, all: true },
     { skip: !activeFromDate || !activeToDate }
   );
 
@@ -242,12 +258,26 @@ export const Dashboard = () => {
   };
   
   // Calculate totals for financial metrics
-  const salesOrdersTotal = salesOrdersData?.data?.salesOrders?.reduce((sum, order) => sum + (order.pricing?.total || 0), 0) || 0;
-  const purchaseOrdersTotal = purchaseOrdersData?.data?.purchaseOrders?.reduce((sum, order) => sum + (order.pricing?.total || 0), 0) || 0;
+  // RTK Query wraps axios response in 'data', so structure is: { data: { salesOrders: [...], pagination: {...} } }
+  // Sales Orders use `total` directly, not `pricing.total`
+  const salesOrdersArray = salesOrdersData?.data?.salesOrders || salesOrdersData?.salesOrders || [];
+  const salesOrdersTotal = salesOrdersArray.reduce((sum, order) => {
+    const orderTotal = order.total || order.pricing?.total || 0;
+    return sum + Number(orderTotal);
+  }, 0);
   
-  // Sales Invoices (from Sales/POS page)
-  const salesInvoicesTotal = salesInvoicesData?.data?.orders?.reduce((sum, order) => sum + (order.pricing?.total || 0), 0) || 
-                              salesInvoicesData?.orders?.reduce((sum, order) => sum + (order.pricing?.total || 0), 0) || 0;
+  const purchaseOrdersTotal = (purchaseOrdersData?.data?.purchaseOrders || purchaseOrdersData?.purchaseOrders || []).reduce((sum, order) => {
+    return sum + Number(order.pricing?.total || order.total || 0);
+  }, 0);
+  
+  // Sales Invoices (from Sales/POS page) - use `pricing.total`
+  // RTK Query wraps axios response in 'data', so structure is: { data: { orders: [...], pagination: {...} } }
+  // Also handle direct response structure (no data wrapper)
+  const salesInvoicesArray = salesInvoicesData?.data?.orders || salesInvoicesData?.orders || [];
+  const salesInvoicesTotal = salesInvoicesArray.reduce((sum, order) => {
+    const orderTotal = order.pricing?.total || order.total || 0;
+    return sum + Number(orderTotal);
+  }, 0);
   
   // Purchase Invoices (from Purchase page)
   const purchaseInvoicesTotal = purchaseInvoicesData?.data?.invoices?.reduce((sum, invoice) => sum + (invoice.pricing?.total || 0), 0) || 

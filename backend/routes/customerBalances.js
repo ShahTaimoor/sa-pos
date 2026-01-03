@@ -1,8 +1,9 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
-const Customer = require('../models/Customer');
-const Sales = require('../models/Sales');
+const Customer = require('../models/Customer'); // Still needed for model reference
+const Sales = require('../models/Sales'); // Still needed for model reference
 const CustomerBalanceService = require('../services/customerBalanceService');
+const customerRepository = require('../repositories/CustomerRepository');
 const { auth, requirePermission } = require('../middleware/auth');
 
 const router = express.Router();
@@ -156,19 +157,25 @@ router.get('/reports/balance-issues', [
 ], async (req, res) => {
   try {
     // Find customers with pending balances
-    const customersWithPendingBalances = await Customer.find({
+    const customersWithPendingBalances = await customerRepository.findAll({
       pendingBalance: { $gt: 0 }
-    }).select('name businessName email phone pendingBalance advanceBalance creditLimit');
+    }, {
+      select: 'name businessName email phone pendingBalance advanceBalance creditLimit'
+    });
 
     // Find customers with advance balances
-    const customersWithAdvanceBalances = await Customer.find({
+    const customersWithAdvanceBalances = await customerRepository.findAll({
       advanceBalance: { $gt: 0 }
-    }).select('name businessName email phone pendingBalance advanceBalance creditLimit');
+    }, {
+      select: 'name businessName email phone pendingBalance advanceBalance creditLimit'
+    });
 
     // Find customers over credit limit
-    const customersOverCreditLimit = await Customer.find({
+    const customersOverCreditLimit = await customerRepository.findAll({
       $expr: { $gt: ['$currentBalance', '$creditLimit'] }
-    }).select('name businessName email phone currentBalance creditLimit');
+    }, {
+      select: 'name businessName email phone currentBalance creditLimit'
+    });
 
     res.json({
       success: true,
@@ -201,7 +208,7 @@ router.post('/fix-all-balances', [
   requirePermission('manage_customers')
 ], async (req, res) => {
   try {
-    const customers = await Customer.find({});
+    const customers = await customerRepository.findAll({});
     const results = [];
 
     for (const customer of customers) {

@@ -35,11 +35,20 @@ import { useGetSuppliersQuery } from '../store/services/suppliersApi';
 import { useGetCustomersQuery } from '../store/services/customersApi';
 import { useGetAccountsQuery } from '../store/services/chartOfAccountsApi';
 
+// Helper function to get local date in YYYY-MM-DD format (avoids timezone issues with toISOString)
+const getLocalDateString = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 const CashPayments = () => {
+  const today = getLocalDateString();
   // State for filters and pagination
   const [filters, setFilters] = useState({
-    fromDate: new Date().toISOString().split('T')[0],
-    toDate: new Date().toISOString().split('T')[0],
+    fromDate: today,
+    toDate: today,
     voucherCode: '',
     amount: '',
     particular: ''
@@ -61,7 +70,7 @@ const CashPayments = () => {
 
   // Form state
   const [formData, setFormData] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: today,
     amount: '',
     particular: '',
     supplier: '',
@@ -107,7 +116,9 @@ const CashPayments = () => {
     { refetchOnMountOrArgChange: true }
   );
 
-  const suppliers = suppliersData?.data?.suppliers || suppliersData?.suppliers || suppliersData || [];
+  const suppliers = React.useMemo(() => {
+    return suppliersData?.data?.suppliers || suppliersData?.suppliers || suppliersData || [];
+  }, [suppliersData]);
   const customers = customersData?.data?.customers || customersData?.customers || customersData || [];
   const expenseAccounts =
     expenseAccountsData?.data ||
@@ -117,8 +128,8 @@ const CashPayments = () => {
 
   // Update selected supplier when suppliers data changes
   useEffect(() => {
-    if (selectedSupplier && suppliersData) {
-      const updatedSupplier = suppliersData.find(s => s._id === selectedSupplier._id);
+    if (selectedSupplier && suppliers.length > 0) {
+      const updatedSupplier = suppliers.find(s => s._id === selectedSupplier._id);
       if (updatedSupplier && (
         updatedSupplier.pendingBalance !== selectedSupplier.pendingBalance ||
         updatedSupplier.advanceBalance !== selectedSupplier.advanceBalance ||
@@ -130,11 +141,11 @@ const CashPayments = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // Note: selectedSupplier is intentionally excluded from deps to prevent infinite loops.
     // We only want to sync when the suppliers list updates, not when selectedSupplier changes.
-  }, [suppliersData]);
+  }, [suppliers]);
 
   // Update selected customer when customers data changes
   useEffect(() => {
-    if (selectedCustomer && customers) {
+    if (selectedCustomer && customers.length > 0) {
       const updatedCustomer = customers.find(c => c._id === selectedCustomer._id);
       if (updatedCustomer && (
         updatedCustomer.pendingBalance !== selectedCustomer.pendingBalance ||
@@ -147,7 +158,7 @@ const CashPayments = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // Note: selectedCustomer is intentionally excluded from deps to prevent infinite loops.
     // We only want to sync when the customers list updates, not when selectedCustomer changes.
-  }, [customersData]);
+  }, [customers]);
 
   // Mutations
   const [createCashPayment, { isLoading: creating }] = useCreateCashPaymentMutation();
@@ -160,7 +171,7 @@ const CashPayments = () => {
   // Helper functions
   const resetForm = () => {
     setFormData({
-      date: new Date().toISOString().split('T')[0],
+      date: getLocalDateString(),
       amount: '',
       particular: '',
       supplier: '',
@@ -180,7 +191,7 @@ const CashPayments = () => {
   };
 
   const handleSupplierSelect = (supplierId) => {
-    const supplier = suppliersData?.find(s => s._id === supplierId);
+    const supplier = suppliers.find(s => s._id === supplierId);
     setSelectedSupplier(supplier);
     setFormData(prev => ({ ...prev, supplier: supplierId, customer: '' }));
     setSelectedCustomer(null);
@@ -188,7 +199,7 @@ const CashPayments = () => {
   };
 
   const handleCustomerSelect = (customerId) => {
-    const customer = customersData?.find(c => c._id === customerId);
+    const customer = customers.find(c => c._id === customerId);
     setSelectedCustomer(customer);
     setFormData(prev => ({ ...prev, customer: customerId, supplier: '' }));
     setSelectedSupplier(null);
@@ -272,11 +283,11 @@ const CashPayments = () => {
   };
 
   const handleSupplierKeyDown = (e) => {
-    const filteredSuppliers = suppliersData?.filter(supplier => 
+    const filteredSuppliers = suppliers.filter(supplier => 
       (supplier.companyName || supplier.name || supplier.displayName || '').toLowerCase().includes(supplierSearchTerm.toLowerCase()) ||
       (supplier.phone || '').includes(supplierSearchTerm) ||
       (supplier.email || '').toLowerCase().includes(supplierSearchTerm.toLowerCase())
-    ) || [];
+    );
 
     if (!supplierSearchTerm || filteredSuppliers.length === 0) {
       return;
@@ -614,7 +625,7 @@ const CashPayments = () => {
                   </div>
                   {supplierSearchTerm && (
                     <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
-                      {suppliersData?.filter(supplier => 
+                      {suppliers.filter(supplier => 
                         (supplier.companyName || supplier.name || supplier.displayName || '').toLowerCase().includes(supplierSearchTerm.toLowerCase()) ||
                         (supplier.phone || '').includes(supplierSearchTerm) ||
                         (supplier.email || '').toLowerCase().includes(supplierSearchTerm.toLowerCase())
@@ -1398,7 +1409,7 @@ const CashPayments = () => {
                     </div>
                     {supplierSearchTerm && (
                       <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
-                        {suppliersData?.filter(supplier => 
+                        {suppliers.filter(supplier => 
                           (supplier.companyName || supplier.name || '').toLowerCase().includes(supplierSearchTerm.toLowerCase()) ||
                           (supplier.phone || '').includes(supplierSearchTerm)
                         ).map((supplier) => (

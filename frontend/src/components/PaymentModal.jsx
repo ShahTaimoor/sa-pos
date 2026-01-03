@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { LoadingButton } from './LoadingSpinner';
 import { handleApiError, showSuccessToast, showErrorToast } from '../utils/errorHandler';
+import { useProcessPaymentMutation } from '../store/services/paymentApi';
 
 const PaymentModal = ({ 
   isOpen, 
@@ -31,6 +32,7 @@ const PaymentModal = ({
   });
   const [isProcessing, setIsProcessing] = useState(false);
   const [errors, setErrors] = useState({});
+  const [processPayment] = useProcessPaymentMutation();
 
   // Payment methods configuration
   const paymentMethods = [
@@ -181,16 +183,7 @@ const PaymentModal = ({
         }
       };
 
-      const response = await fetch('/api/payments/process', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify(paymentData)
-      });
-
-      const result = await response.json();
+      const result = await processPayment(paymentData).unwrap();
 
       if (result.success) {
         showSuccessToast('Payment processed successfully!');
@@ -201,7 +194,6 @@ const PaymentModal = ({
       }
 
     } catch (error) {
-      console.error('Payment error:', error);
       handleApiError(error, 'Payment Processing');
       onPaymentError && onPaymentError(error);
     } finally {

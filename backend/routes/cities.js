@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
-const City = require('../models/City');
+const cityService = require('../services/cityService');
 
 // @route   GET /api/cities
 // @desc    Get all cities with filtering and pagination
@@ -22,50 +22,14 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
-    const skip = (page - 1) * limit;
-
-    // Build filter
-    const filter = {};
-
-    if (req.query.search) {
-      filter.$or = [
-        { name: { $regex: req.query.search, $options: 'i' } },
-        { state: { $regex: req.query.search, $options: 'i' } },
-        { country: { $regex: req.query.search, $options: 'i' } }
-      ];
-    }
-
-    if (req.query.isActive !== undefined) {
-      filter.isActive = req.query.isActive === 'true';
-    }
-
-    if (req.query.state) {
-      filter.state = { $regex: req.query.state, $options: 'i' };
-    }
-
-    // Get cities with pagination
-    const cities = await City.find(filter)
-      .populate('createdBy', 'firstName lastName')
-      .populate('updatedBy', 'firstName lastName')
-      .sort({ name: 1 })
-      .skip(skip)
-      .limit(limit);
-
-    // Get total count for pagination
-    const total = await City.countDocuments(filter);
-
+    // Call service to get cities
+    const result = await cityService.getCities(req.query);
+    
     res.json({
       success: true,
       data: {
-        cities,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        cities: result.cities,
+        pagination: result.pagination
       }
     });
   } catch (error) {
@@ -86,10 +50,7 @@ router.get('/active', [
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    const cities = await City.find({ isActive: true })
-      .sort({ name: 1 })
-      .select('name state country');
-
+    const cities = await cityService.getActiveCities();
     res.json({
       success: true,
       data: cities
@@ -112,17 +73,7 @@ router.get('/:id', [
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    const city = await City.findById(req.params.id)
-      .populate('createdBy', 'firstName lastName')
-      .populate('updatedBy', 'firstName lastName');
-
-    if (!city) {
-      return res.status(404).json({
-        success: false,
-        message: 'City not found'
-      });
-    }
-
+    const city = await cityService.getCityById(req.params.id);
     res.json({
       success: true,
       data: city
@@ -155,41 +106,20 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { name, state, country = 'US', description, isActive = true } = req.body;
-
-    // Check if city already exists
-    const existingCity = await City.findOne({ name: name.trim() });
-    if (existingCity) {
-      return res.status(400).json({
-        success: false,
-        message: 'City with this name already exists'
-      });
-    }
-
-    const city = new City({
-      name: name.trim(),
-      state: state ? state.trim() : undefined,
-      country: country.trim(),
-      description: description ? description.trim() : undefined,
-      isActive,
-      createdBy: req.user._id
-    });
-
-    await city.save();
-
-    await city.populate('createdBy', 'firstName lastName');
-
+    // Call service to create city
+    const result = await cityService.createCity(req.body, req.user._id);
+    
     res.status(201).json({
       success: true,
-      message: 'City created successfully',
-      data: city
+      message: result.message,
+      data: result.city
     });
   } catch (error) {
     console.error('Create city error:', error);
-    if (error.code === 11000) {
+    if (error.message === 'City with this name already exists') {
       return res.status(400).json({
         success: false,
-        message: 'City with this name already exists'
+        message: error.message
       });
     }
     res.status(500).json({
@@ -218,52 +148,26 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { name, state, country, description, isActive } = req.body;
-
-    const city = await City.findById(req.params.id);
-    if (!city) {
+    // Call service to update city
+    const result = await cityService.updateCity(req.params.id, req.body, req.user._id);
+    
+    res.json({
+      success: true,
+      message: result.message,
+      data: result.city
+    });
+  } catch (error) {
+    console.error('Update city error:', error);
+    if (error.message === 'City not found') {
       return res.status(404).json({
         success: false,
         message: 'City not found'
       });
     }
-
-    // Check if name is being changed and if new name already exists
-    if (name && name.trim() !== city.name) {
-      const existingCity = await City.findOne({ name: name.trim() });
-      if (existingCity) {
-        return res.status(400).json({
-          success: false,
-          message: 'City with this name already exists'
-        });
-      }
-      city.name = name.trim();
-    }
-
-    if (state !== undefined) city.state = state ? state.trim() : undefined;
-    if (country !== undefined) city.country = country.trim();
-    if (description !== undefined) city.description = description ? description.trim() : undefined;
-    if (isActive !== undefined) city.isActive = isActive;
-    city.updatedBy = req.user._id;
-
-    await city.save();
-
-    await city.populate([
-      { path: 'createdBy', select: 'firstName lastName' },
-      { path: 'updatedBy', select: 'firstName lastName' }
-    ]);
-
-    res.json({
-      success: true,
-      message: 'City updated successfully',
-      data: city
-    });
-  } catch (error) {
-    console.error('Update city error:', error);
-    if (error.code === 11000) {
+    if (error.message === 'City with this name already exists') {
       return res.status(400).json({
         success: false,
-        message: 'City with this name already exists'
+        message: error.message
       });
     }
     res.status(500).json({
@@ -282,41 +186,27 @@ router.delete('/:id', [
   requirePermission('manage_users')
 ], async (req, res) => {
   try {
-    const city = await City.findById(req.params.id);
-    if (!city) {
+    // Call service to delete city
+    const result = await cityService.deleteCity(req.params.id);
+    
+    res.json({
+      success: true,
+      message: result.message
+    });
+  } catch (error) {
+    console.error('Delete city error:', error);
+    if (error.message === 'City not found') {
       return res.status(404).json({
         success: false,
         message: 'City not found'
       });
     }
-
-    // Check if city is being used by customers or suppliers
-    const Customer = require('../models/Customer');
-    const Supplier = require('../models/Supplier');
-    
-    const customersUsingCity = await Customer.findOne({
-      'addresses.city': city.name
-    });
-
-    const suppliersUsingCity = await Supplier.findOne({
-      'addresses.city': city.name
-    });
-
-    if (customersUsingCity || suppliersUsingCity) {
+    if (error.message.includes('Cannot delete city')) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot delete city. It is being used by customers or suppliers. Deactivate it instead.'
+        message: error.message
       });
     }
-
-    await City.findByIdAndDelete(req.params.id);
-
-    res.json({
-      success: true,
-      message: 'City deleted successfully'
-    });
-  } catch (error) {
-    console.error('Delete city error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',

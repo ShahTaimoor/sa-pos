@@ -162,6 +162,17 @@ const supplierSchema = new mongoose.Schema({
   ledgerAccount: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'ChartOfAccounts'
+  },
+  
+  // Soft Delete Fields
+  isDeleted: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  deletedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true,

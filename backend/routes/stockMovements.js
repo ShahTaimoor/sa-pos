@@ -1,8 +1,10 @@
 const express = require('express');
 const { body, query, param } = require('express-validator');
-const StockMovement = require('../models/StockMovement');
-const Product = require('../models/Product');
+const StockMovement = require('../models/StockMovement'); // Still needed for new StockMovement() and static methods
+const Product = require('../models/Product'); // Still needed for model reference
 const { auth, requirePermission } = require('../middleware/auth');
+const stockMovementRepository = require('../repositories/StockMovementRepository');
+const productRepository = require('../repositories/ProductRepository');
 
 const router = express.Router();
 
@@ -105,9 +107,9 @@ router.get('/', [
       }
 
       try {
-        const matchingProducts = await Product.find({
+        const matchingProducts = await productRepository.findAll({
           name: { $regex: decodedSearch, $options: 'i' }
-        }).select('_id');
+        }, { select: '_id' });
 
         if (matchingProducts.length > 0) {
           orConditions.push({
@@ -123,22 +125,25 @@ router.get('/', [
       }
     }
 
-    // Get total count
-    const total = await StockMovement.countDocuments(query);
-    
     // Get movements with pagination
-    const movements = await StockMovement.find(query)
-      .populate('product', 'name sku category')
-      .populate('user', 'firstName lastName email')
-      .populate('supplier', 'name')
-      .populate('customer', 'name businessName')
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .lean();
+    const result = await stockMovementRepository.findWithPagination(query, {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      sort: { createdAt: -1 },
+      populate: [
+        { path: 'product', select: 'name sku category' },
+        { path: 'user', select: 'firstName lastName email' },
+        { path: 'supplier', select: 'name' },
+        { path: 'customer', select: 'name businessName' }
+      ],
+      lean: true
+    });
+    
+    const movements = result.movements;
+    const total = result.total;
 
     // Calculate summary statistics
-    const summary = await StockMovement.aggregate([
+    const summary = await stockMovementRepository.aggregate([
       { $match: query },
       {
         $group: {
@@ -222,7 +227,9 @@ router.get('/product/:productId', [
     const summary = await StockMovement.getStockSummary(productId);
     
     // Get current stock from product
-    const product = await Product.findById(productId).select('inventory.currentStock');
+    const product = await productRepository.findById(productId, {
+      select: 'inventory.currentStock'
+    });
 
     res.json({
       success: true,
@@ -254,13 +261,16 @@ router.get('/:id', [
   param('id').isMongoId().withMessage('Invalid movement ID')
 ], async (req, res) => {
   try {
-    const movement = await StockMovement.findById(req.params.id)
-      .populate('product', 'name sku category')
-      .populate('user', 'firstName lastName email')
-      .populate('supplier', 'name')
-      .populate('customer', 'name businessName')
-      .populate('originalMovement')
-      .populate('reversedBy', 'firstName lastName');
+    const movement = await stockMovementRepository.findById(req.params.id, {
+      populate: [
+        { path: 'product', select: 'name sku category' },
+        { path: 'user', select: 'firstName lastName email' },
+        { path: 'supplier', select: 'name' },
+        { path: 'customer', select: 'name businessName' },
+        { path: 'originalMovement' },
+        { path: 'reversedBy', select: 'firstName lastName' }
+      ]
+    });
 
     if (!movement) {
       return res.status(404).json({
@@ -307,7 +317,7 @@ router.post('/adjustment', [
     } = req.body;
 
     // Get product
-    const product = await Product.findById(productId);
+    const product = await productRepository.findById(productId);
     if (!product) {
       return res.status(404).json({
         success: false,
@@ -384,7 +394,7 @@ router.post('/:id/reverse', [
   body('reason').optional().isString().trim().isLength({ max: 500 }).withMessage('Reason too long')
 ], async (req, res) => {
   try {
-    const movement = await StockMovement.findById(req.params.id);
+    const movement = await stockMovementRepository.findById(req.params.id);
     
     if (!movement) {
       return res.status(404).json({
@@ -396,7 +406,7 @@ router.post('/:id/reverse', [
     const reversedMovement = await movement.reverse(req.user._id, req.body.reason);
     
     // Update product stock
-    const product = await Product.findById(movement.product);
+    const product = await productRepository.findById(movement.product);
     if (product) {
       product.inventory.currentStock = reversedMovement.newStock;
       await product.save();
@@ -443,7 +453,7 @@ router.get('/stats/overview', [
       }
     }
 
-    const stats = await StockMovement.aggregate([
+    const stats = await stockMovementRepository.aggregate([
       { $match: matchStage },
       {
         $group: {
@@ -471,7 +481,7 @@ router.get('/stats/overview', [
     ]);
 
     // Get top products by movement
-    const topProducts = await StockMovement.aggregate([
+    const topProducts = await stockMovementRepository.aggregate([
       { $match: matchStage },
       {
         $group: {

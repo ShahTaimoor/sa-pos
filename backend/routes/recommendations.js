@@ -3,9 +3,10 @@ const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const recommendationEngine = require('../services/recommendationEngine');
-const UserBehavior = require('../models/UserBehavior');
-const Recommendation = require('../models/Recommendation');
-const Product = require('../models/Product');
+const UserBehavior = require('../models/UserBehavior'); // Still needed for static methods
+const Recommendation = require('../models/Recommendation'); // Still needed for model reference
+const Product = require('../models/Product'); // Still needed for model reference
+const recommendationRepository = require('../repositories/RecommendationRepository');
 
 const router = express.Router();
 
@@ -98,10 +99,13 @@ router.get('/:recommendationId', [
     const { recommendationId } = req.params;
     const userId = req.user?.id;
 
-    const recommendation = await Recommendation.findById(recommendationId)
-      .populate('recommendations.product')
-      .populate('user', 'firstName lastName email')
-      .populate('customer', 'firstName lastName email');
+    const recommendation = await recommendationRepository.findById(recommendationId, {
+      populate: [
+        { path: 'recommendations.product' },
+        { path: 'user', select: 'firstName lastName email' },
+        { path: 'customer', select: 'firstName lastName email' }
+      ]
+    });
 
     if (!recommendation) {
       return res.status(404).json({ message: 'Recommendation not found' });
@@ -338,9 +342,12 @@ router.get('/performance', [
     }
     if (algorithm) filter.algorithm = algorithm;
 
-    const recommendations = await Recommendation.find(filter)
-      .populate('recommendations.product')
-      .sort({ createdAt: -1 });
+    const recommendations = await recommendationRepository.findWithFilter(filter, {
+      sort: { createdAt: -1 },
+      populate: [
+        { path: 'recommendations.product' }
+      ]
+    });
 
     // Calculate aggregate metrics
     const metrics = {
@@ -424,10 +431,16 @@ router.get('/user/:userId', [
       return res.status(403).json({ message: 'Access denied' });
     }
 
-    const recommendations = await Recommendation.find({ user: userId })
-      .populate('recommendations.product')
-      .sort({ createdAt: -1 })
-      .limit(parseInt(limit));
+    const recommendations = await recommendationRepository.findWithFilter(
+      { user: userId },
+      {
+        sort: { createdAt: -1 },
+        populate: [
+          { path: 'recommendations.product' }
+        ],
+        limit: parseInt(limit)
+      }
+    );
 
     res.json({
       recommendations,

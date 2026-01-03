@@ -2,11 +2,13 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
-const CashPayment = require('../models/CashPayment');
-const Sales = require('../models/Sales');
-const Supplier = require('../models/Supplier');
-const Customer = require('../models/Customer');
-const ChartOfAccounts = require('../models/ChartOfAccounts');
+const CashPayment = require('../models/CashPayment'); // Still needed for new CashPayment() and static methods
+const Sales = require('../models/Sales'); // Still needed for model reference in populate
+const cashPaymentRepository = require('../repositories/CashPaymentRepository');
+const supplierRepository = require('../repositories/SupplierRepository');
+const customerRepository = require('../repositories/CustomerRepository');
+const chartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
+const salesRepository = require('../repositories/SalesRepository');
 
 // @route   GET /api/cash-payments
 // @desc    Get all cash payments with filtering and pagination
@@ -95,18 +97,21 @@ router.get('/', [
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     // Get cash payments with pagination
-    const cashPayments = await CashPayment.find(filter)
-      .populate({ path: 'order', model: 'Sales', select: 'orderNumber' }) // Explicitly reference Sales model
-      .populate('supplier', 'name businessName')
-      .populate('customer', 'name email')
-      .populate('createdBy', 'firstName lastName')
-      .populate('expenseAccount', 'accountName accountCode')
-      .sort({ date: -1, createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    // Get total count for pagination
-    const total = await CashPayment.countDocuments(filter);
+    const result = await cashPaymentRepository.findWithPagination(filter, {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      sort: { date: -1, createdAt: -1 },
+      populate: [
+        { path: 'order', model: 'Sales', select: 'orderNumber' },
+        { path: 'supplier', select: 'name businessName' },
+        { path: 'customer', select: 'name email' },
+        { path: 'createdBy', select: 'firstName lastName' },
+        { path: 'expenseAccount', select: 'accountName accountCode' }
+      ]
+    });
+    
+    const cashPayments = result.cashPayments;
+    const total = result.total;
 
     res.json({
       success: true,
@@ -166,7 +171,7 @@ router.post('/', [
 
     // Validate order exists if provided
     if (order) {
-      const orderExists = await Sales.findById(order);
+      const orderExists = await salesRepository.findById(order);
       if (!orderExists) {
         return res.status(400).json({ 
           success: false,
@@ -177,7 +182,7 @@ router.post('/', [
 
     // Validate supplier exists if provided
     if (supplier) {
-      const supplierExists = await Supplier.findById(supplier);
+      const supplierExists = await supplierRepository.findById(supplier);
       if (!supplierExists) {
         return res.status(400).json({ 
           success: false,
@@ -188,7 +193,7 @@ router.post('/', [
 
     // Validate customer exists if provided
     if (customer) {
-      const customerExists = await Customer.findById(customer);
+      const customerExists = await customerRepository.findById(customer);
       if (!customerExists) {
         return res.status(400).json({ 
           success: false,
@@ -199,7 +204,7 @@ router.post('/', [
 
     let expenseAccountDoc = null;
     if (expenseAccount) {
-      expenseAccountDoc = await ChartOfAccounts.findById(expenseAccount);
+      expenseAccountDoc = await chartOfAccountsRepository.findById(expenseAccount);
       if (!expenseAccountDoc) {
         return res.status(400).json({
           success: false,
@@ -315,17 +320,7 @@ router.get('/summary/date-range', [
     };
 
     // Get summary data
-    const summary = await CashPayment.aggregate([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          totalAmount: { $sum: '$amount' },
-          totalCount: { $sum: 1 },
-          averageAmount: { $avg: '$amount' }
-        }
-      }
-    ]);
+    const summary = await cashPaymentRepository.getSummary(filter);
 
     const result = summary.length > 0 ? summary[0] : {
       totalAmount: 0,

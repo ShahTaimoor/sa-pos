@@ -34,6 +34,13 @@ export const reportsApi = api.injectEndpoints({
       }),
       providesTags: [{ type: 'Reports', id: 'INVENTORY_REPORT' }],
     }),
+    getBackdateReport: builder.query({
+      query: () => ({
+        url: 'backdate-report',
+        method: 'get',
+      }),
+      providesTags: [{ type: 'Reports', id: 'BACKDATE_REPORT' }],
+    }),
   }),
   overrideExisting: false,
 });
@@ -43,5 +50,6 @@ export const {
   useGetProductReportQuery,
   useGetCustomerReportQuery,
   useGetInventoryReportQuery,
+  useGetBackdateReportQuery,
 } = reportsApi;
 

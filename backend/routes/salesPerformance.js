@@ -3,7 +3,9 @@ const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const salesPerformanceService = require('../services/salesPerformanceService');
-const SalesPerformance = require('../models/SalesPerformance');
+const SalesPerformance = require('../models/SalesPerformance'); // Still needed for static methods
+const salesPerformanceRepository = require('../repositories/SalesPerformanceRepository');
+const salesRepository = require('../repositories/SalesRepository');
 
 const router = express.Router();
 
@@ -180,7 +182,7 @@ router.put('/:reportId/favorite', [
     const { reportId } = req.params;
     const { isFavorite } = req.body;
 
-    const report = await SalesPerformance.findOne({ reportId });
+    const report = await salesPerformanceRepository.findByReportId(reportId);
     if (!report) {
       return res.status(404).json({ message: 'Sales performance report not found' });
     }
@@ -217,7 +219,7 @@ router.put('/:reportId/tags', [
     const { reportId } = req.params;
     const { tags } = req.body;
 
-    const report = await SalesPerformance.findOne({ reportId });
+    const report = await salesPerformanceRepository.findByReportId(reportId);
     if (!report) {
       return res.status(404).json({ message: 'Sales performance report not found' });
     }
@@ -253,7 +255,7 @@ router.put('/:reportId/notes', [
     const { reportId } = req.params;
     const { notes } = req.body;
 
-    const report = await SalesPerformance.findOne({ reportId });
+    const report = await salesPerformanceRepository.findByReportId(reportId);
     if (!report) {
       return res.status(404).json({ message: 'Sales performance report not found' });
     }
@@ -289,7 +291,7 @@ router.post('/:reportId/export', [
     const { reportId } = req.params;
     const { format } = req.body;
 
-    const report = await SalesPerformance.findOne({ reportId });
+    const report = await salesPerformanceRepository.findByReportId(reportId);
     if (!report) {
       return res.status(404).json({ message: 'Sales performance report not found' });
     }
@@ -371,10 +373,7 @@ router.get('/quick/top-products', [
     }
 
     // Get quick data without generating full report
-    const Sales = require('../models/Sales');
-    const Product = require('../models/Product');
-
-    const productPerformance = await Sales.aggregate([
+    const productPerformance = await salesRepository.aggregate([
       {
         $match: {
           createdAt: { $gte: startDate, $lte: endDate },
@@ -465,9 +464,7 @@ router.get('/quick/top-customers', [
     }
 
     // Get quick data without generating full report
-    const Sales = require('../models/Sales');
-
-    const customerPerformance = await Sales.aggregate([
+    const customerPerformance = await salesRepository.aggregate([
       {
         $match: {
           createdAt: { $gte: startDate, $lte: endDate },
@@ -663,10 +660,8 @@ router.get('/quick/summary', [
     }
 
     // Get quick summary data without generating full report
-    const Sales = require('../models/Sales');
-
     // Get current period summary
-    const currentSummary = await Sales.aggregate([
+    const currentSummary = await salesRepository.aggregate([
       {
         $match: {
           createdAt: { $gte: startDate, $lte: endDate },
@@ -698,7 +693,7 @@ router.get('/quick/summary', [
 
     // Get previous period for comparison
     const previousStartDate = new Date(startDate.getTime() - (endDate - startDate));
-    const previousSummary = await Sales.aggregate([
+    const previousSummary = await salesRepository.aggregate([
       {
         $match: {
           createdAt: { $gte: previousStartDate, $lte: startDate },

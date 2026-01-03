@@ -1,9 +1,8 @@
 const express = require('express');
 const { body, query, param } = require('express-validator');
 const { auth, requireAnyPermission } = require('../middleware/auth');
-const Investor = require('../models/Investor');
-const ProfitShare = require('../models/ProfitShare');
-const profitDistributionService = require('../services/profitDistributionService');
+const investorService = require('../services/investorService');
+const Investor = require('../models/Investor'); // Still needed for some operations
 
 const router = express.Router();
 
@@ -15,23 +14,10 @@ router.get('/', [
   query('search').optional().isString().trim()
 ], async (req, res) => {
   try {
-    const { status, search } = req.query;
-    const query = {};
-    
-    if (status) {
-      query.status = status;
-    }
-    
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const investors = await Investor.find(query)
-      .sort({ createdAt: -1 });
+    const investors = await investorService.getInvestors({
+      status: req.query.status,
+      search: req.query.search
+    });
     
     res.json({
       success: true,
@@ -54,24 +40,11 @@ router.get('/:id', [
   param('id').isMongoId().withMessage('Invalid investor ID')
 ], async (req, res) => {
   try {
-    const investor = await Investor.findById(req.params.id);
-    
-    if (!investor) {
-      return res.status(404).json({
-        success: false,
-        message: 'Investor not found'
-      });
-    }
-
-    // Get profit shares for this investor
-    const profitShares = await profitDistributionService.getProfitSharesForInvestor(investor._id);
+    const result = await investorService.getInvestorById(req.params.id);
     
     res.json({
       success: true,
-      data: {
-        investor,
-        profitShares
-      }
+      data: result
     });
   } catch (error) {
     console.error('Error fetching investor:', error);
@@ -95,24 +68,7 @@ router.post('/', [
   body('status').optional().isIn(['active', 'inactive', 'suspended'])
 ], async (req, res) => {
   try {
-    const investorData = {
-      ...req.body,
-      createdBy: req.user._id
-    };
-    
-    let investor;
-    try {
-      investor = await Investor.create(investorData);
-    } catch (err) {
-      if (err.code === 11000) {
-        const duplicateField = Object.keys(err.keyPattern || {})[0];
-        return res.status(400).json({
-          success: false,
-          message: `${duplicateField} already exists`
-        });
-      }
-      throw err;
-    }
+    const investor = await investorService.createInvestor(req.body, req.user._id);
     
     res.status(201).json({
       success: true,
@@ -120,10 +76,10 @@ router.post('/', [
       data: investor
     });
   } catch (error) {
-    if (error.code === 11000) {
+    if (error.message === 'Investor with this email already exists') {
       return res.status(400).json({
         success: false,
-        message: 'Investor with this email already exists'
+        message: error.message
       });
     }
     console.error('Error creating investor:', error);
@@ -148,17 +104,7 @@ router.put('/:id', [
   body('status').optional().isIn(['active', 'inactive', 'suspended'])
 ], async (req, res) => {
   try {
-    const investor = await Investor.findById(req.params.id);
-    
-    if (!investor) {
-      return res.status(404).json({
-        success: false,
-        message: 'Investor not found'
-      });
-    }
-
-    Object.assign(investor, req.body);
-    await investor.save();
+    const investor = await investorService.updateInvestor(req.params.id, req.body, req.user._id);
     
     res.json({
       success: true,
@@ -166,6 +112,18 @@ router.put('/:id', [
       data: investor
     });
   } catch (error) {
+    if (error.message === 'Investor not found') {
+      return res.status(404).json({
+        success: false,
+        message: error.message
+      });
+    }
+    if (error.message === 'Investor with this email already exists') {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
     console.error('Error updating investor:', error);
     res.status(500).json({
       success: false,
@@ -182,44 +140,25 @@ router.delete('/:id', [
   param('id').isMongoId().withMessage('Invalid investor ID')
 ], async (req, res) => {
   try {
-    const investor = await Investor.findById(req.params.id);
-    
-    if (!investor) {
-      return res.status(404).json({
-        success: false,
-        message: 'Investor not found'
-      });
-    }
-
-    // Check if investor has any profit shares or is linked to products
-    const Product = require('../models/Product');
-    const productsWithInvestor = await Product.find({
-      'investors.investor': req.params.id
-    });
-
-    if (productsWithInvestor.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot delete investor. They are linked to ${productsWithInvestor.length} product(s). Please remove them from products first.`
-      });
-    }
-
-    // Check for profit shares
-    const profitSharesCount = await ProfitShare.countDocuments({ investor: req.params.id });
-    if (profitSharesCount > 0) {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot delete investor. They have ${profitSharesCount} profit share record(s). Consider marking them as inactive instead.`
-      });
-    }
-
-    await Investor.findByIdAndDelete(req.params.id);
+    const result = await investorService.deleteInvestor(req.params.id);
     
     res.json({
       success: true,
-      message: 'Investor deleted successfully'
+      message: result.message
     });
   } catch (error) {
+    if (error.message === 'Investor not found') {
+      return res.status(404).json({
+        success: false,
+        message: error.message
+      });
+    }
+    if (error.message.includes('Cannot delete investor')) {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
     console.error('Error deleting investor:', error);
     res.status(500).json({
       success: false,
@@ -237,23 +176,7 @@ router.post('/:id/payout', [
   body('amount').isFloat({ min: 0.01 }).withMessage('Payout amount must be greater than 0')
 ], async (req, res) => {
   try {
-    const investor = await Investor.findById(req.params.id);
-    
-    if (!investor) {
-      return res.status(404).json({
-        success: false,
-        message: 'Investor not found'
-      });
-    }
-
-    if (req.body.amount > investor.currentBalance) {
-      return res.status(400).json({
-        success: false,
-        message: `Payout amount exceeds available balance. Available: ${investor.currentBalance}`
-      });
-    }
-
-    await investor.recordPayout(req.body.amount);
+    const investor = await investorService.recordPayout(req.params.id, req.body.amount);
     
     res.json({
       success: true,
@@ -261,6 +184,18 @@ router.post('/:id/payout', [
       data: investor
     });
   } catch (error) {
+    if (error.message === 'Investor not found') {
+      return res.status(404).json({
+        success: false,
+        message: error.message
+      });
+    }
+    if (error.message.includes('Payout amount exceeds')) {
+      return res.status(400).json({
+        success: false,
+        message: error.message
+      });
+    }
     console.error('Error recording payout:', error);
     res.status(500).json({
       success: false,
@@ -279,16 +214,7 @@ router.post('/:id/investment', [
   body('notes').optional().isString().trim().isLength({ max: 500 }).withMessage('Notes too long')
 ], async (req, res) => {
   try {
-    const investor = await Investor.findById(req.params.id);
-    
-    if (!investor) {
-      return res.status(404).json({
-        success: false,
-        message: 'Investor not found'
-      });
-    }
-
-    await investor.recordInvestment(req.body.amount);
+    const investor = await investorService.recordInvestment(req.params.id, req.body.amount);
     
     res.json({
       success: true,
@@ -296,6 +222,12 @@ router.post('/:id/investment', [
       data: investor
     });
   } catch (error) {
+    if (error.message === 'Investor not found') {
+      return res.status(404).json({
+        success: false,
+        message: error.message
+      });
+    }
     console.error('Error recording investment:', error);
     res.status(500).json({
       success: false,
@@ -391,14 +323,14 @@ router.get('/:id/products', [
   param('id').isMongoId().withMessage('Invalid investor ID')
 ], async (req, res) => {
   try {
-    const Product = require('../models/Product');
+    const products = await investorService.getProductsForInvestor(req.params.id);
     
-    const products = await Product.find({
-      'investors.investor': req.params.id
-    })
-    .populate('category', 'name')
-    .select('name description pricing category inventory status investors')
-    .sort({ name: 1 });
+    // Sort products by name
+    products.sort((a, b) => {
+      const nameA = (a.name || '').toUpperCase();
+      const nameB = (b.name || '').toUpperCase();
+      return nameA.localeCompare(nameB);
+    });
     
     // Map products to include the share percentage for this specific investor
     const productsWithShares = products.map(product => {

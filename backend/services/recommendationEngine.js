@@ -1,5 +1,5 @@
-const Product = require('../models/Product');
-const Sales = require('../models/Sales');
+const ProductRepository = require('../repositories/ProductRepository');
+const SalesRepository = require('../repositories/SalesRepository');
 const UserBehavior = require('../models/UserBehavior');
 const Recommendation = require('../models/Recommendation');
 const Category = require('../models/Category');
@@ -70,10 +70,12 @@ class RecommendationEngine {
     const limit = context.limit || 10;
     
     // Get user's purchase history
-    const userOrders = await Sales.find({
+    const userOrders = await SalesRepository.findAll({
       $or: [{ customer: userId }, { 'metadata.sessionId': sessionId }],
       status: 'completed',
-    }).populate('items.product');
+    }, {
+      populate: [{ path: 'items.product' }]
+    });
     
     if (userOrders.length === 0) {
       return await this.trendingProducts(userId, sessionId, context, userPreferences);
@@ -85,7 +87,7 @@ class RecommendationEngine {
     );
     
     // Find other users who bought similar products
-    const similarUsers = await Sales.aggregate([
+    const similarUsers = await SalesRepository.aggregate([
       {
         $match: {
           status: 'completed',
@@ -124,7 +126,7 @@ class RecommendationEngine {
     for (const user of similarUsers) {
       for (const productId of user.allProducts) {
         if (!seenProducts.has(productId)) {
-          const product = await Product.findById(productId);
+          const product = await ProductRepository.findById(productId);
           if (product && product.status === 'active') {
             recommendedProducts.push({
               product,
@@ -156,10 +158,12 @@ class RecommendationEngine {
     }
     
     // Get products in preferred categories
-    const products = await Product.find({
+    const products = await ProductRepository.findAll({
       category: { $in: preferredCategories },
       status: 'active',
-    }).limit(limit * 3);
+    }, {
+      limit: limit * 3
+    });
     
     // Score products based on user preferences
     const scoredProducts = products.map(product => {
@@ -285,17 +289,19 @@ class RecommendationEngine {
       return [];
     }
     
-    const currentProduct = await Product.findById(context.currentProduct);
+    const currentProduct = await ProductRepository.findById(context.currentProduct);
     if (!currentProduct) {
       return [];
     }
     
     // Find products in same category with similar attributes
-    const similarProducts = await Product.find({
+    const similarProducts = await ProductRepository.findAll({
       _id: { $ne: currentProduct._id },
       category: currentProduct.category,
       status: 'active',
-    }).limit(limit * 2);
+    }, {
+      limit: limit * 2
+    });
     
     // Score based on attribute similarity
     const scoredProducts = similarProducts.map(product => {
@@ -364,13 +370,15 @@ class RecommendationEngine {
     }
     
     // Find products with seasonal tags
-    const products = await Product.find({
+    const products = await ProductRepository.findAll({
       status: 'active',
       $or: [
         { tags: { $in: currentSeasonalTags } },
         { 'metadata.seasonal': { $in: currentSeasonalTags } },
       ],
-    }).limit(limit);
+    }, {
+      limit: limit
+    });
     
     return products.map(product => ({
       product,
@@ -391,10 +399,12 @@ class RecommendationEngine {
     const midPrice = (min + max) / 2;
     
     // Find products in user's price range
-    const products = await Product.find({
+    const products = await ProductRepository.findAll({
       status: 'active',
       'pricing.retail': { $gte: min, $lte: max },
-    }).limit(limit * 2);
+    }, {
+      limit: limit * 2
+    });
     
     // Score based on price proximity to user's average
     const scoredProducts = products.map(product => {

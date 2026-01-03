@@ -1,50 +1,26 @@
 import React, { useState } from 'react';
-import { useMutation } from 'react-query';
 import { RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
 import { handleApiError, showSuccessToast, showErrorToast } from '../utils/errorHandler';
+import { useUpdateInvoicePrefixMutation } from '../store/services/migrationApi';
 
 const Migration = () => {
   const [migrationResult, setMigrationResult] = useState(null);
-  const [isRunning, setIsRunning] = useState(false);
+  const [updateInvoicePrefix, { isLoading: isRunning }] = useUpdateInvoicePrefixMutation();
 
-  const migrationMutation = useMutation(
-    async () => {
-      const response = await fetch('/api/migration/update-invoice-prefix', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (!response.ok) {
-        throw new Error('Migration failed');
-      }
-      
-      return response.json();
-    },
-    {
-      onSuccess: (data) => {
+  const handleRunMigration = async () => {
+    if (window.confirm('Are you sure you want to update all ORD- invoices to SI- format? This action cannot be undone.')) {
+      setMigrationResult(null);
+      try {
+        const data = await updateInvoicePrefix().unwrap();
         setMigrationResult(data);
         if (data.success) {
           showSuccessToast(data.message);
         } else {
           showErrorToast(data.message);
         }
-        setIsRunning(false);
-      },
-      onError: (error) => {
+      } catch (error) {
         handleApiError(error, 'Migration');
-        setIsRunning(false);
       }
-    }
-  );
-
-  const handleRunMigration = () => {
-    if (window.confirm('Are you sure you want to update all ORD- invoices to SI- format? This action cannot be undone.')) {
-      setIsRunning(true);
-      setMigrationResult(null);
-      migrationMutation.mutate();
     }
   };
 

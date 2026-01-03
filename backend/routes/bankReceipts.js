@@ -2,11 +2,11 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
-const BankReceipt = require('../models/BankReceipt');
+const bankReceiptService = require('../services/bankReceiptService');
+const BankReceipt = require('../models/BankReceipt'); // Still needed for create/update operations
 const Bank = require('../models/Bank');
 const Sales = require('../models/Sales');
 const Customer = require('../models/Customer');
-const Supplier = require('../models/Supplier');
 
 // @route   GET /api/bank-receipts
 // @desc    Get all bank receipts with filtering and pagination
@@ -91,33 +91,23 @@ router.get('/', [
       filter.particular = { $regex: particular, $options: 'i' };
     }
 
-    // Calculate pagination
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-
-    // Get bank receipts with pagination
-    const bankReceipts = await BankReceipt.find(filter)
-      .populate('bank', 'accountName accountNumber bankName')
-      .populate({ path: 'order', model: 'Sales', select: 'orderNumber' }) // Explicitly reference Sales model
-      .populate('customer', 'name businessName')
-      .populate('supplier', 'name businessName')
-      .populate('createdBy', 'firstName lastName')
-      .sort({ date: -1, createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-
-    // Get total count for pagination
-    const total = await BankReceipt.countDocuments(filter);
+    const result = await bankReceiptService.getBankReceipts({
+      page,
+      limit,
+      fromDate,
+      toDate,
+      dateFrom,
+      dateTo,
+      voucherCode,
+      amount,
+      particular
+    });
 
     res.json({
       success: true,
       data: {
-        bankReceipts,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(total / parseInt(limit)),
-          totalItems: total,
-          itemsPerPage: parseInt(limit)
-        }
+        bankReceipts: result.bankReceipts,
+        pagination: result.pagination
       }
     });
   } catch (error) {
@@ -192,7 +182,7 @@ router.post('/', [
 
     // Validate supplier exists if provided
     if (supplier) {
-      const supplierExists = await Supplier.findById(supplier);
+      const supplierExists = await bankReceiptService.supplierExists(supplier);
       if (!supplierExists) {
         return res.status(400).json({ 
           success: false,
@@ -307,40 +297,16 @@ router.get('/summary/date-range', [
 
     const { fromDate, toDate } = req.query;
 
-    const filter = {
-      date: {
-        $gte: new Date(fromDate),
-        $lte: new Date(toDate + 'T23:59:59.999Z')
-      }
-    };
-
-    // Get summary data
-    const summary = await BankReceipt.aggregate([
-      { $match: filter },
-      {
-        $group: {
-          _id: null,
-          totalAmount: { $sum: '$amount' },
-          totalCount: { $sum: 1 },
-          averageAmount: { $avg: '$amount' }
-        }
-      }
-    ]);
-
-    const result = summary.length > 0 ? summary[0] : {
-      totalAmount: 0,
-      totalCount: 0,
-      averageAmount: 0
-    };
+    const summary = await bankReceiptService.getSummary(fromDate, toDate);
 
     res.json({
       success: true,
       data: {
         fromDate,
         toDate,
-        totalAmount: result.totalAmount,
-        totalCount: result.totalCount,
-        averageAmount: result.averageAmount
+        totalAmount: summary.totalAmount || 0,
+        totalCount: summary.totalReceipts || 0,
+        averageAmount: summary.averageAmount || 0
       }
     });
   } catch (error) {

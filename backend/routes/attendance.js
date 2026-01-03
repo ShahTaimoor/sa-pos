@@ -1,8 +1,10 @@
 const express = require('express');
 const { body, query } = require('express-validator');
 const { auth, requireAnyPermission } = require('../middleware/auth');
-const Attendance = require('../models/Attendance');
-const Employee = require('../models/Employee');
+const Attendance = require('../models/Attendance'); // Still needed for new Attendance() and static methods
+const Employee = require('../models/Employee'); // Still needed for model reference
+const attendanceRepository = require('../repositories/AttendanceRepository');
+const employeeRepository = require('../repositories/EmployeeRepository');
 
 const router = express.Router();
 
@@ -20,7 +22,7 @@ router.post('/clock-in', [
     
     // If employeeId is provided (manager clocking in someone else)
     if (req.body.employeeId) {
-      employee = await Employee.findById(req.body.employeeId);
+      employee = await employeeRepository.findById(req.body.employeeId);
       if (!employee) {
         return res.status(404).json({ message: 'Employee not found' });
       }
@@ -29,7 +31,7 @@ router.post('/clock-in', [
       }
     } else {
       // Find employee linked to current user
-      employee = await Employee.findOne({ userAccount: req.user._id });
+      employee = await employeeRepository.findByUserAccount(req.user._id);
       if (!employee) {
         return res.status(400).json({ 
           message: 'No employee record found. Please contact administrator to link your user account to an employee record.' 
@@ -41,14 +43,14 @@ router.post('/clock-in', [
     }
     
     // Check for open session
-    const open = await Attendance.findOne({ employee: employee._id, status: 'open' });
+    const open = await attendanceRepository.findOpenSession(employee._id);
     if (open) {
       return res.status(400).json({ message: 'Employee is already clocked in' });
     }
     
     let session;
     try {
-      session = await Attendance.create({
+      session = await attendanceRepository.create({
         employee: employee._id,
         user: req.body.employeeId ? null : req.user._id, // Only set if self clock-in
         clockedInBy: req.body.employeeId ? req.user._id : null, // Set if manager clocking in
@@ -87,18 +89,18 @@ router.post('/clock-out', [
     let employee;
     
     if (req.body.employeeId) {
-      employee = await Employee.findById(req.body.employeeId);
+      employee = await employeeRepository.findById(req.body.employeeId);
       if (!employee) {
         return res.status(404).json({ message: 'Employee not found' });
       }
     } else {
-      employee = await Employee.findOne({ userAccount: req.user._id });
+      employee = await employeeRepository.findByUserAccount(req.user._id);
       if (!employee) {
         return res.status(400).json({ message: 'No employee record found' });
       }
     }
     
-    const session = await Attendance.findOne({ employee: employee._id, status: 'open' });
+    const session = await attendanceRepository.findOpenSession(employee._id);
     if (!session) {
       return res.status(400).json({ message: 'Employee is not clocked in' });
     }
@@ -119,12 +121,12 @@ router.post('/breaks/start', [
   body('type').optional().isIn(['break', 'lunch', 'other'])
 ], async (req, res) => {
   try {
-    const employee = await Employee.findOne({ userAccount: req.user._id });
+    const employee = await employeeRepository.findByUserAccount(req.user._id);
     if (!employee) {
       return res.status(400).json({ message: 'No employee record found' });
     }
     
-    const session = await Attendance.findOne({ employee: employee._id, status: 'open' });
+    const session = await attendanceRepository.findOpenSession(employee._id);
     if (!session) {
       return res.status(400).json({ message: 'You are not clocked in' });
     }
@@ -147,12 +149,12 @@ router.post('/breaks/end', [
   requireAnyPermission(['manage_attendance_breaks', 'clock_attendance']),
 ], async (req, res) => {
   try {
-    const employee = await Employee.findOne({ userAccount: req.user._id });
+    const employee = await employeeRepository.findByUserAccount(req.user._id);
     if (!employee) {
       return res.status(400).json({ message: 'No employee record found' });
     }
     
-    const session = await Attendance.findOne({ employee: employee._id, status: 'open' });
+    const session = await attendanceRepository.findOpenSession(employee._id);
     if (!session) {
       return res.status(400).json({ message: 'You are not clocked in' });
     }
@@ -175,14 +177,17 @@ router.get('/status', [
   requireAnyPermission(['view_own_attendance', 'clock_attendance']),
 ], async (req, res) => {
   try {
-    const employee = await Employee.findOne({ userAccount: req.user._id });
+    const employee = await employeeRepository.findByUserAccount(req.user._id);
     if (!employee) {
       return res.json({ success: true, data: null }); // No employee record, no attendance
     }
     
-    const session = await Attendance.findOne({ employee: employee._id, status: 'open' })
-      .populate('employee', 'firstName lastName employeeId position department')
-      .populate('user', 'firstName lastName email');
+    const session = await attendanceRepository.findOpenSession(employee._id, {
+      populate: [
+        { path: 'employee', select: 'firstName lastName employeeId position department' },
+        { path: 'user', select: 'firstName lastName email' }
+      ]
+    });
     res.json({ success: true, data: session });
   } catch (err) {
     console.error('Get status error:', err);
@@ -199,7 +204,7 @@ router.get('/me', [
   query('endDate').optional().isISO8601(),
 ], async (req, res) => {
   try {
-    const employee = await Employee.findOne({ userAccount: req.user._id });
+    const employee = await employeeRepository.findByUserAccount(req.user._id);
     if (!employee) {
       return res.json({ success: true, data: [] }); // No employee record, no attendance
     }
@@ -219,11 +224,16 @@ router.get('/me', [
       }
     }
     
-    const rows = await Attendance.find(query)
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .populate('employee', 'firstName lastName employeeId position department')
-      .populate('user', 'firstName lastName email');
+    const result = await attendanceRepository.findWithPagination(query, {
+      page: 1,
+      limit,
+      sort: { createdAt: -1 },
+      populate: [
+        { path: 'employee', select: 'firstName lastName employeeId position department' },
+        { path: 'user', select: 'firstName lastName email' }
+      ]
+    });
+    const rows = result.attendances;
     res.json({ success: true, data: rows });
   } catch (err) {
     console.error('Get my attendance error:', err);
@@ -265,12 +275,17 @@ router.get('/team', [
       }
     }
     
-    const rows = await Attendance.find(query)
-      .sort({ createdAt: -1 })
-      .limit(limit)
-      .populate('employee', 'firstName lastName employeeId position department')
-      .populate('user', 'firstName lastName email role')
-      .populate('clockedInBy', 'firstName lastName email');
+    const result = await attendanceRepository.findWithPagination(query, {
+      page: 1,
+      limit,
+      sort: { createdAt: -1 },
+      populate: [
+        { path: 'employee', select: 'firstName lastName employeeId position department' },
+        { path: 'user', select: 'firstName lastName email role' },
+        { path: 'clockedInBy', select: 'firstName lastName email' }
+      ]
+    });
+    const rows = result.attendances;
     res.json({ success: true, data: rows });
   } catch (err) {
     console.error('Get team attendance error:', err);

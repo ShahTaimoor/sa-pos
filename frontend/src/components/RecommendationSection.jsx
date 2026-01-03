@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { TrendingUp, Sparkles, RefreshCw, Settings, Eye, ShoppingCart } from 'lucide-react';
 import { useGenerateRecommendationsMutation } from '../store/services/recommendationsApi';
 import { handleApiError, showSuccessToast, showErrorToast } from '../utils/errorHandler';
@@ -26,10 +26,23 @@ const RecommendationSection = ({
 
   // Generate recommendations mutation
   const [generateRecommendations, { isLoading }] = useGenerateRecommendationsMutation();
+  
+  // Ref to prevent duplicate calls in React Strict Mode
+  const isFetchingRef = useRef(false);
 
   // Fetch recommendations on mount and when algorithm/context changes
   useEffect(() => {
+    // Prevent duplicate calls in React Strict Mode
+    if (isFetchingRef.current) {
+      return;
+    }
+    
     const fetchRecommendations = async () => {
+      if (isFetchingRef.current) {
+        return; // Double check
+      }
+      
+      isFetchingRef.current = true;
       try {
         setError(null);
         const result = await generateRecommendations({
@@ -42,6 +55,11 @@ const RecommendationSection = ({
       } catch (err) {
         setError(err);
         handleApiError(err, 'Recommendations');
+      } finally {
+        // Reset after a short delay to allow cleanup
+        setTimeout(() => {
+          isFetchingRef.current = false;
+        }, 100);
       }
     };
 
@@ -50,7 +68,13 @@ const RecommendationSection = ({
   }, [currentAlgorithm, sessionId, limit]);
 
   const handleRefresh = async () => {
+    // Prevent duplicate refresh calls
+    if (isFetchingRef.current || isRefreshing) {
+      return;
+    }
+    
     setIsRefreshing(true);
+    isFetchingRef.current = true;
     try {
       setError(null);
       const result = await generateRecommendations({
@@ -66,6 +90,9 @@ const RecommendationSection = ({
       handleApiError(err, 'Refresh Recommendations');
     } finally {
       setIsRefreshing(false);
+      setTimeout(() => {
+        isFetchingRef.current = false;
+      }, 100);
     }
   };
 

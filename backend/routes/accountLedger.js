@@ -1,52 +1,18 @@
 const express = require('express');
 const { auth, requirePermission } = require('../middleware/auth');
 const { query } = require('express-validator');
-const Transaction = require('../models/Transaction');
-const ChartOfAccounts = require('../models/ChartOfAccounts');
-const CashReceipt = require('../models/CashReceipt');
-const CashPayment = require('../models/CashPayment');
-const BankReceipt = require('../models/BankReceipt');
-const BankPayment = require('../models/BankPayment');
 const exportService = require('../services/exportService');
+const accountLedgerService = require('../services/accountLedgerService');
+const chartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
+const transactionRepository = require('../repositories/TransactionRepository');
+const cashReceiptRepository = require('../repositories/CashReceiptRepository');
+const cashPaymentRepository = require('../repositories/CashPaymentRepository');
+const bankReceiptRepository = require('../repositories/BankReceiptRepository');
+const bankPaymentRepository = require('../repositories/BankPaymentRepository');
 const path = require('path');
 const fs = require('fs');
 
 const router = express.Router();
-
-// Helpers
-const clampDateRange = (start, end, maxDays = 93, defaultDays = 30) => {
-  let s = start ? new Date(start) : null;
-  let e = end ? new Date(end) : null;
-  if (!s && !e) {
-    e = new Date();
-    s = new Date(e);
-    s.setDate(e.getDate() - defaultDays);
-  } else if (s && !e) {
-    e = new Date(s);
-    e.setDate(s.getDate() + defaultDays);
-  } else if (!s && e) {
-    s = new Date(e);
-    s.setDate(e.getDate() - defaultDays);
-  }
-  const maxMs = maxDays * 24 * 60 * 60 * 1000;
-  if (e - s > maxMs) {
-    e = new Date(s.getTime() + maxMs);
-  }
-  return { start: s, end: e };
-};
-
-const resolveCashBankCodes = async () => {
-  try {
-    const accounts = await ChartOfAccounts.find({ accountType: 'asset' })
-      .select('accountCode accountName')
-      .lean();
-    let cash = accounts.find(a => /cash/i.test(a.accountName))?.accountCode || '1001';
-    let bank = accounts.find(a => /bank/i.test(a.accountName))?.accountCode || '1002';
-    return { cashCode: cash, bankCode: bank };
-  } catch (_) {
-    return { cashCode: '1001', bankCode: '1002' };
-  }
-};
 
 /**
  * @route   GET /api/account-ledger
@@ -79,106 +45,25 @@ router.get('/', [
       page = 1
     } = req.query;
 
-    // Date range guardrails
-    const { start, end } = clampDateRange(startDate, endDate);
-
-    // Build query filter
-    const filter = {};
-    
-    if (accountCode) {
-      filter.accountCode = accountCode;
-    }
-
-    if (start || end) {
-      filter.createdAt = {};
-      if (start) filter.createdAt.$gte = start;
-      if (end) filter.createdAt.$lte = end;
-    }
-
-    // Account name → map to matching account codes
-    if (accountName && !accountCode) {
-      const matchingAccounts = await ChartOfAccounts.find({
-        accountName: { $regex: accountName, $options: 'i' }
-      }).select('accountCode');
-      if (matchingAccounts.length > 0) {
-        filter.accountCode = { $in: matchingAccounts.map(a => a.accountCode) };
-      } else {
-        // No accounts match the name; return empty page quickly
-        return res.json({
-          success: true,
-          data: { account: null, entries: [], pagination: { currentPage: parseInt(page), totalPages: 0, totalEntries: 0, entriesPerPage: parseInt(limit) }, summary: { openingBalance: 0, closingBalance: 0, totalDebits: 0, totalCredits: 0 } }
-        });
-      }
-    }
-
-    // Text search across key fields
-    if (search) {
-      filter.$or = [
-        { description: { $regex: search, $options: 'i' } },
-        { reference: { $regex: search, $options: 'i' } },
-        { transactionId: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    // Get total count AFTER applying all filters
-    const totalTransactions = await Transaction.countDocuments(filter);
-
-    // Get transactions; for summary mode skip heavy populates
-    const baseQuery = Transaction.find(filter).sort({ createdAt: 1 });
-    if (!summary) {
-      baseQuery
-        .populate('customer.id', 'firstName lastName email')
-        .populate('supplier', 'companyName')
-        .populate('createdBy', 'firstName lastName');
-    }
-    const transactions = await baseQuery
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .lean();
-
-    // Results are already filtered; no extra in-memory filtering needed
-    let filteredTransactions = transactions;
-    // Optional supplier name filter (case-insensitive) when populated
-    if (supplierName) {
-      const q = String(supplierName).toLowerCase();
-      filteredTransactions = filteredTransactions.filter(t =>
-        (t.supplier && (t.supplier.companyName || '').toLowerCase().includes(q))
-      );
-    }
-
-    // Get account info if specific account
-    let accountInfo = null;
-    if (accountCode) {
-      accountInfo = await ChartOfAccounts.findOne({ accountCode });
-    }
-
-    // Calculate running balance only when specific account is selected
-    let runningBalance = accountInfo ? accountInfo.openingBalance || 0 : null;
-    const ledgerEntries = filteredTransactions.map(transaction => {
-      const debit = transaction.debitAmount || 0;
-      const credit = transaction.creditAmount || 0;
-      
-      if (accountInfo && runningBalance !== null) {
-        if (accountInfo.normalBalance === 'debit') {
-          runningBalance = runningBalance + debit - credit;
-        } else {
-          runningBalance = runningBalance + credit - debit;
-        }
-      }
-
-      return {
-        ...transaction,
-        accountCode: transaction.accountCode || accountInfo?.accountCode,
-        accountName: accountInfo?.accountName || '',
-        debitAmount: debit,
-        creditAmount: credit,
-        balance: accountInfo && runningBalance !== null ? runningBalance : undefined,
-        source: 'Transaction'
-      };
+    // Get account ledger data from service
+    const result = await accountLedgerService.getAccountLedger({
+      startDate,
+      endDate,
+      accountCode,
+      accountName,
+      search,
+      supplierName,
+      summary,
+      limit,
+      page
     });
 
-    // Export functionality (CSV, Excel, PDF, JSON)
+    // If export requested, handle it
     if (exportFormat) {
+      const { account: accountInfo, entries: ledgerEntries, summary: ledgerSummary } = result.data;
+      const { start, end } = accountLedgerService.clampDateRange(startDate, endDate);
+
+      // Export functionality (CSV, Excel, PDF, JSON)
       try {
         const headers = ['Date', 'Account Code', 'Account Name', 'Description', 'Reference', 'Debit', 'Credit', 'Balance', 'Source'];
         const rows = ledgerEntries.map(e => [
@@ -321,48 +206,8 @@ router.get('/', [
       }
     }
 
-    // Summary mode: return totals only
-    if (summary) {
-      return res.json({
-        success: true,
-        data: {
-          account: accountInfo,
-          entries: [],
-          pagination: {
-            currentPage: parseInt(page),
-            totalPages: Math.ceil(totalTransactions / parseInt(limit)),
-            totalEntries: totalTransactions,
-            entriesPerPage: parseInt(limit)
-          },
-          summary: {
-            openingBalance: accountInfo ? accountInfo.openingBalance : 0,
-            closingBalance: accountInfo ? runningBalance : (filteredTransactions.reduce((sum, t) => sum + ((t.debitAmount||0) - (t.creditAmount||0)), 0)),
-            totalDebits: filteredTransactions.reduce((sum, t) => sum + (t.debitAmount||0), 0),
-            totalCredits: filteredTransactions.reduce((sum, t) => sum + (t.creditAmount||0), 0)
-          }
-        }
-      });
-    }
-
-    res.json({
-      success: true,
-      data: {
-        account: accountInfo,
-        entries: ledgerEntries,
-        pagination: {
-          currentPage: parseInt(page),
-          totalPages: Math.ceil(totalTransactions / parseInt(limit)),
-          totalEntries: totalTransactions,
-          entriesPerPage: parseInt(limit)
-        },
-        summary: {
-          openingBalance: accountInfo ? accountInfo.openingBalance : 0,
-          closingBalance: accountInfo ? runningBalance : (ledgerEntries.reduce((sum, e) => sum + (e.debitAmount - e.creditAmount), 0)),
-          totalDebits: ledgerEntries.reduce((sum, entry) => sum + entry.debitAmount, 0),
-          totalCredits: ledgerEntries.reduce((sum, entry) => sum + entry.creditAmount, 0)
-        }
-      }
-    });
+    // Return the result from service
+    res.json(result);
 
   } catch (error) {
     console.error('Error fetching account ledger:', error);
@@ -400,28 +245,24 @@ router.get('/accounts', [
     }
 
     // Get all accounts
-    const accounts = await ChartOfAccounts.find({ isActive: true })
-      .sort({ accountCode: 1 })
-      .lean();
+    const accounts = await chartOfAccountsRepository.findAll({ isActive: true }, {
+      sort: { accountCode: 1 },
+      lean: true
+    });
 
     // Use aggregation to get transaction summary for all accounts at once (fixes N+1 problem)
-    const transactionSummary = await Transaction.aggregate([
-      ...(Object.keys(dateFilter).length > 0 ? [{ $match: dateFilter }] : []),
-      {
-        $group: {
-          _id: '$accountCode',
-          totalDebits: { $sum: { $ifNull: ['$debitAmount', 0] } },
-          totalCredits: { $sum: { $ifNull: ['$creditAmount', 0] } },
-          transactionCount: { $sum: 1 },
-          lastActivity: { $max: '$createdAt' }
-        }
-      }
-    ]);
+    const transactionFilter = Object.keys(dateFilter).length > 0 ? dateFilter : {};
+    const transactionSummary = await transactionRepository.getSummary(transactionFilter, '$accountCode');
 
     // Create a map for quick lookup
     const summaryMap = {};
     transactionSummary.forEach(summary => {
-      summaryMap[summary._id] = summary;
+      summaryMap[summary._id] = {
+        totalDebits: summary.totalDebits || 0,
+        totalCredits: summary.totalCredits || 0,
+        transactionCount: summary.count || 0,
+        lastActivity: summary.lastActivity || null
+      };
     });
 
     // Calculate balances for each account
@@ -517,10 +358,13 @@ router.get('/all-entries', [
 
     // 1. Get Cash Receipts
     const cashReceiptFilter = Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {};
-    const cashReceipts = await CashReceipt.find(cashReceiptFilter)
-      .populate('customer', 'firstName lastName')
-      .populate('createdBy', 'firstName lastName')
-      .lean();
+    const cashReceipts = await cashReceiptRepository.findAll(cashReceiptFilter, {
+      populate: [
+        { path: 'customer', select: 'firstName lastName' },
+        { path: 'createdBy', select: 'firstName lastName' }
+      ],
+      lean: true
+    });
 
     cashReceipts.forEach(receipt => {
       if (!accountCode || accountCode === cashCode) {
@@ -541,10 +385,13 @@ router.get('/all-entries', [
     });
 
     // 2. Get Cash Payments
-    const cashPayments = await CashPayment.find(cashReceiptFilter)
-      .populate('supplier', 'name')
-      .populate('createdBy', 'firstName lastName')
-      .lean();
+    const cashPayments = await cashPaymentRepository.findAll(cashReceiptFilter, {
+      populate: [
+        { path: 'supplier', select: 'name' },
+        { path: 'createdBy', select: 'firstName lastName' }
+      ],
+      lean: true
+    });
 
     cashPayments.forEach(payment => {
       if (!accountCode || accountCode === cashCode) {
@@ -565,10 +412,13 @@ router.get('/all-entries', [
     });
 
     // 3. Get Bank Receipts
-    const bankReceipts = await BankReceipt.find(cashReceiptFilter)
-      .populate('customer', 'firstName lastName')
-      .populate('createdBy', 'firstName lastName')
-      .lean();
+    const bankReceipts = await bankReceiptRepository.findAll(cashReceiptFilter, {
+      populate: [
+        { path: 'customer', select: 'firstName lastName' },
+        { path: 'createdBy', select: 'firstName lastName' }
+      ],
+      lean: true
+    });
 
     bankReceipts.forEach(receipt => {
       if (!accountCode || accountCode === bankCode) {
@@ -589,10 +439,13 @@ router.get('/all-entries', [
     });
 
     // 4. Get Bank Payments
-    const bankPayments = await BankPayment.find(cashReceiptFilter)
-      .populate('supplier', 'name')
-      .populate('createdBy', 'firstName lastName')
-      .lean();
+    const bankPayments = await bankPaymentRepository.findAll(cashReceiptFilter, {
+      populate: [
+        { path: 'supplier', select: 'name' },
+        { path: 'createdBy', select: 'firstName lastName' }
+      ],
+      lean: true
+    });
 
     bankPayments.forEach(payment => {
       if (!accountCode || accountCode === bankCode) {
@@ -621,19 +474,25 @@ router.get('/all-entries', [
       transactionFilter.accountCode = accountCode;
     }
     
-    const transactions = await Transaction.find(transactionFilter)
-      .populate('customer.id', 'firstName lastName businessName')
-      .populate('supplier', 'companyName contactPerson')
-      .populate('createdBy', 'firstName lastName')
-      .lean();
+    const transactions = await transactionRepository.findAll(transactionFilter, {
+      populate: [
+        { path: 'customer.id', select: 'firstName lastName businessName' },
+        { path: 'supplier', select: 'companyName contactPerson' },
+        { path: 'createdBy', select: 'firstName lastName' }
+      ],
+      lean: true
+    });
 
     // Get account names for transaction entries
     const transactionAccountCodes = [...new Set(transactions.map(t => t.accountCode).filter(Boolean))];
     const accountMap = {};
     if (transactionAccountCodes.length > 0) {
-      const accounts = await ChartOfAccounts.find({
+      const accounts = await chartOfAccountsRepository.findAll({
         accountCode: { $in: transactionAccountCodes }
-      }).select('accountCode accountName').lean();
+      }, {
+        select: 'accountCode accountName',
+        lean: true
+      });
       accounts.forEach(acc => {
         accountMap[acc.accountCode] = acc.accountName;
       });
@@ -692,27 +551,16 @@ router.get('/all-entries', [
     let openingBalance = 0;
     
     if (accountCode) {
-      accountInfo = await ChartOfAccounts.findOne({ accountCode });
+      accountInfo = await chartOfAccountsRepository.findByAccountCode(accountCode);
       if (accountInfo) {
         openingBalance = accountInfo.openingBalance || 0;
         
         // Calculate opening balance up to start date if date range is provided
         if (start) {
-          const openingTransactions = await Transaction.aggregate([
-            {
-              $match: {
-                accountCode: accountCode,
-                createdAt: { $lt: start }
-              }
-            },
-            {
-              $group: {
-                _id: null,
-                totalDebits: { $sum: { $ifNull: ['$debitAmount', 0] } },
-                totalCredits: { $sum: { $ifNull: ['$creditAmount', 0] } }
-              }
-            }
-          ]);
+          const openingTransactions = await transactionRepository.getSummary({
+            accountCode: accountCode,
+            createdAt: { $lt: start }
+          }, null);
           
           if (openingTransactions.length > 0) {
             const opening = openingTransactions[0];

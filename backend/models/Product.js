@@ -92,6 +92,18 @@ const productSchema = new mongoose.Schema({
     type: String,
     trim: true
   },
+  
+  // Supplier Information
+  // Products can be sourced from multiple suppliers
+  suppliers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Supplier'
+  }],
+  // Primary supplier (optional - for quick reference)
+  primarySupplier: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Supplier'
+  },
   barcode: {
     type: String,
     trim: true,
@@ -183,6 +195,17 @@ const productSchema = new mongoose.Schema({
   lastModifiedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  
+  // Soft Delete Fields
+  isDeleted: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  deletedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true

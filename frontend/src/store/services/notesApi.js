@@ -3,11 +3,22 @@ import { api } from '../api';
 export const notesApi = api.injectEndpoints({
   endpoints: (builder) => ({
     getNotes: builder.query({
-      query: (params) => ({
-        url: 'notes',
-        method: 'get',
-        params,
-      }),
+      query: (params) => {
+        // Filter out empty string parameters
+        const filteredParams = {};
+        Object.keys(params || {}).forEach(key => {
+          const value = params[key];
+          // Only include non-empty values (skip empty strings, null, undefined)
+          if (value !== '' && value !== null && value !== undefined) {
+            filteredParams[key] = value;
+          }
+        });
+        return {
+          url: 'notes',
+          method: 'get',
+          params: filteredParams,
+        };
+      },
       providesTags: (result) => {
         const list = result?.data?.notes || result?.notes || result?.items || [];
         return list.length

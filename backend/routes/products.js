@@ -6,9 +6,9 @@ const createCsvWriter = require('csv-writer').createObjectCsvWriter;
 const XLSX = require('xlsx');
 const fs = require('fs');
 const path = require('path');
-const Product = require('../models/Product');
 const { auth, requirePermission } = require('../middleware/auth');
 const { sanitizeRequest, handleValidationErrors } = require('../middleware/validation');
+const productService = require('../services/productService');
 
 const router = express.Router();
 
@@ -111,179 +111,12 @@ router.get('/', [
       });
     }
     
-    // Check if all products are requested (no pagination)
-    const getAllProducts = req.query.all === 'true' || req.query.all === true || 
-                          (req.query.limit && parseInt(req.query.limit) >= 999999);
-    
-    const page = getAllProducts ? 1 : (parseInt(req.query.page) || 1);
-    const limit = getAllProducts ? 999999 : (parseInt(req.query.limit) || 20);
-    const skip = getAllProducts ? 0 : ((page - 1) * limit);
-    
-    // Build filter
-    const filter = {};
-    
-    // Multi-field search
-    if (req.query.search) {
-      const searchTerm = req.query.search;
-      let searchFields = ['name', 'description'];
-      
-      // Parse custom search fields if provided
-      if (req.query.searchFields) {
-        try {
-          searchFields = JSON.parse(req.query.searchFields);
-        } catch (e) {
-          // Use default fields
-        }
-      }
-      
-      // Build $or query for multiple fields
-      const searchConditions = [];
-      searchFields.forEach(field => {
-        if (field === 'sku' || field === 'barcode') {
-          // Exact match for SKU/barcode
-          searchConditions.push({ [field]: { $regex: `^${searchTerm}$`, $options: 'i' } });
-        } else {
-          // Partial match for other fields
-          searchConditions.push({ [field]: { $regex: searchTerm, $options: 'i' } });
-        }
-      });
-      
-      if (searchConditions.length > 0) {
-        filter.$or = searchConditions;
-    }
-    }
-    
-    // Category filter (single or multiple)
-    if (req.query.category) {
-      filter.category = req.query.category;
-    } else if (req.query.categories) {
-      try {
-        const categories = JSON.parse(req.query.categories);
-        if (Array.isArray(categories) && categories.length > 0) {
-          filter.category = { $in: categories };
-        }
-      } catch (e) {
-        // Invalid format, ignore
-      }
-    }
-    
-    // Status filter (single or multiple)
-    if (req.query.status) {
-      filter.status = req.query.status;
-    } else if (req.query.statuses) {
-      try {
-        const statuses = JSON.parse(req.query.statuses);
-        if (Array.isArray(statuses) && statuses.length > 0) {
-          filter.status = { $in: statuses };
-        }
-      } catch (e) {
-        // Invalid format, ignore
-      }
-    }
-    
-    // Price range filter
-    if (req.query.minPrice || req.query.maxPrice) {
-      const priceField = req.query.priceField || 'retail';
-      const pricePath = `pricing.${priceField}`;
-      
-      if (req.query.minPrice && req.query.maxPrice) {
-        filter[pricePath] = {
-          $gte: parseFloat(req.query.minPrice),
-          $lte: parseFloat(req.query.maxPrice)
-        };
-      } else if (req.query.minPrice) {
-        filter[pricePath] = { $gte: parseFloat(req.query.minPrice) };
-      } else if (req.query.maxPrice) {
-        filter[pricePath] = { $lte: parseFloat(req.query.maxPrice) };
-      }
-    }
-    
-    // Stock level filter
-    if (req.query.minStock || req.query.maxStock) {
-      if (req.query.minStock && req.query.maxStock) {
-        filter['inventory.currentStock'] = {
-          $gte: parseInt(req.query.minStock),
-          $lte: parseInt(req.query.maxStock)
-        };
-      } else if (req.query.minStock) {
-        filter['inventory.currentStock'] = { $gte: parseInt(req.query.minStock) };
-      } else if (req.query.maxStock) {
-        filter['inventory.currentStock'] = { $lte: parseInt(req.query.maxStock) };
-      }
-    }
-    
-    // Date range filter
-    if (req.query.dateFrom || req.query.dateTo) {
-      const dateField = req.query.dateField || 'createdAt';
-      
-      if (req.query.dateFrom && req.query.dateTo) {
-        filter[dateField] = {
-          $gte: new Date(req.query.dateFrom),
-          $lte: new Date(req.query.dateTo)
-        };
-      } else if (req.query.dateFrom) {
-        filter[dateField] = { $gte: new Date(req.query.dateFrom) };
-      } else if (req.query.dateTo) {
-        filter[dateField] = { $lte: new Date(req.query.dateTo) };
-      }
-    }
-    
-    // Brand filter
-    if (req.query.brand) {
-      filter.brand = { $regex: req.query.brand, $options: 'i' };
-    }
-    
-    // Low stock filter
-    if (req.query.lowStock === 'true') {
-      filter.$expr = { $lte: ['$inventory.currentStock', '$inventory.reorderPoint'] };
-    }
-
-    // Stock status filter
-    if (req.query.stockStatus) {
-      switch (req.query.stockStatus) {
-        case 'lowStock':
-          filter.$expr = { $lte: ['$inventory.currentStock', '$inventory.reorderPoint'] };
-          break;
-        case 'outOfStock':
-          filter['inventory.currentStock'] = 0;
-          break;
-        case 'inStock':
-          filter['inventory.currentStock'] = { $gt: 0 };
-          break;
-      }
-    }
-    
-    let query = Product.find(filter)
-      .populate('category', 'name')
-      .populate('investors.investor', 'name email')
-      .sort({ createdAt: -1 });
-    
-    // Only apply skip and limit if not getting all products
-    if (!getAllProducts) {
-      query = query.skip(skip).limit(limit);
-    }
-    
-    const products = await query;
-    const total = await Product.countDocuments(filter);
-    
-    // Transform product names to uppercase
-    const transformedProducts = products.map(transformProductToUppercase);
+    // Call service to get products
+    const result = await productService.getProducts(req.query);
     
     res.json({
-      products: transformedProducts,
-      pagination: getAllProducts ? {
-        current: 1,
-        pages: 1,
-        total,
-        hasNext: false,
-        hasPrev: false
-      } : {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page < Math.ceil(total / limit),
-        hasPrev: page > 1
-      }
+      products: result.products,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Get products error:', error);
@@ -297,18 +130,9 @@ router.get('/', [
 router.get('/:id/last-purchase-price', auth, async (req, res) => {
   try {
     const { id } = req.params;
-    const PurchaseInvoice = require('../models/PurchaseInvoice');
+    const priceInfo = await productService.getLastPurchasePrice(id);
     
-    // Find the most recent purchase invoice item for this product
-    const lastPurchase = await PurchaseInvoice.findOne({
-      'items.product': id,
-      invoiceType: 'purchase'
-    })
-      .sort({ createdAt: -1 })
-      .select('items invoiceNumber createdAt')
-      .lean();
-    
-    if (!lastPurchase) {
+    if (!priceInfo) {
       return res.json({
         success: true,
         message: 'No purchase history found for this product',
@@ -316,29 +140,19 @@ router.get('/:id/last-purchase-price', auth, async (req, res) => {
       });
     }
     
-    // Find the item for this product in the invoice
-    const productItem = lastPurchase.items.find(
-      item => item.product.toString() === id.toString()
-    );
-    
-    if (!productItem) {
-      return res.json({
-        success: true,
-        message: 'Product not found in last purchase',
-        lastPurchasePrice: null
-      });
-    }
-    
     res.json({
       success: true,
       message: 'Last purchase price retrieved successfully',
-      lastPurchasePrice: productItem.unitCost,
-      invoiceNumber: lastPurchase.invoiceNumber,
-      purchaseDate: lastPurchase.createdAt
+      lastPurchasePrice: priceInfo.lastPurchasePrice,
+      invoiceNumber: priceInfo.invoiceNumber,
+      purchaseDate: priceInfo.purchaseDate
     });
   } catch (error) {
     console.error('Get last purchase price error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined 
+    });
   }
 });
 
@@ -347,16 +161,12 @@ router.get('/:id/last-purchase-price', auth, async (req, res) => {
 // @access  Private
 router.get('/:id', auth, async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id)
-      .populate('category', 'name')
-      .populate('investors.investor', 'name email');
-    
-    if (!product) {
+    const product = await productService.getProductById(req.params.id);
+    res.json({ product });
+  } catch (error) {
+    if (error.message === 'Product not found') {
       return res.status(404).json({ message: 'Product not found' });
     }
-    
-    res.json({ product: transformProductToUppercase(product) });
-  } catch (error) {
     console.error('Get product error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -366,8 +176,7 @@ router.get('/:id', auth, async (req, res) => {
 // @desc    Create new product
 // @access  Private
 router.post('/', [
-  // Temporarily disable sanitization for debugging
-  // sanitizeRequest,
+  sanitizeRequest,
   auth,
   requirePermission('create_products'),
   body('name').trim().isLength({ min: 1 }).withMessage('Product name is required'),
@@ -382,47 +191,10 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const productData = {
-      ...req.body,
-      createdBy: req.user._id,
-      lastModifiedBy: req.user._id
-    };
+    // Call service to create product
+    const result = await productService.createProduct(req.body, req.user._id);
     
-    const product = new Product(productData);
-    await product.save();
-    
-    // Automatically create inventory record for the new product
-    try {
-      const Inventory = require('../models/Inventory');
-      const inventoryRecord = new Inventory({
-        product: product._id,
-        currentStock: product.inventory?.currentStock || 0,
-        reorderPoint: product.inventory?.reorderPoint || 10,
-        reorderQuantity: product.inventory?.reorderQuantity || 50,
-        status: 'active',
-        location: {
-          warehouse: 'Main Warehouse',
-          aisle: 'A1',
-          shelf: 'S1'
-        },
-        movements: [],
-        createdBy: req.user._id
-      });
-      await inventoryRecord.save();
-    } catch (inventoryError) {
-      console.error('Error creating inventory record:', inventoryError);
-      console.error('Inventory error details:', {
-        name: inventoryError.name,
-        message: inventoryError.message,
-        code: inventoryError.code
-      });
-      // Don't fail the product creation if inventory creation fails
-    }
-    
-    res.status(201).json({
-      message: 'Product created successfully',
-      product
-    });
+    res.status(201).json(result);
   } catch (error) {
     console.error('Create product error:', error);
     console.error('Error details:', {
@@ -467,25 +239,10 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const updateData = {
-      ...req.body,
-      lastModifiedBy: req.user._id
-    };
+    // Call service to update product
+    const result = await productService.updateProduct(req.params.id, req.body, req.user._id);
     
-    const product = await Product.findByIdAndUpdate(
-      req.params.id,
-      updateData,
-      { new: true, runValidators: true }
-    );
-    
-    if (!product) {
-      return res.status(404).json({ message: 'Product not found' });
-    }
-    
-    res.json({
-      message: 'Product updated successfully',
-      product
-    });
+    res.json(result);
   } catch (error) {
     console.error('Update product error:', error);
     if (error.code === 11000) {
@@ -499,22 +256,60 @@ router.put('/:id', [
 });
 
 // @route   DELETE /api/products/:id
-// @desc    Delete product
+// @desc    Delete product (soft delete)
 // @access  Private
 router.delete('/:id', [
   auth,
   requirePermission('delete_products')
 ], async (req, res) => {
   try {
-    const product = await Product.findByIdAndDelete(req.params.id);
-    
-    if (!product) {
-      return res.status(404).json({ message: 'Product not found' });
-    }
-    
-    res.json({ message: 'Product deleted successfully' });
+    // Call service to delete product (soft delete)
+    const result = await productService.deleteProduct(req.params.id);
+    res.json(result);
   } catch (error) {
     console.error('Delete product error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   POST /api/products/:id/restore
+// @desc    Restore soft-deleted product
+// @access  Private
+router.post('/:id/restore', [
+  auth,
+  requirePermission('delete_products')
+], async (req, res) => {
+  try {
+    const productRepository = require('../repositories/ProductRepository');
+    const product = await productRepository.findDeletedById(req.params.id);
+    if (!product) {
+      return res.status(404).json({ message: 'Deleted product not found' });
+    }
+    
+    await productRepository.restore(req.params.id);
+    res.json({ message: 'Product restored successfully' });
+  } catch (error) {
+    console.error('Restore product error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/products/deleted
+// @desc    Get all deleted products
+// @access  Private
+router.get('/deleted', [
+  auth,
+  requirePermission('view_products')
+], async (req, res) => {
+  try {
+    const productRepository = require('../repositories/ProductRepository');
+    const deletedProducts = await productRepository.findDeleted({}, {
+      sort: { deletedAt: -1 },
+      populate: [{ path: 'category', select: 'name' }]
+    });
+    res.json(deletedProducts);
+  } catch (error) {
+    console.error('Get deleted products error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -525,17 +320,8 @@ router.delete('/:id', [
 router.get('/search/:query', auth, async (req, res) => {
   try {
     const query = req.params.query;
-    
-    const products = await Product.find({
-      name: { $regex: query, $options: 'i' },
-      status: 'active'
-    })
-    .select('name pricing inventory status')
-    .limit(10);
-    
-    // Transform product names to uppercase
-    const transformedProducts = products.map(transformProductToUppercase);
-    res.json({ products: transformedProducts });
+    const products = await productService.searchProducts(query, 10);
+    res.json({ products });
   } catch (error) {
     console.error('Search products error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -554,82 +340,10 @@ router.put('/bulk', [
   try {
     const { productIds, updates } = req.body;
     
-    if (!Array.isArray(productIds) || productIds.length === 0) {
-      return res.status(400).json({ message: 'Product IDs array is required' });
-    }
-
-    // Handle price updates
-    if (updates.priceType && updates.priceValue !== undefined) {
-      const priceField = `pricing.${updates.priceType}`;
-      const updateMethod = updates.updateMethod || 'set';
-      
-      const products = await Product.find({ _id: { $in: productIds } });
-      const bulkOps = products.map(product => {
-        let newValue = updates.priceValue;
-        
-        if (updateMethod === 'increase') {
-          newValue = (product.pricing[updates.priceType] || 0) + updates.priceValue;
-        } else if (updateMethod === 'decrease') {
-          newValue = Math.max(0, (product.pricing[updates.priceType] || 0) - updates.priceValue);
-        } else if (updateMethod === 'percentage') {
-          newValue = (product.pricing[updates.priceType] || 0) * (1 + updates.priceValue / 100);
-        }
-        
-        return {
-          updateOne: {
-            filter: { _id: product._id },
-            update: { $set: { [priceField]: newValue } }
-          }
-        };
-      });
-      
-      await Product.bulkWrite(bulkOps);
-    }
+    // Call service to bulk update products
+    const result = await productService.bulkUpdateProductsAdvanced(productIds, updates);
     
-    // Handle category update
-    if (updates.category) {
-      await Product.updateMany(
-        { _id: { $in: productIds } },
-        { $set: { category: updates.category } }
-      );
-    }
-    
-    // Handle status update
-    if (updates.status) {
-      await Product.updateMany(
-        { _id: { $in: productIds } },
-        { $set: { status: updates.status } }
-      );
-    }
-    
-    // Handle stock adjustment
-    if (updates.stockAdjustment !== undefined) {
-      const stockMethod = updates.stockMethod || 'set';
-      const products = await Product.find({ _id: { $in: productIds } });
-      const bulkOps = products.map(product => {
-        let newStock = updates.stockAdjustment;
-        
-        if (stockMethod === 'increase') {
-          newStock = (product.inventory?.currentStock || 0) + updates.stockAdjustment;
-        } else if (stockMethod === 'decrease') {
-          newStock = Math.max(0, (product.inventory?.currentStock || 0) - updates.stockAdjustment);
-        }
-        
-        return {
-          updateOne: {
-            filter: { _id: product._id },
-            update: { $set: { 'inventory.currentStock': newStock } }
-          }
-        };
-      });
-      
-      await Product.bulkWrite(bulkOps);
-    }
-    
-    res.json({ 
-      message: `Successfully updated ${productIds.length} products`,
-      updated: productIds.length
-    });
+    res.json(result);
   } catch (error) {
     console.error('Bulk update products error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -647,16 +361,10 @@ router.delete('/bulk', [
   try {
     const { productIds } = req.body;
     
-    if (!Array.isArray(productIds) || productIds.length === 0) {
-      return res.status(400).json({ message: 'Product IDs array is required' });
-    }
+    // Call service to bulk delete products
+    const result = await productService.bulkDeleteProducts(productIds);
     
-    const result = await Product.deleteMany({ _id: { $in: productIds } });
-    
-    res.json({ 
-      message: `Successfully deleted ${result.deletedCount} products`,
-      deleted: result.deletedCount
-    });
+    res.json(result);
   } catch (error) {
     console.error('Bulk delete products error:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
@@ -668,18 +376,8 @@ router.delete('/bulk', [
 // @access  Private
 router.get('/low-stock', auth, async (req, res) => {
   try {
-    const products = await Product.find({
-      $expr: {
-        $lte: ['$inventory.currentStock', '$inventory.reorderPoint']
-      },
-      status: 'active'
-    })
-    .select('name inventory pricing')
-    .sort({ 'inventory.currentStock': 1 });
-    
-    // Transform product names to uppercase
-    const transformedProducts = products.map(transformProductToUppercase);
-    res.json({ products: transformedProducts });
+    const products = await productService.getLowStockProducts();
+    res.json({ products });
   } catch (error) {
     console.error('Get low stock products error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -700,25 +398,9 @@ router.post('/:id/price-check', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const product = await Product.findById(req.params.id);
-    if (!product) {
-      return res.status(404).json({ message: 'Product not found' });
-    }
-    
     const { customerType, quantity } = req.body;
-    const price = product.getPriceForCustomerType(customerType, quantity);
-    
-    res.json({
-      product: {
-        id: product._id,
-        name: product.name
-      },
-      customerType,
-      quantity,
-      unitPrice: price,
-      totalPrice: price * quantity,
-      availableStock: product.inventory.currentStock
-    });
+    const result = await productService.getPriceForCustomerType(req.params.id, customerType, quantity);
+    res.json(result);
   } catch (error) {
     console.error('Price check error:', error);
     res.status(500).json({ message: 'Server error' });
@@ -732,17 +414,8 @@ router.post('/export/csv', [auth, requirePermission('view_products')], async (re
   try {
     const { filters = {} } = req.body;
     
-    // Build query based on filters
-    const query = {};
-    if (filters.category) query.category = filters.category;
-    if (filters.status) query.status = filters.status;
-    if (filters.lowStock) {
-      query['inventory.currentStock'] = { $lte: '$inventory.reorderPoint' };
-    }
-    
-    const products = await Product.find(query)
-      .populate('category', 'name')
-      .lean();
+    // Call service to get products for export
+    const products = await productService.getProductsForExport(filters);
     
     // Prepare CSV data with proper string conversion
     const csvData = products.map(product => ({
@@ -824,17 +497,8 @@ router.post('/export/excel', [auth, requirePermission('view_products')], async (
   try {
     const { filters = {} } = req.body;
     
-    // Build query based on filters
-    const query = {};
-    if (filters.category) query.category = filters.category;
-    if (filters.status) query.status = filters.status;
-    if (filters.lowStock) {
-      query['inventory.currentStock'] = { $lte: '$inventory.reorderPoint' };
-    }
-    
-    const products = await Product.find(query)
-      .populate('category', 'name')
-      .lean();
+    // Call service to get products for export
+    const products = await productService.getProductsForExport(filters);
     
     // Helper function to safely convert any value to string
     const safeString = (value) => {
@@ -888,10 +552,6 @@ router.post('/export/excel', [auth, requirePermission('view_products')], async (
       'Tax Rate': safeNumber(product.taxSettings?.taxRate),
       'Created Date': safeString(product.createdAt)
     }));
-
-    // Debug: Log first product data to see what we're working with
-    if (products.length > 0) {
-    }
     
     // Create Excel workbook with proper options
     const workbook = XLSX.utils.book_new();
@@ -1083,11 +743,9 @@ router.post('/import/csv', [
             }
             
             // Check if product already exists
-            const existingProduct = await Product.findOne({ 
-              name: row.name.trim()
-            });
+            const productExists = await productService.productExistsByName(row.name.trim());
             
-            if (existingProduct) {
+            if (productExists) {
               results.errors.push({
                 row: i + 2,
                 error: `Product already exists with name: ${row.name}`
@@ -1095,8 +753,8 @@ router.post('/import/csv', [
               continue;
             }
             
-            // Create product
-            const product = new Product({
+            // Create product using service
+            const productData = {
               name: row.name.trim(),
               description: row.description?.trim() || '',
               category: row.category?.trim() || 'Uncategorized',
@@ -1114,9 +772,9 @@ router.post('/import/csv', [
                 reorderPoint: parseInt(row.reorderPoint) || 0
               },
               status: row.status?.toLowerCase() === 'inactive' ? 'inactive' : 'active'
-            });
+            };
             
-            await product.save();
+            await productService.createProduct(productData, req.user._id);
             results.success++;
             
           } catch (error) {
@@ -1204,11 +862,9 @@ router.post('/import/excel', [
         }
         
         // Check if product already exists
-        const existingProduct = await Product.findOne({ 
-          name: productData.name.toString().trim()
-        });
+        const productExists = await productService.productExistsByName(productData.name.toString().trim());
         
-        if (existingProduct) {
+        if (productExists) {
           results.errors.push({
             row: i + 2,
             error: `Product already exists with name: ${productData.name}`
@@ -1216,8 +872,8 @@ router.post('/import/excel', [
           continue;
         }
         
-        // Create product
-        const product = new Product({
+        // Create product using service
+        const productPayload = {
           name: productData.name.toString().trim(),
           description: productData.description?.toString().trim() || '',
           category: productData.category?.toString().trim() || 'Uncategorized',
@@ -1235,9 +891,9 @@ router.post('/import/excel', [
             reorderPoint: parseInt(productData.reorderPoint) || 0
           },
           status: productData.status?.toString().toLowerCase() === 'inactive' ? 'inactive' : 'active'
-        });
+        };
         
-        await product.save();
+        await productService.createProduct(productPayload, req.user._id);
         results.success++;
         
       } catch (error) {
@@ -1337,36 +993,7 @@ router.post('/:id/investors', [
   body('investors.*.sharePercentage').optional().isFloat({ min: 0, max: 100 })
 ], async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
-    if (!product) {
-      return res.status(404).json({ message: 'Product not found' });
-    }
-
-    const Investor = require('../models/Investor');
-    
-    // Validate all investors exist
-    for (const inv of req.body.investors) {
-      const investor = await Investor.findById(inv.investor);
-      if (!investor) {
-        return res.status(400).json({ message: `Investor ${inv.investor} not found` });
-      }
-    }
-
-    // Update product investors
-    // Use sharePercentage from request, default to 30% if not provided
-    const updatedInvestors = req.body.investors.map(inv => ({
-      investor: inv.investor,
-      sharePercentage: inv.sharePercentage || 30,
-      addedAt: new Date()
-    }));
-    
-    product.investors = updatedInvestors;
-    product.hasInvestors = product.investors.length > 0;
-    
-    await product.save();
-
-    // Populate investors before returning
-    await product.populate('investors.investor', 'name email');
+    const product = await productService.updateProductInvestors(req.params.id, req.body.investors);
 
     res.json({
       success: true,
@@ -1389,20 +1016,7 @@ router.delete('/:id/investors/:investorId', [
   requirePermission('edit_products')
 ], async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
-    if (!product) {
-      return res.status(404).json({ message: 'Product not found' });
-    }
-
-    product.investors = product.investors.filter(
-      inv => inv.investor.toString() !== req.params.investorId
-    );
-    product.hasInvestors = product.investors.length > 0;
-    
-    await product.save();
-
-    // Populate investors before returning
-    await product.populate('investors.investor', 'name email');
+    const product = await productService.removeProductInvestor(req.params.id, req.params.investorId);
 
     res.json({
       success: true,
@@ -1410,6 +1024,9 @@ router.delete('/:id/investors/:investorId', [
       data: product
     });
   } catch (error) {
+    if (error.message === 'Product not found') {
+      return res.status(404).json({ message: error.message });
+    }
     console.error('Error removing investor:', error);
     res.status(500).json({
       success: false,
@@ -1430,35 +1047,7 @@ router.post('/get-last-purchase-prices', auth, async (req, res) => {
       return res.status(400).json({ message: 'Product IDs array is required' });
     }
     
-    const PurchaseInvoice = require('../models/PurchaseInvoice');
-    
-    // Get last purchase price for each product
-    const prices = {};
-    
-    for (const productId of productIds) {
-      const lastPurchase = await PurchaseInvoice.findOne({
-        'items.product': productId,
-        invoiceType: 'purchase'
-      })
-        .sort({ createdAt: -1 })
-        .select('items invoiceNumber createdAt')
-        .lean();
-      
-      if (lastPurchase) {
-        const productItem = lastPurchase.items.find(
-          item => item.product.toString() === productId.toString()
-        );
-        
-        if (productItem) {
-          prices[productId] = {
-            productId: productId,
-            lastPurchasePrice: productItem.unitCost,
-            invoiceNumber: lastPurchase.invoiceNumber,
-            purchaseDate: lastPurchase.createdAt
-          };
-        }
-      }
-    }
+    const prices = await productService.getLastPurchasePrices(productIds);
     
     res.json({
       success: true,
@@ -1467,7 +1056,10 @@ router.post('/get-last-purchase-prices', auth, async (req, res) => {
     });
   } catch (error) {
     console.error('Get last purchase prices error:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined 
+    });
   }
 });
 

@@ -10,7 +10,6 @@ export const formatDate = (dateString) => {
       day: '2-digit'
     });
   } catch (error) {
-    console.error('Error formatting date:', error);
     return dateString;
   }
 };
@@ -29,7 +28,6 @@ export const formatDateTime = (dateString) => {
       second: '2-digit'
     });
   } catch (error) {
-    console.error('Error formatting date time:', error);
     return dateString;
   }
 };
@@ -45,7 +43,6 @@ export const formatTime = (dateString) => {
       hour12: true
     });
   } catch (error) {
-    console.error('Error formatting time:', error);
     return dateString;
   }
 };
@@ -63,7 +60,6 @@ export const formatCurrency = (amount, currency = 'USD') => {
       currency: currency
     }).format(numAmount);
   } catch (error) {
-    console.error('Error formatting currency:', error);
     return amount.toString();
   }
 };
@@ -81,7 +77,6 @@ export const formatNumber = (number, decimals = 2) => {
       maximumFractionDigits: decimals
     }).format(num);
   } catch (error) {
-    console.error('Error formatting number:', error);
     return number.toString();
   }
 };
@@ -100,7 +95,6 @@ export const formatPercentage = (value, decimals = 2) => {
       maximumFractionDigits: decimals
     }).format(num / 100);
   } catch (error) {
-    console.error('Error formatting percentage:', error);
     return value.toString();
   }
 };

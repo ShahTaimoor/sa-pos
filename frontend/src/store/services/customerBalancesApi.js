@@ -64,7 +64,11 @@ export const customerBalancesApi = api.injectEndpoints({
         url: 'customer-balances/fix-all-balances',
         method: 'post',
       }),
-      invalidatesTags: ['Customers', 'Accounting'],
+      invalidatesTags: [
+        { type: 'Customers', id: 'LIST' },
+        { type: 'Accounting', id: 'CUSTOMER_BALANCE' },
+        { type: 'Reports', id: 'BALANCE_ISSUES' },
+      ],
     }),
   }),
   overrideExisting: false,

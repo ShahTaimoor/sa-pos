@@ -17,7 +17,10 @@ import {
   useExportExcelMutation,
   useImportExcelMutation,
   useImportCSVMutation,
+  useLazyDownloadTemplateQuery,
+  productsApi,
 } from '../store/services/productsApi';
+import { useAppDispatch } from '../store/hooks';
 import { LoadingButton } from './LoadingSpinner';
 import { handleApiError, showSuccessToast, showErrorToast, showWarningToast } from '../utils/errorHandler';
 import toast from 'react-hot-toast';
@@ -26,6 +29,7 @@ import { validateFile, validateCSVData, sanitizeCSVData } from '../utils/validat
 import { sanitizeCSVData as sanitizeCSVDataUtil } from '../utils/sanitization';
 
 const ProductImportExport = ({ onImportComplete, filters = {} }) => {
+  const dispatch = useAppDispatch();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -39,30 +43,24 @@ const ProductImportExport = ({ onImportComplete, filters = {} }) => {
   const [importExcel] = useImportExcelMutation();
   const [importCSV] = useImportCSVMutation();
   
-  // Use axios directly for file downloads since RTK Query lazy hooks might not be generated
-  // This matches the pattern used in other import/export components
-  const downloadFile = async (filename) => {
-    const axios = (await import('axios')).default;
-    const token = localStorage.getItem('token');
-    const response = await axios.get(`/api/products/download/${filename}`, {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      },
-      responseType: 'blob'
-    });
-    return { data: response.data };
-  };
+  // Use lazy query for template download
+  const [downloadTemplateTrigger] = useLazyDownloadTemplateQuery();
   
   const downloadTemplate = async () => {
-    const axios = (await import('axios')).default;
-    const token = localStorage.getItem('token');
-    const response = await axios.get('/api/products/template', {
-      headers: {
-        'Authorization': `Bearer ${token}`
-      },
-      responseType: 'blob'
-    });
-    return { data: response.data };
+    try {
+      const result = await downloadTemplateTrigger().unwrap();
+      return result;
+    } catch (error) {
+      // If unwrap fails, try to get data directly
+      const result = await downloadTemplateTrigger();
+      return result.data || result;
+    }
+  };
+  
+  // Use dispatch with API endpoint initiate for downloadFile (since lazy hooks aren't available)
+  const downloadFile = async (filename) => {
+    const result = await dispatch(productsApi.endpoints.downloadFile.initiate(filename));
+    return result.data;
   };
 
   const handleExportCSV = async () => {

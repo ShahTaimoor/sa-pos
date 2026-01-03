@@ -2,8 +2,8 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
+const employeeService = require('../services/employeeService');
 const Employee = require('../models/Employee');
-const User = require('../models/User');
 
 const router = express.Router();
 
@@ -20,70 +20,41 @@ router.get('/', [
   query('status').optional().isIn(['active', 'inactive', 'terminated', 'on_leave']),
   query('department').optional().isString(),
   query('position').optional().isString(),
+  handleValidationErrors, // Use as middleware
 ], async (req, res) => {
   try {
-    const errors = handleValidationErrors(req);
-    if (errors) return res.status(400).json({ errors });
+    console.log('GET /api/employees - Request received');
+    console.log('Query params:', req.query);
 
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
-
-    const query = {};
-
-    // Search filter
-    if (req.query.search) {
-      const searchRegex = new RegExp(req.query.search, 'i');
-      query.$or = [
-        { firstName: searchRegex },
-        { lastName: searchRegex },
-        { employeeId: searchRegex },
-        { email: searchRegex },
-        { phone: searchRegex },
-        { position: searchRegex },
-        { department: searchRegex }
-      ];
-    }
-
-    // Status filter
-    if (req.query.status) {
-      query.status = req.query.status;
-    }
-
-    // Department filter
-    if (req.query.department) {
-      query.department = req.query.department;
-    }
-
-    // Position filter
-    if (req.query.position) {
-      query.position = req.query.position;
-    }
-
-    const [employees, total] = await Promise.all([
-      Employee.find(query)
-        .populate('userAccount', 'firstName lastName email role')
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      Employee.countDocuments(query)
-    ]);
-
+    // Call service to get employees
+    const result = await employeeService.getEmployees(req.query);
+    
     res.json({
       success: true,
       data: {
-        employees,
-        pagination: {
-          page,
-          limit,
-          total,
-          pages: Math.ceil(total / limit)
-        }
+        employees: result.employees,
+        pagination: result.pagination
       }
     });
   } catch (error) {
-    console.error('Get employees error:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('========================================');
+    console.error('Get employees ERROR:');
+    console.error('Error name:', error.name);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    if (error.code) console.error('Error code:', error.code);
+    if (error.keyPattern) console.error('Key pattern:', error.keyPattern);
+    if (error.keyValue) console.error('Key value:', error.keyValue);
+    console.error('========================================');
+    res.status(500).json({ 
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      details: process.env.NODE_ENV === 'development' ? {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      } : undefined
+    });
   }
 });
 
@@ -93,18 +64,11 @@ router.get('/', [
 router.get('/:id', [
   auth,
   requirePermission('manage_users'),
-  param('id').isMongoId().withMessage('Invalid employee ID')
+  param('id').isMongoId().withMessage('Invalid employee ID'),
+  handleValidationErrors, // Use as middleware
 ], async (req, res) => {
   try {
-    const errors = handleValidationErrors(req);
-    if (errors) return res.status(400).json({ errors });
-
-    const employee = await Employee.findById(req.params.id)
-      .populate('userAccount', 'firstName lastName email role status');
-
-    if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
+    const employee = await employeeService.getEmployeeById(req.params.id);
 
     res.json({
       success: true,
@@ -112,7 +76,11 @@ router.get('/:id', [
     });
   } catch (error) {
     console.error('Get employee error:', error);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -122,6 +90,7 @@ router.get('/:id', [
 router.post('/', [
   auth,
   requirePermission('manage_users'),
+  sanitizeRequest,
   body('firstName').trim().isLength({ min: 1 }).withMessage('First name is required'),
   body('lastName').trim().isLength({ min: 1 }).withMessage('Last name is required'),
   body('employeeId').optional().trim().isString(),
@@ -133,53 +102,10 @@ router.post('/', [
   body('employmentType').optional().isIn(['full_time', 'part_time', 'contract', 'temporary', 'intern']),
   body('status').optional().isIn(['active', 'inactive', 'terminated', 'on_leave']),
   body('userAccount').optional().isMongoId().withMessage('Invalid user account ID'),
+  handleValidationErrors, // Use as middleware
 ], async (req, res) => {
   try {
-    const errors = handleValidationErrors(req);
-    if (errors) return res.status(400).json({ errors });
-
-    // Check if employee ID already exists
-    if (req.body.employeeId) {
-      const existing = await Employee.findOne({ employeeId: req.body.employeeId.toUpperCase() });
-      if (existing) {
-        return res.status(400).json({ message: 'Employee ID already exists' });
-      }
-    }
-
-    // Check if email already exists
-    if (req.body.email) {
-      const existing = await Employee.findOne({ email: req.body.email.toLowerCase() });
-      if (existing) {
-        return res.status(400).json({ message: 'Email already exists' });
-      }
-    }
-
-    // Validate user account if provided
-    if (req.body.userAccount) {
-      const user = await User.findById(req.body.userAccount);
-      if (!user) {
-        return res.status(400).json({ message: 'User account not found' });
-      }
-      // Check if user is already linked to another employee
-      const existingEmployee = await Employee.findOne({ userAccount: req.body.userAccount });
-      if (existingEmployee) {
-        return res.status(400).json({ message: 'User account is already linked to another employee' });
-      }
-    }
-
-    let employee;
-    try {
-      employee = await Employee.create(req.body);
-    } catch (err) {
-      if (err.code === 11000) {
-        const duplicateField = Object.keys(err.keyPattern || {})[0];
-        return res.status(400).json({
-          success: false,
-          message: `${duplicateField} already exists`
-        });
-      }
-      throw err;
-    }
+    const employee = await employeeService.createEmployee(req.body);
 
     res.status(201).json({
       success: true,
@@ -201,6 +127,7 @@ router.post('/', [
 router.put('/:id', [
   auth,
   requirePermission('manage_users'),
+  sanitizeRequest,
   param('id').isMongoId().withMessage('Invalid employee ID'),
   body('firstName').optional().trim().isLength({ min: 1 }),
   body('lastName').optional().trim().isLength({ min: 1 }),
@@ -210,55 +137,10 @@ router.put('/:id', [
   body('position').optional().trim().isLength({ min: 1 }),
   body('status').optional().isIn(['active', 'inactive', 'terminated', 'on_leave']),
   body('userAccount').optional().isMongoId(),
+  handleValidationErrors, // Use as middleware
 ], async (req, res) => {
   try {
-    const errors = handleValidationErrors(req);
-    if (errors) return res.status(400).json({ errors });
-
-    const employee = await Employee.findById(req.params.id);
-    if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
-
-    // Check if employee ID is being changed and if it's already taken
-    if (req.body.employeeId && req.body.employeeId !== employee.employeeId) {
-      const existing = await Employee.findOne({ employeeId: req.body.employeeId.toUpperCase() });
-      if (existing) {
-        return res.status(400).json({ message: 'Employee ID already exists' });
-      }
-    }
-
-    // Check if email is being changed and if it's already taken
-    if (req.body.email && req.body.email !== employee.email) {
-      const existing = await Employee.findOne({ email: req.body.email.toLowerCase() });
-      if (existing) {
-        return res.status(400).json({ message: 'Email already exists' });
-      }
-    }
-
-    // Validate user account if being changed
-    if (req.body.userAccount !== undefined) {
-      if (req.body.userAccount && req.body.userAccount !== employee.userAccount?.toString()) {
-        const user = await User.findById(req.body.userAccount);
-        if (!user) {
-          return res.status(400).json({ message: 'User account not found' });
-        }
-        // Check if user is already linked to another employee
-        const existingEmployee = await Employee.findOne({ 
-          userAccount: req.body.userAccount,
-          _id: { $ne: req.params.id }
-        });
-        if (existingEmployee) {
-          return res.status(400).json({ message: 'User account is already linked to another employee' });
-        }
-      }
-    }
-
-    const updatedEmployee = await Employee.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    ).populate('userAccount', 'firstName lastName email role');
+    const updatedEmployee = await employeeService.updateEmployee(req.params.id, req.body);
 
     res.json({
       success: true,
@@ -266,11 +148,18 @@ router.put('/:id', [
       data: { employee: updatedEmployee }
     });
   } catch (error) {
-    console.error('Update employee error:', error);
-    if (error.code === 11000) {
-      return res.status(400).json({ message: 'Employee ID or email already exists' });
+    if (error.message === 'Employee not found') {
+      return res.status(404).json({ message: error.message });
     }
-    res.status(500).json({ message: 'Server error' });
+    if (error.message.includes('already exists') || error.message.includes('not found') || error.message.includes('already linked')) {
+      return res.status(400).json({ message: error.message });
+    }
+    console.error('Update employee error:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -280,41 +169,21 @@ router.put('/:id', [
 router.delete('/:id', [
   auth,
   requirePermission('manage_users'),
-  param('id').isMongoId().withMessage('Invalid employee ID')
+  param('id').isMongoId().withMessage('Invalid employee ID'),
+  handleValidationErrors, // Use as middleware
 ], async (req, res) => {
   try {
-    const errors = handleValidationErrors(req);
-    if (errors) return res.status(400).json({ errors });
-
-    const employee = await Employee.findById(req.params.id);
-    if (!employee) {
-      return res.status(404).json({ message: 'Employee not found' });
-    }
-
-    // Check if employee has attendance records
-    const Attendance = require('../models/Attendance');
-    const attendanceCount = await Attendance.countDocuments({ employee: req.params.id });
-    
-    if (attendanceCount > 0) {
-      // Don't delete, just mark as terminated
-      employee.status = 'terminated';
-      employee.terminationDate = new Date();
-      await employee.save();
-      
-      return res.json({
-        success: true,
-        message: 'Employee marked as terminated (has attendance records)',
-        data: { employee }
-      });
-    }
-
-    await Employee.findByIdAndDelete(req.params.id);
+    const result = await employeeService.deleteEmployee(req.params.id);
 
     res.json({
       success: true,
-      message: 'Employee deleted successfully'
+      message: result.message,
+      ...(result.employee && { data: { employee: result.employee } })
     });
   } catch (error) {
+    if (error.message === 'Employee not found') {
+      return res.status(404).json({ message: error.message });
+    }
     console.error('Delete employee error:', error);
     res.status(500).json({ message: 'Server error' });
   }

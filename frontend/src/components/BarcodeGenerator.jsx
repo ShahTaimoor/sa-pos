@@ -49,7 +49,6 @@ export const BarcodeGenerator = ({
         lineColor: '#000000'
       });
     } catch (error) {
-      console.error('Error generating barcode:', error);
       toast.error(`Invalid barcode format for ${barcodeFormat}. Please try a different format.`);
     }
   };

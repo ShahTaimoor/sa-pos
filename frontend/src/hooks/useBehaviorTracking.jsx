@@ -53,7 +53,7 @@ const useBehaviorTracking = () => {
       try {
         await trackBehaviorMutation(behaviorData).unwrap();
       } catch (error) {
-        console.error('Error tracking behavior:', error);
+        // Error tracking behavior - silent fail
         // Re-queue failed tracking if it's important
         if (behaviorData.action === 'purchase' || behaviorData.action === 'add_to_cart') {
           trackingQueue.current.unshift(behaviorData);

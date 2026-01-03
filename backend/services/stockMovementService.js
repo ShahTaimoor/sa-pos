@@ -1,6 +1,7 @@
-const StockMovement = require('../models/StockMovement');
-const Product = require('../models/Product');
-const Inventory = require('../models/Inventory');
+const StockMovementRepository = require('../repositories/StockMovementRepository');
+const ProductRepository = require('../repositories/ProductRepository');
+const InventoryRepository = require('../repositories/InventoryRepository');
+const StockMovement = require('../models/StockMovement'); // Keep for instance creation
 
 class StockMovementService {
   /**
@@ -34,7 +35,7 @@ class StockMovementService {
       } = movementData;
 
       // Get product details
-      const product = await Product.findById(productId);
+      const product = await ProductRepository.findById(productId);
       if (!product) {
         throw new Error('Product not found');
       }
@@ -80,7 +81,7 @@ class StockMovementService {
         }
       }
 
-      const movement = new StockMovement({
+      const stockMovementRecord = {
         product: productId,
         productName: product.name,
         productSku: product.sku,
@@ -106,9 +107,9 @@ class StockMovementService {
         customer,
         status: 'completed',
         systemGenerated: true
-      });
+      };
 
-      await movement.save();
+      const movement = await StockMovementRepository.create(stockMovementRecord);
 
       if (!skipInventoryUpdate) {
         try {
@@ -377,10 +378,11 @@ class StockMovementService {
       const reversedMovement = await movement.reverse(user._id, reason);
       
       // Update product stock
-      const product = await Product.findById(movement.product);
+      const product = await ProductRepository.findById(movement.product);
       if (product) {
-        product.inventory.currentStock = reversedMovement.newStock;
-        await product.save();
+        await ProductRepository.updateById(product._id, {
+          'inventory.currentStock': reversedMovement.newStock
+        });
       }
 
       return reversedMovement;

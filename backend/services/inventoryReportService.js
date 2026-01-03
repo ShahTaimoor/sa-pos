@@ -115,14 +115,25 @@ class InventoryReportService {
         matchCriteria.category = { $in: filters.categories };
       }
 
-      // TODO: Supplier filtering is currently disabled because Product model doesn't have a supplier field.
-      // Products can be sourced from multiple suppliers, so implementing this would require:
-      // 1. Adding a suppliers array field to Product model (or a junction table for many-to-many relationship)
-      // 2. Updating product creation/editing to allow supplier assignment
-      // 3. Consider if this should filter by primary supplier, all suppliers, or require all selected suppliers
-      // if (filters.suppliers && filters.suppliers.length > 0) {
-      //   matchCriteria.supplier = { $in: filters.suppliers };
-      // }
+      // Supplier filtering - filter by products that have any of the selected suppliers
+      if (filters.suppliers && filters.suppliers.length > 0) {
+        matchCriteria.$or = matchCriteria.$or || [];
+        matchCriteria.$or.push(
+          { suppliers: { $in: filters.suppliers } },
+          { primarySupplier: { $in: filters.suppliers } }
+        );
+        // If there are other $or conditions, we need to combine them properly
+        if (matchCriteria.$or.length > 2) {
+          // Keep existing $or conditions and add supplier conditions
+          const existingOr = matchCriteria.$or.filter((_, idx) => idx < matchCriteria.$or.length - 2);
+          matchCriteria.$and = [
+            ...(matchCriteria.$and || []),
+            { $or: existingOr },
+            { $or: matchCriteria.$or.slice(-2) }
+          ];
+          delete matchCriteria.$or;
+        }
+      }
 
       // Get all products with current stock levels
       const products = await Product.find(matchCriteria)
@@ -303,14 +314,14 @@ class InventoryReportService {
       if (filters.categories && filters.categories.length > 0) {
         matchCriteria.category = { $in: filters.categories };
       }
-      // TODO: Supplier filtering is currently disabled because Product model doesn't have a supplier field.
-      // Products can be sourced from multiple suppliers, so implementing this would require:
-      // 1. Adding a suppliers array field to Product model (or a junction table for many-to-many relationship)
-      // 2. Updating product creation/editing to allow supplier assignment
-      // 3. Consider if this should filter by primary supplier, all suppliers, or require all selected suppliers
-      // if (filters.suppliers && filters.suppliers.length > 0) {
-      //   matchCriteria.supplier = { $in: filters.suppliers };
-      // }
+      // Supplier filtering - filter by products that have any of the selected suppliers
+      if (filters.suppliers && filters.suppliers.length > 0) {
+        matchCriteria.$or = matchCriteria.$or || [];
+        matchCriteria.$or.push(
+          { suppliers: { $in: filters.suppliers } },
+          { primarySupplier: { $in: filters.suppliers } }
+        );
+      }
 
       const products = await Product.find(matchCriteria);
 
@@ -498,13 +509,107 @@ class InventoryReportService {
   async generateSupplierPerformanceData(report) {
     try {
       const { startDate, endDate } = report;
+      const PurchaseOrder = require('../models/PurchaseOrder');
+      const PurchaseInvoice = require('../models/PurchaseInvoice');
+      const Product = require('../models/Product');
 
-      // TODO: Supplier performance data is currently disabled because Product model doesn't have a supplier field.
-      // To implement supplier performance tracking, consider:
-      // 1. Adding supplier relationships to Product model (see supplier filtering TODO above)
-      // 2. Tracking supplier performance through PurchaseOrder/PurchaseInvoice data instead
-      // 3. Creating a separate SupplierProduct junction table to track which suppliers provide which products
-      report.supplierPerformance = [];
+      // Get all products with suppliers
+      const productsWithSuppliers = await Product.find({
+        $or: [
+          { suppliers: { $exists: true, $ne: [] } },
+          { primarySupplier: { $exists: true } }
+        ]
+      }).select('_id suppliers primarySupplier').lean();
+
+      // Create a map of supplier to products
+      const supplierProductMap = new Map();
+      productsWithSuppliers.forEach(product => {
+        const suppliers = product.suppliers || [];
+        if (product.primarySupplier) {
+          suppliers.push(product.primarySupplier);
+        }
+        const uniqueSuppliers = [...new Set(suppliers.map(s => s.toString()))];
+        uniqueSuppliers.forEach(supplierId => {
+          if (!supplierProductMap.has(supplierId)) {
+            supplierProductMap.set(supplierId, []);
+          }
+          supplierProductMap.get(supplierId).push(product._id);
+        });
+      });
+
+      // Get purchase orders and invoices for the period
+      const purchaseOrders = await PurchaseOrder.find({
+        orderDate: { $gte: startDate, $lte: endDate },
+        status: { $in: ['confirmed', 'partially_received', 'fully_received'] }
+      }).populate('supplier', 'companyName').lean();
+
+      const purchaseInvoices = await PurchaseInvoice.find({
+        createdAt: { $gte: startDate, $lte: endDate },
+        invoiceType: 'purchase',
+        status: { $in: ['confirmed', 'received', 'paid'] }
+      }).populate('supplier', 'companyName').lean();
+
+      // Calculate performance metrics per supplier
+      const supplierPerformance = new Map();
+      
+      // Process purchase orders
+      purchaseOrders.forEach(po => {
+        if (!po.supplier) return;
+        const supplierId = po.supplier._id.toString();
+        if (!supplierPerformance.has(supplierId)) {
+          supplierPerformance.set(supplierId, {
+            supplierId: supplierId,
+            supplierName: po.supplier.companyName || 'Unknown',
+            totalOrders: 0,
+            totalInvoices: 0,
+            totalValue: 0,
+            averageOrderValue: 0,
+            onTimeDelivery: 0,
+            totalDeliveries: 0
+          });
+        }
+        const perf = supplierPerformance.get(supplierId);
+        perf.totalOrders++;
+        perf.totalValue += po.total || 0;
+      });
+
+      // Process purchase invoices
+      purchaseInvoices.forEach(inv => {
+        if (!inv.supplier) return;
+        const supplierId = inv.supplier._id.toString();
+        if (!supplierPerformance.has(supplierId)) {
+          supplierPerformance.set(supplierId, {
+            supplierId: supplierId,
+            supplierName: inv.supplier.companyName || 'Unknown',
+            totalOrders: 0,
+            totalInvoices: 0,
+            totalValue: 0,
+            averageOrderValue: 0,
+            onTimeDelivery: 0,
+            totalDeliveries: 0
+          });
+        }
+        const perf = supplierPerformance.get(supplierId);
+        perf.totalInvoices++;
+        perf.totalValue += inv.pricing?.total || 0;
+        if (inv.actualDelivery && inv.expectedDelivery) {
+          perf.totalDeliveries++;
+          if (inv.actualDelivery <= inv.expectedDelivery) {
+            perf.onTimeDelivery++;
+          }
+        }
+      });
+
+      // Calculate averages and convert to array
+      const performanceArray = Array.from(supplierPerformance.values()).map(perf => {
+        perf.averageOrderValue = perf.totalOrders > 0 ? perf.totalValue / perf.totalOrders : 0;
+        perf.onTimeDeliveryRate = perf.totalDeliveries > 0 
+          ? (perf.onTimeDelivery / perf.totalDeliveries) * 100 
+          : 0;
+        return perf;
+      });
+
+      report.supplierPerformance = performanceArray;
       // Don't save here - will be saved at the end
     } catch (error) {
       console.error('Error generating supplier performance data:', error);

@@ -1,8 +1,7 @@
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
-const User = require('../models/User');
 const { auth } = require('../middleware/auth');
+const authService = require('../services/authService');
 
 const router = express.Router();
 
@@ -29,46 +28,18 @@ router.post('/register', [
       return res.status(403).json({ message: 'Access denied' });
     }
     
-    const { firstName, lastName, email, password, role, phone, department, permissions, status } = req.body;
-    // Try to create user atomically; avoid race conditions causing 500s on unique email
+    const userData = req.body;
     
-    let user;
-    try {
-      user = new User({
-        firstName,
-        lastName,
-        email,
-        password,
-        role,
-        phone,
-        department,
-        permissions: permissions || [],
-        status: status || 'active'
-      });
-      
-      await user.save();
-    } catch (err) {
-      // Handle duplicate email gracefully instead of returning a 500 from Atlas (E11000)
-      if (err && (err.code === 11000 || err.name === 'MongoServerError')) {
-        return res.status(400).json({ message: 'User already exists' });
-      }
-      throw err;
-    }
-
-        // Track user creation in permission history
-        await user.trackPermissionChange(
-          req.user,
-          'created',
-          {},
-          { role: user.role, permissions: user.permissions },
-          'User account created'
-        );
+    // Call service to register user
+    const result = await authService.register(userData, req.user);
     
-    res.status(201).json({
-      message: 'User created successfully',
-      user: user.toSafeObject()
-    });
+    res.status(201).json(result);
   } catch (error) {
+    // Handle duplicate email error
+    if (error.message === 'User already exists' || error.code === 11000) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
+    
     console.error('❌ Registration error:', {
       message: error.message,
       stack: error.stack,
@@ -96,60 +67,44 @@ router.post('/login', [
     
     const { email, password } = req.body;
     
-    // Find user
-    const user = await User.findOne({ email });
-    if (!user) {
+    // Get IP address and user agent
+    const ipAddress = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'];
+    const userAgent = req.get('User-Agent');
+    
+    // Call service to login user
+    const result = await authService.login(email, password, ipAddress, userAgent);
+    
+    // Set HTTP-only cookie for secure token storage
+    res.cookie('token', result.token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production', // Only send over HTTPS in production
+      sameSite: 'strict', // CSRF protection
+      maxAge: 8 * 60 * 60 * 1000, // 8 hours in milliseconds
+      path: '/'
+    });
+    
+    // Also return token in response for backward compatibility (can be removed later)
+    res.json({
+      message: result.message,
+      token: result.token,
+      user: result.user
+    });
+  } catch (error) {
+    // Handle specific error cases
+    if (error.message === 'Invalid credentials') {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
-    
-    // Check if account is locked
-    if (user.isLocked) {
+    if (error.message.includes('locked')) {
       return res.status(423).json({ 
         message: 'Account is temporarily locked due to too many failed login attempts' 
       });
     }
-    
-    // Check password
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      await user.incLoginAttempts();
-      return res.status(400).json({ message: 'Invalid credentials' });
-    }
-    
-    // Reset login attempts on successful login
-    if (user.loginAttempts > 0) {
-      await user.resetLoginAttempts();
-    }
-    
-    // Track login activity
-    const ipAddress = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'];
-    const userAgent = req.get('User-Agent');
-    await user.trackLogin(ipAddress, userAgent);
-    
-    // Create JWT token
-    if (!process.env.JWT_SECRET || process.env.JWT_SECRET.trim() === '') {
-      console.error('❌ JWT_SECRET is not set! Cannot create token.');
+    if (error.message.includes('JWT_SECRET')) {
       return res.status(500).json({ 
         message: 'Server configuration error: JWT_SECRET is missing' 
       });
     }
     
-    const payload = {
-      userId: user._id,
-      email: user.email,
-      role: user.role
-    };
-    
-    const token = jwt.sign(payload, process.env.JWT_SECRET, {
-      expiresIn: '8h'
-    });
-    
-    res.json({
-      message: 'Login successful',
-      token,
-      user: user.toSafeObject()
-    });
-  } catch (error) {
     console.error('❌ Login error:', {
       message: error.message,
       stack: error.stack,
@@ -168,10 +123,12 @@ router.post('/login', [
 // @access  Private
 router.get('/me', auth, async (req, res) => {
   try {
-    res.json({
-      user: req.user.toSafeObject()
-    });
+    const user = await authService.getCurrentUser(req.user._id);
+    res.json({ user });
   } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ message: 'User not found' });
+    }
     console.error('Get user error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -193,26 +150,16 @@ router.put('/profile', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const { firstName, lastName, phone, department, preferences } = req.body;
-    const updateData = {};
+    const updateData = req.body;
     
-    if (firstName) updateData.firstName = firstName;
-    if (lastName) updateData.lastName = lastName;
-    if (phone) updateData.phone = phone;
-    if (department) updateData.department = department;
-    if (preferences) updateData.preferences = { ...req.user.preferences, ...preferences };
+    // Call service to update profile
+    const result = await authService.updateProfile(req.user._id, updateData);
     
-    const user = await User.findByIdAndUpdate(
-      req.user._id,
-      updateData,
-      { new: true, runValidators: true }
-    ).select('-password');
-    
-    res.json({
-      message: 'Profile updated successfully',
-      user: user.toSafeObject()
-    });
+    res.json(result);
   } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ message: 'User not found' });
+    }
     console.error('Profile update error:', error);
     res.status(500).json({ message: 'Server error' });
   }
@@ -234,22 +181,38 @@ router.post('/change-password', [
     
     const { currentPassword, newPassword } = req.body;
     
-    // Get user with password
-    const user = await User.findById(req.user._id);
+    // Call service to change password
+    const result = await authService.changePassword(req.user._id, currentPassword, newPassword);
     
-    // Verify current password
-    const isMatch = await user.comparePassword(currentPassword);
-    if (!isMatch) {
+    res.json(result);
+  } catch (error) {
+    if (error.message === 'User not found') {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    if (error.message === 'Current password is incorrect') {
       return res.status(400).json({ message: 'Current password is incorrect' });
     }
-    
-    // Update password
-    user.password = newPassword;
-    await user.save();
-    
-    res.json({ message: 'Password changed successfully' });
-  } catch (error) {
     console.error('Password change error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   POST /api/auth/logout
+// @desc    Logout user (clear HTTP-only cookie)
+// @access  Private
+router.post('/logout', auth, async (req, res) => {
+  try {
+    // Clear the HTTP-only cookie
+    res.clearCookie('token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/'
+    });
+    
+    res.json({ message: 'Logout successful' });
+  } catch (error) {
+    console.error('Logout error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

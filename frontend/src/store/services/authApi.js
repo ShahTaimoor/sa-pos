@@ -8,11 +8,11 @@ export const authApi = api.injectEndpoints({
         method: 'post',
         data: { email, password },
       }),
-      invalidatesTags: ['Auth'],
+      invalidatesTags: [{ type: 'Auth', id: 'CURRENT_USER' }],
     }),
     currentUser: builder.query({
       query: () => ({ url: 'auth/me', method: 'get' }),
-      providesTags: ['Auth'],
+      providesTags: [{ type: 'Auth', id: 'CURRENT_USER' }],
     }),
     updateProfile: builder.mutation({
       query: (data) => ({
@@ -20,7 +20,7 @@ export const authApi = api.injectEndpoints({
         method: 'put',
         data,
       }),
-      invalidatesTags: ['Auth'],
+      invalidatesTags: [{ type: 'Auth', id: 'CURRENT_USER' }],
     }),
     changePassword: builder.mutation({
       query: ({ currentPassword, newPassword }) => ({
@@ -28,6 +28,13 @@ export const authApi = api.injectEndpoints({
         method: 'post',
         data: { currentPassword, newPassword },
       }),
+    }),
+    logout: builder.mutation({
+      query: () => ({
+        url: 'auth/logout',
+        method: 'post',
+      }),
+      invalidatesTags: [{ type: 'Auth', id: 'CURRENT_USER' }],
     }),
   }),
   overrideExisting: false,
@@ -38,5 +45,6 @@ export const {
   useCurrentUserQuery,
   useUpdateProfileMutation,
   useChangePasswordMutation,
+  useLogoutMutation,
 } = authApi;
 

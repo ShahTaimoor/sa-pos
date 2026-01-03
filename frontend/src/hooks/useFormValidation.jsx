@@ -22,16 +22,10 @@ export const useFormValidation = (initialValues = {}, validationRules = {}) => {
       if (validationRules[fieldName]) {
         const validator = validationRules[fieldName];
         
-        // Debug: Check if it's a function
+        // Check if it's a function
         if (typeof validator !== 'function') {
-          console.error('Validator is not a function for field:', fieldName);
-          console.error('Validator type:', typeof validator);
-          console.error('Validator value:', validator);
-          
           // If it's an array with includes method, this is the old pattern
           if (Array.isArray(validator) && validator.includes) {
-            console.error('Found old array-based validation rule for field:', fieldName);
-            console.error('Please update this to use function-based validation');
             return null; // Return null to avoid error
           }
         }
@@ -42,8 +36,6 @@ export const useFormValidation = (initialValues = {}, validationRules = {}) => {
       // Use predefined validators
       return FIELD_VALIDATORS[fieldName] || null;
     } catch (error) {
-      console.error('Error in getFieldValidator for field:', fieldName, error);
-      console.error('Validation rules:', validationRules);
       throw error;
     }
   }, [validationRules]);
@@ -185,9 +177,6 @@ export const useFormValidation = (initialValues = {}, validationRules = {}) => {
         ...options
       };
     } catch (error) {
-      console.error('Error in getFieldProps for field:', fieldName, error);
-      console.error('Validation rules:', validationRules);
-      console.error('Field validator:', getFieldValidator(fieldName));
       throw error;
     }
   }, [values, errors, handleChange, handleBlur, getFieldValidator]);

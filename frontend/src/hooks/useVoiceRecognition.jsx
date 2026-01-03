@@ -125,7 +125,7 @@ export const useVoiceRecognition = ({
         // Recognition might already be starting
         if (err.name !== 'InvalidStateError') {
           setError('Failed to start voice recognition');
-          console.error('Voice recognition error:', err);
+          // Voice recognition error - handled silently
         }
       }
     }
@@ -136,7 +136,7 @@ export const useVoiceRecognition = ({
       try {
         recognitionRef.current.stop();
       } catch (err) {
-        console.error('Error stopping recognition:', err);
+        // Error stopping recognition - silent fail
       }
     }
   }, [isListening]);

@@ -1,7 +1,9 @@
-const Discount = require('../models/Discount');
-const Sales = require('../models/Sales');
-const Customer = require('../models/Customer');
-const Product = require('../models/Product');
+const DiscountRepository = require('../repositories/DiscountRepository');
+const SalesRepository = require('../repositories/SalesRepository');
+const CustomerRepository = require('../repositories/CustomerRepository');
+const ProductRepository = require('../repositories/ProductRepository');
+const Discount = require('../models/Discount'); // Still needed for model methods
+const Sales = require('../models/Sales'); // Still needed for model methods
 
 class DiscountService {
   constructor() {
@@ -21,13 +23,13 @@ class DiscountService {
       }
 
       // Check if discount code already exists
-      const existingDiscount = await Discount.findOne({ code: discountData.code });
+      const existingDiscount = await DiscountRepository.findByCode(discountData.code);
       if (existingDiscount) {
         throw new Error('Discount code already exists');
       }
 
       // Create the discount
-      const discount = new Discount({
+      const discountDataWithAudit = {
         ...discountData,
         createdBy,
         auditTrail: [{
@@ -36,9 +38,9 @@ class DiscountService {
           details: 'Discount created',
           performedAt: new Date()
         }]
-      });
+      };
 
-      await discount.save();
+      const discount = await DiscountRepository.create(discountDataWithAudit);
       return discount;
     } catch (error) {
       console.error('Error creating discount:', error);
@@ -49,7 +51,7 @@ class DiscountService {
   // Update an existing discount
   async updateDiscount(discountId, updateData, modifiedBy) {
     try {
-      const discount = await Discount.findById(discountId);
+      const discount = await DiscountRepository.findById(discountId);
       if (!discount) {
         throw new Error('Discount not found');
       }
@@ -62,8 +64,8 @@ class DiscountService {
 
       // Check if code is being changed and if it already exists
       if (updateData.code && updateData.code !== discount.code) {
-        const existingDiscount = await Discount.findOne({ code: updateData.code });
-        if (existingDiscount) {
+        const codeExists = await DiscountRepository.codeExists(updateData.code, discountId);
+        if (codeExists) {
           throw new Error('Discount code already exists');
         }
       }
@@ -71,21 +73,29 @@ class DiscountService {
       // Store original values for audit trail
       const originalValues = discount.toObject();
 
-      // Update the discount
-      Object.assign(discount, updateData);
-      discount.lastModifiedBy = modifiedBy;
+      // Prepare update data with audit trail
+      const updateDataWithAudit = {
+        ...updateData,
+        lastModifiedBy: modifiedBy
+      };
 
-      // Add audit trail entry
-      discount.auditTrail.push({
+      // Get existing audit trail and add new entry
+      const existingAuditTrail = discount.auditTrail || [];
+      const updatedDiscount = await DiscountRepository.update(discountId, updateDataWithAudit);
+      
+      // Add audit trail entry (need to update the document after getting it)
+      const updatedDiscountDoc = await DiscountRepository.findById(discountId);
+      updatedDiscountDoc.auditTrail = existingAuditTrail;
+      updatedDiscountDoc.auditTrail.push({
         action: 'updated',
         performedBy: modifiedBy,
         details: 'Discount updated',
-        changes: this.getChangedFields(originalValues, discount.toObject()),
+        changes: this.getChangedFields(originalValues, { ...originalValues, ...updateData }),
         performedAt: new Date()
       });
+      await updatedDiscountDoc.save();
 
-      await discount.save();
-      return discount;
+      return updatedDiscountDoc;
     } catch (error) {
       console.error('Error updating discount:', error);
       throw error;
@@ -131,27 +141,30 @@ class DiscountService {
       }
 
       // Status filter (this is a virtual field, so we need to handle it differently)
-      let discounts = await Discount.find(query)
-        .populate([
-          { path: 'createdBy', select: 'firstName lastName email' },
-          { path: 'lastModifiedBy', select: 'firstName lastName email' },
-          { path: 'applicableProducts', select: 'name description' },
-          { path: 'applicableCategories', select: 'name' },
-          { path: 'applicableCustomers', select: 'displayName email' }
-        ])
-        .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
-        .skip(skip)
-        .limit(limit);
+      const sortObj = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+      const populate = [
+        { path: 'createdBy', select: 'firstName lastName email' },
+        { path: 'lastModifiedBy', select: 'firstName lastName email' },
+        { path: 'applicableProducts', select: 'name description' },
+        { path: 'applicableCategories', select: 'name' },
+        { path: 'applicableCustomers', select: 'displayName email' }
+      ];
+
+      const { discounts, total } = await DiscountRepository.findWithPagination(query, {
+        page,
+        limit,
+        sort: sortObj,
+        populate
+      });
 
       // Apply status filter after fetching (since it's a virtual field)
+      let filteredDiscounts = discounts;
       if (status) {
-        discounts = discounts.filter(discount => discount.status === status);
+        filteredDiscounts = discounts.filter(discount => discount.status === status);
       }
 
-      const total = await Discount.countDocuments(query);
-
       return {
-        discounts,
+        discounts: filteredDiscounts,
         pagination: {
           current: page,
           pages: Math.ceil(total / limit),
@@ -169,16 +182,17 @@ class DiscountService {
   // Get discount by ID
   async getDiscountById(discountId) {
     try {
-      const discount = await Discount.findById(discountId)
-        .populate([
-          { path: 'createdBy', select: 'firstName lastName email' },
-          { path: 'lastModifiedBy', select: 'firstName lastName email' },
-          { path: 'applicableProducts', select: 'name description price' },
-          { path: 'applicableCategories', select: 'name description' },
-          { path: 'applicableCustomers', select: 'displayName email businessType customerTier' },
-          { path: 'analytics.usageHistory.orderId', select: 'orderNumber total createdAt' },
-          { path: 'analytics.usageHistory.customerId', select: 'displayName email' }
-        ]);
+      const populate = [
+        { path: 'createdBy', select: 'firstName lastName email' },
+        { path: 'lastModifiedBy', select: 'firstName lastName email' },
+        { path: 'applicableProducts', select: 'name description price' },
+        { path: 'applicableCategories', select: 'name description' },
+        { path: 'applicableCustomers', select: 'displayName email businessType customerTier' },
+        { path: 'analytics.usageHistory.orderId', select: 'orderNumber total createdAt' },
+        { path: 'analytics.usageHistory.customerId', select: 'displayName email' }
+      ];
+
+      const discount = await DiscountRepository.findById(discountId, populate);
 
       if (!discount) {
         throw new Error('Discount not found');
@@ -194,12 +208,13 @@ class DiscountService {
   // Get discount by code
   async getDiscountByCode(code) {
     try {
-      const discount = await Discount.findOne({ code: code.toUpperCase() })
-        .populate([
-          { path: 'applicableProducts', select: 'name description' },
-          { path: 'applicableCategories', select: 'name' },
-          { path: 'applicableCustomers', select: 'displayName email' }
-        ]);
+      const populate = [
+        { path: 'applicableProducts', select: 'name description' },
+        { path: 'applicableCategories', select: 'name' },
+        { path: 'applicableCustomers', select: 'displayName email' }
+      ];
+
+      const discount = await DiscountRepository.findByCode(code.toUpperCase(), { populate });
 
       return discount;
     } catch (error) {
@@ -211,7 +226,7 @@ class DiscountService {
   // Apply discount to an order
   async applyDiscountToOrder(orderId, discountCode, customerId = null) {
     try {
-      const order = await Sales.findById(orderId).populate('customer');
+      const order = await SalesRepository.findById(orderId, [{ path: 'customer' }]);
       if (!order) {
         throw new Error('Order not found');
       }
@@ -275,7 +290,7 @@ class DiscountService {
   // Remove discount from an order
   async removeDiscountFromOrder(orderId, discountCode) {
     try {
-      const order = await Sales.findById(orderId);
+      const order = await SalesRepository.findById(orderId);
       if (!order) {
         throw new Error('Order not found');
       }
@@ -313,6 +328,8 @@ class DiscountService {
   // Get applicable discounts for an order
   async getApplicableDiscounts(orderData, customerData = null) {
     try {
+      // Note: findApplicableDiscounts is a static method on the Discount model
+      // This should remain as is since it's a model-level method
       const applicableDiscounts = await Discount.findApplicableDiscounts(orderData, customerData);
       
       // Sort by priority and discount amount
@@ -429,28 +446,48 @@ class DiscountService {
     return changes;
   }
 
+  // Get active discounts
+  async getActiveDiscounts() {
+    try {
+      return await DiscountRepository.findActive({
+        select: 'name code type value description validFrom validUntil applicableTo conditions',
+        sort: { priority: -1, createdAt: -1 }
+      });
+    } catch (error) {
+      console.error('Error fetching active discounts:', error);
+      throw error;
+    }
+  }
+
   // Toggle discount active status
   async toggleDiscountStatus(discountId, modifiedBy) {
     try {
-      const discount = await Discount.findById(discountId);
+      const discount = await DiscountRepository.findById(discountId);
       if (!discount) {
         throw new Error('Discount not found');
       }
 
       const oldStatus = discount.isActive;
-      discount.isActive = !discount.isActive;
-      discount.lastModifiedBy = modifiedBy;
+      const newStatus = !discount.isActive;
+      
+      // Update discount
+      const updatedDiscount = await DiscountRepository.update(discountId, {
+        isActive: newStatus,
+        lastModifiedBy: modifiedBy
+      });
 
       // Add audit trail entry
-      discount.auditTrail.push({
-        action: discount.isActive ? 'activated' : 'deactivated',
+      const discountDoc = await DiscountRepository.findById(discountId);
+      discountDoc.auditTrail = discountDoc.auditTrail || [];
+      discountDoc.auditTrail.push({
+        action: newStatus ? 'activated' : 'deactivated',
         performedBy: modifiedBy,
-        details: `Discount ${discount.isActive ? 'activated' : 'deactivated'}`,
+        details: `Discount ${newStatus ? 'activated' : 'deactivated'}`,
         performedAt: new Date()
       });
 
-      await discount.save();
-      return discount;
+      await discountDoc.save();
+      return discountDoc;
     } catch (error) {
       console.error('Error toggling discount status:', error);
       throw error;
@@ -460,7 +497,7 @@ class DiscountService {
   // Delete discount
   async deleteDiscount(discountId, deletedBy) {
     try {
-      const discount = await Discount.findById(discountId);
+      const discount = await DiscountRepository.findById(discountId);
       if (!discount) {
         throw new Error('Discount not found');
       }
@@ -470,7 +507,7 @@ class DiscountService {
         throw new Error('Cannot delete discount that has been used');
       }
 
-      await Discount.findByIdAndDelete(discountId);
+      await DiscountRepository.softDelete(discountId);
       return { message: 'Discount deleted successfully' };
     } catch (error) {
       console.error('Error deleting discount:', error);
@@ -506,7 +543,7 @@ class DiscountService {
   // Check discount code availability
   async isDiscountCodeAvailable(code) {
     try {
-      const existingDiscount = await Discount.findOne({ code: code.toUpperCase() });
+      const existingDiscount = await DiscountRepository.findByCode(code.toUpperCase());
       return !existingDiscount;
     } catch (error) {
       console.error('Error checking discount code availability:', error);

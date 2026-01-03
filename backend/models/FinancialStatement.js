@@ -90,7 +90,9 @@ const FinancialStatementSchema = new mongoose.Schema({
     totalCOGS: {
       amount: { type: Number, default: 0 },
       calculation: String,
+      calculationMethod: { type: String, enum: ['transaction', 'inventory_formula'], default: 'transaction' },
     },
+    cogsFromInventoryFormula: { type: Number, default: 0 }, // For validation/reference
   },
   grossProfit: {
     amount: { type: Number, default: 0 },
@@ -361,12 +363,30 @@ FinancialStatementSchema.methods.calculateDerivedValues = function() {
   this.revenue.totalRevenue.amount = this.revenue.netSales.amount + this.revenue.otherRevenue.amount;
   this.revenue.totalRevenue.calculation = `${this.revenue.netSales.amount} + ${this.revenue.otherRevenue.amount}`;
   
-  // COGS = Beginning Inventory + Purchases + Freight In - Purchase Returns - Purchase Discounts - Ending Inventory
-  this.costOfGoodsSold.totalCOGS.amount = this.costOfGoodsSold.beginningInventory + 
+  // COGS Calculation: Use transaction-based if available, otherwise use inventory formula
+  // Calculate inventory formula COGS for reference/validation
+  const inventoryFormulaCOGS = this.costOfGoodsSold.beginningInventory + 
     this.costOfGoodsSold.purchases.amount + this.costOfGoodsSold.freightIn - 
     this.costOfGoodsSold.purchaseReturns - this.costOfGoodsSold.purchaseDiscounts - 
     this.costOfGoodsSold.endingInventory;
-  this.costOfGoodsSold.totalCOGS.calculation = `${this.costOfGoodsSold.beginningInventory} + ${this.costOfGoodsSold.purchases.amount} + ${this.costOfGoodsSold.freightIn} - ${this.costOfGoodsSold.purchaseReturns} - ${this.costOfGoodsSold.purchaseDiscounts} - ${this.costOfGoodsSold.endingInventory}`;
+  
+  // Store inventory formula result for reference
+  this.costOfGoodsSold.cogsFromInventoryFormula = inventoryFormulaCOGS;
+  
+  // Use transaction-based COGS if already set (from populateCOGSData), otherwise use inventory formula
+  // Check if transaction-based COGS was set by checking if calculationMethod is 'transaction'
+  if (this.costOfGoodsSold.totalCOGS.calculationMethod === 'transaction') {
+    // Transaction-based COGS is set, keep it and update calculation string if needed
+    if (!this.costOfGoodsSold.totalCOGS.calculation) {
+      this.costOfGoodsSold.totalCOGS.calculation = 'Sum of COGS transactions';
+    }
+    // Keep the transaction-based amount - don't overwrite
+  } else {
+    // No transaction-based COGS set, use inventory formula
+    this.costOfGoodsSold.totalCOGS.amount = inventoryFormulaCOGS;
+    this.costOfGoodsSold.totalCOGS.calculation = `${this.costOfGoodsSold.beginningInventory} + ${this.costOfGoodsSold.purchases.amount} + ${this.costOfGoodsSold.freightIn} - ${this.costOfGoodsSold.purchaseReturns} - ${this.costOfGoodsSold.purchaseDiscounts} - ${this.costOfGoodsSold.endingInventory}`;
+    this.costOfGoodsSold.totalCOGS.calculationMethod = 'inventory_formula';
+  }
   
   // Gross Profit = Total Revenue - COGS
   this.grossProfit.amount = this.revenue.totalRevenue.amount - this.costOfGoodsSold.totalCOGS.amount;

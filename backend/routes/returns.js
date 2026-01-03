@@ -2,12 +2,12 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
-const Return = require('../models/Return');
 const Sales = require('../models/Sales');
 const SalesOrder = require('../models/SalesOrder');
 const PurchaseInvoice = require('../models/PurchaseInvoice');
 const PurchaseOrder = require('../models/PurchaseOrder');
 const returnManagementService = require('../services/returnManagementService');
+const ReturnRepository = require('../repositories/ReturnRepository');
 
 const router = express.Router();
 
@@ -170,49 +170,20 @@ router.get('/', [
       search
     } = req.query;
 
-    const skip = (page - 1) * limit;
-    const filter = {};
-
-    // Apply filters
-    if (status) filter.status = status;
-    if (returnType) filter.returnType = returnType;
-    if (customer) filter.customer = customer;
-    if (priority) filter.priority = priority;
-
-    // Date range filter
-    if (startDate || endDate) {
-      filter.returnDate = {};
-      if (startDate) filter.returnDate.$gte = startDate;
-      if (endDate) filter.returnDate.$lte = endDate;
-    }
-
-    // Search filter
-    if (search) {
-      filter.$or = [
-        { returnNumber: { $regex: search, $options: 'i' } },
-        { 'customer.firstName': { $regex: search, $options: 'i' } },
-        { 'customer.lastName': { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const returns = await Return.find(filter)
-      .populate([
-        { path: 'originalOrder', select: 'orderNumber soNumber invoiceNumber poNumber createdAt orderDate invoiceDate' },
-        { path: 'customer', select: 'name businessName email phone firstName lastName' },
-        { path: 'supplier', select: 'name businessName email phone companyName contactPerson' },
-        { path: 'items.product', select: 'name description' },
-        { path: 'requestedBy', select: 'name businessName firstName lastName' },
-        { path: 'approvedBy', select: 'name businessName firstName lastName' },
-        { path: 'processedBy', select: 'name businessName firstName lastName' }
-      ])
-      .sort({ returnDate: -1 })
-      .skip(skip)
-      .limit(limit);
-
-    const total = await Return.countDocuments(filter);
+    const result = await returnManagementService.getReturns({
+      page,
+      limit,
+      status,
+      returnType,
+      customer,
+      startDate,
+      endDate,
+      priority,
+      search
+    });
 
     // Transform names to uppercase
-    returns.forEach(returnItem => {
+    result.returns.forEach(returnItem => {
       if (returnItem.customer) {
         returnItem.customer = transformCustomerToUppercase(returnItem.customer);
       }
@@ -250,14 +221,8 @@ router.get('/', [
     });
 
     res.json({
-      returns,
-      pagination: {
-        current: parseInt(page),
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page * limit < total,
-        hasPrev: page > 1,
-      },
+      returns: result.returns,
+      pagination: result.pagination
     });
   } catch (error) {
     console.error('Error fetching returns:', error);
@@ -352,11 +317,13 @@ router.get('/:returnId', [
   try {
     const { returnId } = req.params;
     
-    const returnRequest = await Return.findById(returnId)
-      .populate([
-        { 
-          path: 'originalOrder',
-          populate: [
+    const returnRequest = await returnManagementService.getReturnById(returnId);
+    
+    // Additional population if needed
+    await returnRequest.populate([
+      { 
+        path: 'originalOrder',
+        populate: [
             { path: 'customer', select: 'name businessName email phone firstName lastName' },
             { path: 'supplier', select: 'name businessName email phone companyName contactPerson' },
             { path: 'items.product', select: 'name description pricing' }
@@ -425,6 +392,9 @@ router.get('/:returnId', [
 
     res.json(returnRequest);
   } catch (error) {
+    if (error.message === 'Return request not found') {
+      return res.status(404).json({ message: 'Return request not found' });
+    }
     console.error('Error fetching return:', error);
     res.status(500).json({ message: 'Server error fetching return', error: error.message });
   }
@@ -449,26 +419,26 @@ router.put('/:returnId/status', [
     const { returnId } = req.params;
     const { status, notes } = req.body;
     
-    const returnRequest = await Return.findById(returnId);
-    if (!returnRequest) {
-      return res.status(404).json({ message: 'Return request not found' });
-    }
-
     // Handle different status changes
+    let returnRequest;
     switch (status) {
       case 'approved':
-        await returnManagementService.approveReturn(returnId, req.user._id, notes);
+        returnRequest = await returnManagementService.approveReturn(returnId, req.user._id, notes);
         break;
       case 'rejected':
         if (!notes) {
           return res.status(400).json({ message: 'Rejection reason is required' });
         }
-        await returnManagementService.rejectReturn(returnId, req.user._id, notes);
+        returnRequest = await returnManagementService.rejectReturn(returnId, req.user._id, notes);
         break;
       case 'received':
-        await returnManagementService.processReceivedReturn(returnId, req.user._id);
+        returnRequest = await returnManagementService.processReceivedReturn(returnId, req.user._id);
         break;
       default:
+        returnRequest = await ReturnRepository.findById(returnId);
+        if (!returnRequest) {
+          throw new Error('Return request not found');
+        }
         await returnRequest.updateStatus(status, req.user._id, notes);
     }
 
@@ -510,22 +480,12 @@ router.put('/:returnId/inspection', [
     const { returnId } = req.params;
     const { inspectionNotes, conditionVerified, resellable, disposalRequired } = req.body;
     
-    const returnRequest = await Return.findById(returnId);
-    if (!returnRequest) {
-      return res.status(404).json({ message: 'Return request not found' });
-    }
-
-    // Update inspection details
-    returnRequest.inspection = {
-      inspectedBy: req.user._id,
-      inspectionDate: new Date(),
+    const returnRequest = await returnManagementService.updateInspection(returnId, {
       inspectionNotes,
       conditionVerified,
       resellable,
       disposalRequired
-    };
-
-    await returnRequest.save();
+    }, req.user._id);
 
     res.json({
       message: 'Inspection details updated successfully',
@@ -553,12 +513,7 @@ router.post('/:returnId/notes', [
     const { returnId } = req.params;
     const { note, isInternal = false } = req.body;
     
-    const returnRequest = await Return.findById(returnId);
-    if (!returnRequest) {
-      return res.status(404).json({ message: 'Return request not found' });
-    }
-
-    await returnRequest.addNote(note, req.user._id, isInternal);
+    const returnRequest = await returnManagementService.addNote(returnId, note, req.user._id, isInternal);
 
     res.json({
       message: 'Note added successfully',
@@ -587,12 +542,7 @@ router.post('/:returnId/communication', [
     const { returnId } = req.params;
     const { type, message, recipient } = req.body;
     
-    const returnRequest = await Return.findById(returnId);
-    if (!returnRequest) {
-      return res.status(404).json({ message: 'Return request not found' });
-    }
-
-    await returnRequest.addCommunication(type, message, req.user._id, recipient);
+    const returnRequest = await returnManagementService.addCommunication(returnId, type, message, req.user._id, recipient);
 
     res.json({
       message: 'Communication logged successfully',
@@ -760,19 +710,7 @@ router.put('/:returnId/cancel', [
   try {
     const { returnId } = req.params;
     
-    const returnRequest = await Return.findById(returnId);
-    if (!returnRequest) {
-      return res.status(404).json({ message: 'Return request not found' });
-    }
-
-    // Only allow cancellation of pending returns
-    if (returnRequest.status !== 'pending') {
-      return res.status(400).json({ 
-        message: 'Only pending return requests can be cancelled' 
-      });
-    }
-
-    await returnRequest.updateStatus('cancelled', req.user._id, 'Return request cancelled');
+    await returnManagementService.cancelReturn(returnId, req.user._id);
 
     res.json({ message: 'Return request cancelled successfully' });
   } catch (error) {
@@ -794,23 +732,9 @@ router.delete('/:returnId', [
   try {
     const { returnId } = req.params;
     
-    const returnRequest = await Return.findById(returnId);
-    
-    if (!returnRequest) {
-      return res.status(404).json({ message: 'Return request not found' });
-    }
+    const result = await returnManagementService.deleteReturn(returnId);
 
-    // Only allow deletion of pending or cancelled returns
-    if (!['pending', 'cancelled'].includes(returnRequest.status)) {
-      return res.status(400).json({ 
-        message: 'Only pending or cancelled return requests can be deleted' 
-      });
-    }
-
-    // Delete the return request
-    await Return.findByIdAndDelete(returnId);
-
-    res.json({ message: 'Return request deleted successfully' });
+    res.json({ message: result.message });
   } catch (error) {
     console.error('Error deleting return:', error);
     res.status(500).json({ message: 'Server error deleting return', error: error.message });

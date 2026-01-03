@@ -331,6 +331,17 @@ const returnSchema = new mongoose.Schema({
       max: 5,
       default: 0
     }
+  },
+  
+  // Soft Delete Fields
+  isDeleted: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  deletedAt: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true,
