@@ -5,6 +5,7 @@
  */
 
 const mongoose = require('mongoose');
+const logger = require('../utils/logger');
 
 /**
  * Check if error is a MongoDB duplicate key error (E11000)
@@ -117,11 +118,14 @@ const formatCastError = (error) => {
  */
 const errorHandler = (err, req, res, next) => {
   // Log error for debugging
-  console.error('Error occurred:', {
+  logger.error('Error occurred:', {
+    requestId: req.id,
     name: err.name,
     message: err.message,
     code: err.code,
     codeName: err.codeName,
+    path: req.path,
+    method: req.method,
     stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
   });
 

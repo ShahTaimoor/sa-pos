@@ -19,27 +19,50 @@ const queryClient = new QueryClient({
   },
 });
 
-// Register service worker for PWA (only in production)
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+// Register service worker for PWA
+if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js')
-      .then(() => {
-        // Service Worker registered successfully
-      })
-      .catch((error) => {
-        // Service Worker registration failed
-      });
-  });
-} else if ('serviceWorker' in navigator && import.meta.env.DEV) {
-  // Unregister service worker in development to prevent caching issues
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.getRegistrations().then((registrations) => {
-      registrations.forEach((registration) => {
-        registration.unregister().then((success) => {
-          // Service Worker unregistered for development
+    if (import.meta.env.PROD) {
+      // Production: Register service worker
+      navigator.serviceWorker.register('/service-worker.js')
+        .then((registration) => {
+          console.log('[PWA] Service Worker registered:', registration.scope);
+          
+          // Check for updates periodically
+          setInterval(() => {
+            registration.update();
+          }, 60 * 60 * 1000); // Check every hour
+          
+          // Listen for updates
+          registration.addEventListener('updatefound', () => {
+            const newWorker = registration.installing;
+            if (newWorker) {
+              newWorker.addEventListener('statechange', () => {
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                  // New version available
+                  console.log('[PWA] New version available');
+                  // Dispatch custom event for update notification
+                  window.dispatchEvent(new CustomEvent('sw-update-available'));
+                }
+              });
+            }
+          });
+        })
+        .catch((error) => {
+          console.error('[PWA] Service Worker registration failed:', error);
+        });
+    } else {
+      // Development: Unregister service worker to prevent caching issues
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        registrations.forEach((registration) => {
+          registration.unregister().then((success) => {
+            if (success) {
+              console.log('[PWA] Service Worker unregistered for development');
+            }
+          });
         });
       });
-    });
+    }
   });
 }
 

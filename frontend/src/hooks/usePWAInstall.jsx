@@ -71,7 +71,8 @@ export const usePWAInstall = () => {
   return {
     isInstallable,
     isInstalled,
-    handleInstallClick
+    handleInstallClick,
+    deferredPrompt
   };
 };
 

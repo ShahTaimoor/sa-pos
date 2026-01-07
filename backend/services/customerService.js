@@ -294,16 +294,19 @@ class CustomerService {
         let newCustomer = new Customer(dataWithUser);
         applyOpeningBalance(newCustomer, parsedOpeningBalance);
         
-        // Use atomic save operation
-        await newCustomer.save(session ? { session } : undefined);
-
-        // Sync ledger account (also wrapped in retry if needed)
+        // Sync ledger account first (this will save the customer with the ledger account)
+        // This ensures the customer is only saved once, after the ledger account is set
         await ledgerAccountService.syncCustomerLedgerAccount(newCustomer, session ? {
           session,
           userId: userId
         } : {
           userId: userId
         });
+
+        // Verify customer was saved (syncCustomerLedgerAccount should have saved it)
+        if (newCustomer.isNew) {
+          await newCustomer.save(session ? { session } : undefined);
+        }
 
         return newCustomer._id;
       }, 'create customer');

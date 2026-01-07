@@ -178,7 +178,11 @@ export const CustomerFormModal = ({ customer, onSave, onCancel, isSubmitting }) 
     isActive: 'true',
   });
 
-  const { data: citiesData = [], isLoading: citiesLoading } = useGetActiveCitiesQuery();
+  const { data: citiesResponse, isLoading: citiesLoading } = useGetActiveCitiesQuery();
+  // Extract cities array from response (handle both direct array and object with data property)
+  const citiesData = Array.isArray(citiesResponse) 
+    ? citiesResponse 
+    : (citiesResponse?.data || []);
 
   const handleCitySubmit = (e) => {
     e.preventDefault();
@@ -491,7 +495,7 @@ export const CustomerFormModal = ({ customer, onSave, onCancel, isSubmitting }) 
                           disabled={citiesLoading}
                         >
                           <option value="">Select a city</option>
-                          {citiesData.map((city) => (
+                          {Array.isArray(citiesData) && citiesData.map((city) => (
                             <option key={city._id || city.name} value={city.name}>
                               {city.name}{city.state ? `, ${city.state}` : ''}
                             </option>
@@ -500,7 +504,7 @@ export const CustomerFormModal = ({ customer, onSave, onCancel, isSubmitting }) 
                         {citiesLoading && (
                           <p className="text-xs text-gray-500 mt-1">Loading cities...</p>
                         )}
-                        {!citiesLoading && citiesData.length === 0 && (
+                        {!citiesLoading && Array.isArray(citiesData) && citiesData.length === 0 && (
                           <p className="text-xs text-amber-600 mt-1">
                             No cities available. Please add cities first.
                           </p>

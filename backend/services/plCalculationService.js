@@ -505,7 +505,9 @@ class PLCalculationService {
       accountCategory: 'operating_expenses',
       isActive: true,
       allowDirectPosting: true
-    }).select('accountCode accountName accountCategory');
+    }, {
+      select: 'accountCode accountName accountCategory'
+    });
     
     // Get all expense transactions for the period
     const expenseAccountCodes = expenseAccounts.map(acc => acc.accountCode);
@@ -1225,7 +1227,9 @@ class PLCalculationService {
     const statements = await FinancialStatementRepository.findAll({
       type: 'profit_loss',
       'period.startDate': { $in: periods.map(p => p.startDate) },
-    }).sort({ 'period.startDate': 1 });
+    }, {
+      sort: { 'period.startDate': 1 }
+    });
 
     return statements.map(statement => ({
       period: statement.period,

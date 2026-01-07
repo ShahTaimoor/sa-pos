@@ -1,40 +1,71 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const compression = require('compression');
 const cookieParser = require('cookie-parser');
 const mongoose = require('mongoose');
 const connectDB = require('./config/db');
+const logger = require('./utils/logger');
+const { v4: uuidv4 } = require('uuid');
 
 // Load environment variables
 require('dotenv').config();
 
-// Set default environment variables if not provided
-process.env.JWT_SECRET = process.env.JWT_SECRET || '';
-process.env.PORT = process.env.PORT || 5000;
-process.env.NODE_ENV = process.env.NODE_ENV || 'development';
-
-const app = express();
-
-// Security hard-stop: require a non-empty JWT secret in non-test environments
-if (!process.env.JWT_SECRET || process.env.JWT_SECRET.trim() === '') {
-  console.error('FATAL: JWT_SECRET is not set. Please configure it in .env');
+// Validate environment variables
+const { validateEnv } = require('./config/env');
+try {
+  validateEnv();
+} catch (error) {
   // Exit only when running as a standalone server (avoid crashing in serverless imports)
   if (!process.env.VERCEL) {
     process.exit(1);
   }
 }
 
+const app = express();
+
 // Security middleware
 app.use(helmet());
 
-// CORS configuration - allow requests from https://sa.wiserconsulting.info
+// Compression middleware (compress responses)
+app.use(compression());
+
+// Request ID middleware (add unique ID to each request for tracking)
+app.use((req, res, next) => {
+  req.id = req.headers['x-request-id'] || uuidv4();
+  res.setHeader('X-Request-ID', req.id);
+  next();
+});
+
+// Request logging middleware (should be early in the middleware chain)
+const requestLogger = require('./middleware/requestLogger');
+app.use(requestLogger);
+
+// Global rate limiting - protect all API endpoints
+const { createRateLimiter } = require('./middleware/rateLimit');
+// General API rate limiter: 100 requests per minute per IP
+app.use('/api', createRateLimiter({ 
+  windowMs: 60000, // 1 minute
+  max: 100 // 100 requests per minute
+}));
+// Stricter rate limiter for auth endpoints: 5 requests per minute per IP
+app.use('/api/auth', createRateLimiter({ 
+  windowMs: 60000, // 1 minute
+  max: 5 // 5 requests per minute (prevents brute force)
+}));
+
+// CORS configuration - use environment variable for allowed origins
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : [
+      'https://sa.wiserconsulting.info',
+      'http://localhost:3000', // Allow local development
+      'http://localhost:5173', // Allow Vite dev server
+      process.env.FRONTEND_URL // Allow from environment variable if set
+    ].filter(Boolean); // Remove undefined values
+
 app.use(cors({
-  origin: [
-    'https://sa.wiserconsulting.info',
-    'http://localhost:3000', // Allow local development
-    'http://localhost:5173', // Allow Vite dev server
-    process.env.FRONTEND_URL // Allow from environment variable if set
-  ].filter(Boolean), // Remove undefined values
+  origin: allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Idempotency-Key', 'Idempotency-Key', 'idempotency-key'],
   credentials: true
@@ -85,7 +116,7 @@ app.get('/health', (req, res) => {
 
 // Connect to database
 connectDB().catch(err => {
-  console.error('❌ Failed to initialize database:', err);
+  logger.error('Failed to initialize database:', err);
 });
 
 // Serve static files for exports (if needed)
@@ -150,12 +181,25 @@ app.use('/api/customer-balances', require('./routes/customerBalances'));
 app.use('/api/supplier-balances', require('./routes/supplierBalances'));
 app.use('/api/accounting', require('./routes/accounting'));
 
-// Health check endpoint
+// Health check endpoint (API version)
 app.get('/api/health', (req, res) => {
+  const dbStatus = mongoose.connection.readyState;
+  const dbStatusText = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting'
+  }[dbStatus] || 'unknown';
+
   res.json({ 
-    status: 'OK', 
+    status: dbStatus === 1 ? 'OK' : 'DEGRADED',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    database: {
+      status: dbStatusText,
+      connected: dbStatus === 1
+    },
+    uptime: process.uptime()
   });
 });
 
@@ -175,21 +219,21 @@ module.exports = app;
 if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   const PORT = process.env.PORT || 5000;
   const server = app.listen(PORT, () => {
-    console.log(`🚀 POS Server running on port ${PORT}`);
-    console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+    logger.info(`POS Server running on port ${PORT}`);
+    logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
   });
 
   // Handle port already in use error
   server.on('error', (error) => {
     if (error.code === 'EADDRINUSE') {
-      console.error(`\n❌ ERROR: Port ${PORT} is already in use!`);
-      console.error(`\n💡 Solutions:`);
-      console.error(`   1. Kill the process using port ${PORT}:`);
-      console.error(`      Windows: netstat -ano | findstr :${PORT}`);
-      console.error(`      Then: taskkill /PID <PID> /F`);
-      console.error(`   2. Or use a different port:`);
-      console.error(`      PORT=5001 npm start`);
-      console.error(`\n🔍 Finding process on port ${PORT}...`);
+      logger.error(`ERROR: Port ${PORT} is already in use!`);
+      logger.error('Solutions:');
+      logger.error(`  1. Kill the process using port ${PORT}:`);
+      logger.error(`     Windows: netstat -ano | findstr :${PORT}`);
+      logger.error(`     Then: taskkill /PID <PID> /F`);
+      logger.error(`  2. Or use a different port:`);
+      logger.error(`     PORT=5001 npm start`);
+      logger.info(`Finding process on port ${PORT}...`);
       
       // Try to find and suggest killing the process
       const { exec } = require('child_process');
@@ -200,8 +244,8 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
           if (listeningLine) {
             const pid = listeningLine.trim().split(/\s+/).pop();
             if (pid && pid !== '0') {
-              console.error(`\n   Found process PID: ${pid}`);
-              console.error(`   Kill it with: taskkill /PID ${pid} /F`);
+              logger.error(`Found process PID: ${pid}`);
+              logger.error(`Kill it with: taskkill /PID ${pid} /F`);
             }
           }
         }
@@ -209,7 +253,7 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
       
       process.exit(1);
     } else {
-      console.error('❌ Server error:', error);
+      logger.error('Server error:', error);
       process.exit(1);
     }
   });

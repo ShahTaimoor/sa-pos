@@ -82,39 +82,17 @@ const cashPaymentSchema = new mongoose.Schema({
 });
 
 // Generate voucher code before saving
+const { generateDateBasedVoucherCode } = require('../utils/voucherCodeGenerator');
 cashPaymentSchema.pre('save', async function(next) {
   if (this.isNew && !this.voucherCode) {
-    const today = new Date();
-    const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
-    
-    // Find the last payment for today
-    const lastPayment = await this.constructor.findOne({
-      voucherCode: new RegExp(`^CP-${dateStr}`)
-    }).sort({ voucherCode: -1 });
-    
-    let sequence = 1;
-    if (lastPayment) {
-      // Extract sequence number from voucher code (format: CP-YYYYMMDDXXX)
-      // Split by '-' to get ["CP", "YYYYMMDDXXX"], then extract sequence after 8-char date
-      const parts = lastPayment.voucherCode.split('-');
-      if (parts.length >= 2) {
-        const dateAndSequence = parts[1]; // "YYYYMMDDXXX"
-        if (dateAndSequence.length > 8) {
-          // Extract all digits after the 8-character date (YYYYMMDD)
-          const lastSequenceStr = dateAndSequence.substring(8);
-          const lastSequence = parseInt(lastSequenceStr, 10);
-          // Validate that sequence is a valid positive number
-          // This prevents issues if somehow 0 or negative values are extracted
-          if (!isNaN(lastSequence) && lastSequence > 0) {
-            sequence = lastSequence + 1;
-          }
-        }
-      }
+    try {
+      this.voucherCode = await generateDateBasedVoucherCode({
+        prefix: 'CP',
+        Model: this.constructor
+      });
+    } catch (error) {
+      return next(error);
     }
-    
-    // Format sequence with minimum 3 digits, but allow more if needed
-    const sequenceStr = sequence.toString().padStart(3, '0');
-    this.voucherCode = `CP-${dateStr}${sequenceStr}`;
   }
   next();
 });

@@ -99,38 +99,17 @@ const bankPaymentSchema = new mongoose.Schema({
 });
 
 // Generate voucher code and transaction reference before saving
+const { generateDateBasedVoucherCode } = require('../utils/voucherCodeGenerator');
 bankPaymentSchema.pre('save', async function(next) {
   if (this.isNew && !this.voucherCode) {
-    const today = new Date();
-    const dateStr = today.toISOString().slice(0, 10).replace(/-/g, '');
-    
-    // Find the last bank payment for today
-    const lastPayment = await this.constructor.findOne({
-      voucherCode: new RegExp(`^BP-${dateStr}`)
-    }).sort({ voucherCode: -1 });
-    
-    let sequence = 1;
-    if (lastPayment) {
-      // Extract sequence number from voucher code (format: BP-YYYYMMDDXXX...)
-      // Split by '-' to get ["BP", "YYYYMMDDXXX..."], then extract sequence after 8-char date
-      const parts = lastPayment.voucherCode.split('-');
-      if (parts.length >= 2) {
-        const dateAndSequence = parts[1]; // "YYYYMMDDXXX..." (sequence can be 3+ digits)
-        if (dateAndSequence.length > 8) {
-          // Extract all digits after the 8-character date (YYYYMMDD)
-          const lastSequenceStr = dateAndSequence.substring(8);
-          const lastSequence = parseInt(lastSequenceStr, 10);
-          if (!isNaN(lastSequence) && lastSequence > 0) {
-            sequence = lastSequence + 1;
-          }
-        }
-      }
+    try {
+      this.voucherCode = await generateDateBasedVoucherCode({
+        prefix: 'BP',
+        Model: this.constructor
+      });
+    } catch (error) {
+      return next(error);
     }
-    
-    // Format sequence with minimum 3 digits (padStart only adds padding if needed)
-    // Sequences > 999 will naturally be 4+ digits without padding
-    const sequenceStr = sequence.toString().padStart(3, '0');
-    this.voucherCode = `BP-${dateStr}${sequenceStr}`;
   }
   
   // Auto-generate transaction reference if not provided

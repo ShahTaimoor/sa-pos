@@ -33,65 +33,84 @@ class AttendanceRepository extends BaseRepository {
    * @returns {Promise<{attendances: Array, total: number, pagination: object}>}
    */
   async findWithPagination(filter = {}, options = {}) {
-    const {
-      page = 1,
-      limit = 50,
-      sort = { date: -1, clockIn: -1 },
-      populate = [
-        { path: 'employee', select: 'firstName lastName employeeId email' }
-      ],
-      getAll = false
-    } = options;
+    try {
+      const {
+        page = 1,
+        limit = 50,
+        sort = { createdAt: -1 },
+        populate = [
+          { path: 'employee', select: 'firstName lastName employeeId email' }
+        ],
+        getAll = false
+      } = options;
 
-    const skip = getAll ? 0 : (page - 1) * limit;
-    const finalLimit = getAll ? 999999 : limit;
+      const skip = getAll ? 0 : (page - 1) * limit;
+      const finalLimit = getAll ? 999999 : limit;
 
-    const finalQuery = this.model.schema.paths.isDeleted 
-      ? { ...filter, isDeleted: { $ne: true } } 
-      : filter;
+      // Attendance model doesn't have isDeleted field, so just use filter as-is
+      const finalQuery = filter;
 
-    let queryBuilder = this.model.find(finalQuery);
-    
-    if (populate && populate.length > 0) {
-      populate.forEach(pop => {
-        queryBuilder = queryBuilder.populate(pop);
-      });
-    }
-    
-    if (sort) {
-      queryBuilder = queryBuilder.sort(sort);
-    }
-    
-    if (skip !== undefined) {
-      queryBuilder = queryBuilder.skip(skip);
-    }
-    
-    if (finalLimit > 0) {
-      queryBuilder = queryBuilder.limit(finalLimit);
-    }
-
-    const [attendances, total] = await Promise.all([
-      queryBuilder,
-      this.model.countDocuments(finalQuery)
-    ]);
-
-    return {
-      attendances,
-      total,
-      pagination: getAll ? {
-        current: 1,
-        pages: 1,
-        total,
-        hasNext: false,
-        hasPrev: false
-      } : {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
-        hasNext: page < Math.ceil(total / limit),
-        hasPrev: page > 1
+      let queryBuilder = this.Model.find(finalQuery);
+      
+      if (populate && populate.length > 0) {
+        populate.forEach(pop => {
+          // Handle populate with proper options
+          if (typeof pop === 'string') {
+            queryBuilder = queryBuilder.populate(pop);
+          } else if (pop.path) {
+            const populateOptions = {
+              path: pop.path
+            };
+            if (pop.select) {
+              populateOptions.select = pop.select;
+            }
+            // Allow null/undefined for missing references
+            queryBuilder = queryBuilder.populate(populateOptions);
+          } else {
+            queryBuilder = queryBuilder.populate(pop);
+          }
+        });
       }
-    };
+      
+      if (sort) {
+        queryBuilder = queryBuilder.sort(sort);
+      }
+      
+      if (skip !== undefined) {
+        queryBuilder = queryBuilder.skip(skip);
+      }
+      
+      if (finalLimit > 0) {
+        queryBuilder = queryBuilder.limit(finalLimit);
+      }
+
+      const [attendances, total] = await Promise.all([
+        queryBuilder,
+        this.Model.countDocuments(finalQuery)
+      ]);
+
+      return {
+        attendances,
+        total,
+        pagination: getAll ? {
+          current: 1,
+          pages: 1,
+          total,
+          hasNext: false,
+          hasPrev: false
+        } : {
+          current: page,
+          pages: Math.ceil(total / limit),
+          total,
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1
+        }
+      };
+    } catch (error) {
+      // Re-throw with more context
+      error.message = `AttendanceRepository.findWithPagination error: ${error.message}`;
+      throw error;
+    }
   }
 }
 

@@ -21,8 +21,21 @@ const createRateLimiter = ({ windowMs = 60_000, max = 60, keyGenerator } = {}) =
     }
     record.count += 1;
     hits.set(key, record);
+    
+    // Add rate limit headers
+    const remaining = Math.max(0, max - record.count);
+    const resetTime = record.start + windowMs;
+    res.setHeader('X-RateLimit-Limit', max);
+    res.setHeader('X-RateLimit-Remaining', remaining);
+    res.setHeader('X-RateLimit-Reset', new Date(resetTime).toISOString());
+    
     if (record.count > max) {
-      return res.status(429).json({ message: 'Too many requests. Please try again later.' });
+      const retryAfter = Math.ceil((resetTime - now) / 1000);
+      res.setHeader('Retry-After', retryAfter);
+      return res.status(429).json({ 
+        message: 'Too many requests. Please try again later.',
+        retryAfter: retryAfter
+      });
     }
     next();
   };

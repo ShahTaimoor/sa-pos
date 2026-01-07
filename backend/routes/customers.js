@@ -440,6 +440,30 @@ router.post('/', [
       });
     }
 
+    // Handle ledger account errors
+    if (error.message && error.message.includes('Accounts Receivable')) {
+      return res.status(500).json({
+        success: false,
+        error: {
+          message: error.message || 'Failed to configure ledger account. Please contact support.',
+          code: 'LEDGER_ACCOUNT_ERROR',
+          ...(process.env.NODE_ENV === 'development' && { details: error.message })
+        }
+      });
+    }
+
+    // Handle null reference errors (like accessing _id on null)
+    if (error.message && (error.message.includes("Cannot read properties of null") || error.message.includes("_id"))) {
+      return res.status(500).json({
+        success: false,
+        error: {
+          message: 'Failed to configure customer ledger account. Please ensure the chart of accounts is properly set up.',
+          code: 'LEDGER_ACCOUNT_CONFIG_ERROR',
+          ...(process.env.NODE_ENV === 'development' && { details: error.message, stack: error.stack })
+        }
+      });
+    }
+
     // Handle other MongoDB errors
     if (error.name === 'MongoError' || error.name === 'MongoServerError') {
       return res.status(500).json({
@@ -458,7 +482,7 @@ router.post('/', [
       error: {
         message: 'An unexpected error occurred while creating the customer',
         code: 'INTERNAL_SERVER_ERROR',
-        ...(process.env.NODE_ENV === 'development' && { details: error.message })
+        ...(process.env.NODE_ENV === 'development' && { details: error.message, stack: error.stack })
       }
     });
   }

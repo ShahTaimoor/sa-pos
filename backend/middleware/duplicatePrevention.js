@@ -5,6 +5,7 @@
  */
 
 const crypto = require('crypto');
+const logger = require('../utils/logger');
 
 // In-memory store for idempotency keys (use Redis in production)
 const idempotencyStore = new Map();
@@ -92,7 +93,11 @@ const preventDuplicates = (options = {}) => {
       
       if (age < windowMs) {
         // Request is a duplicate within the time window
-        console.log(`Duplicate request detected: ${idempotencyKey} (age: ${age}ms)`);
+        logger.warn(`Duplicate request detected: ${idempotencyKey} (age: ${age}ms)`, {
+          path: req.path,
+          method: req.method,
+          idempotencyKey
+        });
         
         // If we have a cached response, return it
         if (existing.response) {

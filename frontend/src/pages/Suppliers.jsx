@@ -86,7 +86,11 @@ const SupplierForm = ({ supplier, onSave, onCancel, isOpen }) => {
     isActive: 'true',
   });
 
-  const { data: citiesData = [], isLoading: citiesLoading } = useGetActiveCitiesQuery();
+  const { data: citiesResponse, isLoading: citiesLoading } = useGetActiveCitiesQuery();
+  // Extract cities array from response (handle both direct array and object with data property)
+  const citiesData = Array.isArray(citiesResponse) 
+    ? citiesResponse 
+    : (citiesResponse?.data || []);
 
   const ledgerOptions = useMemo(() => {
     if (!Array.isArray(ledgerAccounts)) return [];

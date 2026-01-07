@@ -1,5 +1,6 @@
 const { body, param, query, validationResult } = require('express-validator');
 const { sanitizeInput, sanitizeObject } = require('../utils/sanitization');
+const logger = require('../utils/logger');
 
 // Sanitization middleware
 const sanitizeRequest = (req, res, next) => {
@@ -25,9 +26,11 @@ const sanitizeRequest = (req, res, next) => {
 const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    console.error('Validation failed for:', req.path);
-    console.error('Request body:', JSON.stringify(req.body, null, 2));
-    console.error('Validation errors:', errors.array());
+    logger.warn('Validation failed', {
+      path: req.path,
+      method: req.method,
+      errors: errors.array()
+    });
     return res.status(400).json({
       message: 'Validation failed',
       errors: errors.array().map(error => ({

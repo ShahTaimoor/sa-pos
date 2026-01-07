@@ -1,10 +1,11 @@
 const express = require('express');
-const { body, query } = require('express-validator');
+const { body, query, validationResult } = require('express-validator');
 const { auth, requireAnyPermission } = require('../middleware/auth');
 const Attendance = require('../models/Attendance'); // Still needed for new Attendance() and static methods
 const Employee = require('../models/Employee'); // Still needed for model reference
 const attendanceRepository = require('../repositories/AttendanceRepository');
 const employeeRepository = require('../repositories/EmployeeRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -73,7 +74,7 @@ router.post('/clock-in', [
     await session.populate('employee', 'firstName lastName employeeId');
     res.json({ success: true, data: session });
   } catch (err) {
-    console.error('Clock in error:', err);
+    logger.error('Clock in error:', { error: err.message, stack: err.stack });
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -109,7 +110,7 @@ router.post('/clock-out', [
     await session.populate('employee', 'firstName lastName employeeId');
     res.json({ success: true, data: session });
   } catch (err) {
-    console.error('Clock out error:', err);
+    logger.error('Clock out error:', { error: err.message, stack: err.stack });
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -138,7 +139,7 @@ router.post('/breaks/start', [
     await session.populate('employee', 'firstName lastName employeeId');
     res.json({ success: true, data: session });
   } catch (err) {
-    console.error('Start break error:', err);
+    logger.error('Start break error:', { error: err.message, stack: err.stack });
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -166,7 +167,7 @@ router.post('/breaks/end', [
     await session.populate('employee', 'firstName lastName employeeId');
     res.json({ success: true, data: session });
   } catch (err) {
-    console.error('End break error:', err);
+    logger.error('End break error:', { error: err.message, stack: err.stack });
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -190,7 +191,7 @@ router.get('/status', [
     });
     res.json({ success: true, data: session });
   } catch (err) {
-    console.error('Get status error:', err);
+    logger.error('Get status error:', { error: err.message, stack: err.stack });
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -236,7 +237,7 @@ router.get('/me', [
     const rows = result.attendances;
     res.json({ success: true, data: rows });
   } catch (err) {
-    console.error('Get my attendance error:', err);
+    logger.error('Get my attendance error:', { error: err.message, stack: err.stack });
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -244,52 +245,114 @@ router.get('/me', [
 // Team attendance (for managers)
 router.get('/team', [
   auth,
-  requireAnyPermission(['view_team_attendance']),
+  (req, res, next) => {
+    // Allow admins or users with view_team_attendance permission
+    if (req.user.role === 'admin' || req.user.hasPermission('view_team_attendance')) {
+      return next();
+    }
+    return res.status(403).json({
+      success: false,
+      message: 'Access denied. You need "view_team_attendance" permission to view team attendance.'
+    });
+  },
   query('limit').optional().isInt({ min: 1, max: 100 }),
   query('employeeId').optional().isMongoId(),
   query('startDate').optional().isISO8601(),
   query('endDate').optional().isISO8601(),
   query('status').optional().isIn(['open', 'closed']),
 ], async (req, res) => {
+  // Check for validation errors
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    logger.warn('Team attendance validation failed', {
+      errors: errors.array(),
+      query: req.query
+    });
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors.array().map(error => ({
+        field: error.param,
+        message: error.msg,
+        value: error.value
+      }))
+    });
+  }
+
   try {
     const limit = parseInt(req.query.limit || '50');
-    const query = {};
+    const filterQuery = {};
     
     if (req.query.employeeId) {
-      query.employee = req.query.employeeId;
+      filterQuery.employee = req.query.employeeId;
     }
     
     if (req.query.status) {
-      query.status = req.query.status;
+      filterQuery.status = req.query.status;
     }
     
     if (req.query.startDate || req.query.endDate) {
-      query.createdAt = {};
+      filterQuery.createdAt = {};
       if (req.query.startDate) {
-        query.createdAt.$gte = new Date(req.query.startDate);
+        const startDate = new Date(req.query.startDate);
+        if (isNaN(startDate.getTime())) {
+          return res.status(400).json({ 
+            success: false, 
+            message: 'Invalid startDate format. Use ISO 8601 format (YYYY-MM-DD)' 
+          });
+        }
+        filterQuery.createdAt.$gte = startDate;
       }
       if (req.query.endDate) {
         const endDate = new Date(req.query.endDate);
+        if (isNaN(endDate.getTime())) {
+          return res.status(400).json({ 
+            success: false, 
+            message: 'Invalid endDate format. Use ISO 8601 format (YYYY-MM-DD)' 
+          });
+        }
         endDate.setHours(23, 59, 59, 999);
-        query.createdAt.$lte = endDate;
+        filterQuery.createdAt.$lte = endDate;
       }
     }
     
-    const result = await attendanceRepository.findWithPagination(query, {
+    logger.debug('Fetching team attendance', {
+      filterQuery,
+      limit,
+      userId: req.user._id
+    });
+
+    const result = await attendanceRepository.findWithPagination(filterQuery, {
       page: 1,
       limit,
       sort: { createdAt: -1 },
       populate: [
         { path: 'employee', select: 'firstName lastName employeeId position department' },
-        { path: 'user', select: 'firstName lastName email role' },
+        { path: 'user', select: 'firstName lastName email' },
         { path: 'clockedInBy', select: 'firstName lastName email' }
       ]
     });
-    const rows = result.attendances;
+    
+    const rows = result?.attendances || [];
+    
+    logger.info('Team attendance fetched successfully', {
+      count: rows.length,
+      total: result?.total || 0
+    });
+    
     res.json({ success: true, data: rows });
   } catch (err) {
-    console.error('Get team attendance error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    logger.error('Get team attendance error:', {
+      error: err.message,
+      stack: err.stack,
+      query: req.query,
+      name: err.name
+    });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to fetch team attendance',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 });
 

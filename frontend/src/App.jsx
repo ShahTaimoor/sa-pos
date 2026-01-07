@@ -8,6 +8,8 @@ import { Layout } from './components/Layout';
 import { MultiTabLayout } from './components/MultiTabLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatus from './components/NetworkStatus';
+import PWAUpdateNotification from './components/PWAUpdateNotification';
+import OfflineIndicator from './components/OfflineIndicator';
 import { LoadingPage } from './components/LoadingSpinner';
 import KeyboardShortcutsHints from './components/KeyboardShortcutsHints';
 
@@ -68,6 +70,8 @@ function App() {
           <KeyboardShortcutsProvider>
             <TabProvider>
               <NetworkStatus />
+              <PWAUpdateNotification />
+              <OfflineIndicator />
               <KeyboardShortcutsHints />
             <Routes>
               <Route path="/login" element={<Login />} />
