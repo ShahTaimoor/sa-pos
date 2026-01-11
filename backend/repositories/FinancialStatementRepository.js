@@ -106,13 +106,30 @@ class FinancialStatementRepository extends BaseRepository {
    * @param {Date} startDate - Start date
    * @param {Date} endDate - End date
    * @param {string} type - Statement type
+   * @param {string} tenantId - Tenant ID
    * @returns {Promise<FinancialStatement|null>}
    */
-  async findExistingStatement(startDate, endDate, type = 'profit_loss') {
+  async findExistingStatement(startDate, endDate, type = 'profit_loss', tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to find existing statement');
+    }
+    
+    // Use date range query to handle timezone/normalization differences
+    const startOfDay = new Date(startDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfStartDay = new Date(startDate);
+    endOfStartDay.setHours(23, 59, 59, 999);
+    
+    const startOfEndDay = new Date(endDate);
+    startOfEndDay.setHours(0, 0, 0, 0);
+    const endOfEndDay = new Date(endDate);
+    endOfEndDay.setHours(23, 59, 59, 999);
+    
     return await this.findOne({
+      tenantId: tenantId,
       type,
-      'period.startDate': startDate,
-      'period.endDate': endDate
+      'period.startDate': { $gte: startOfDay, $lte: endOfStartDay },
+      'period.endDate': { $gte: startOfEndDay, $lte: endOfEndDay }
     });
   }
 

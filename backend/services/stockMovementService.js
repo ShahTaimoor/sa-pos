@@ -1,7 +1,8 @@
 const StockMovementRepository = require('../repositories/StockMovementRepository');
 const ProductRepository = require('../repositories/ProductRepository');
 const InventoryRepository = require('../repositories/InventoryRepository');
-const StockMovement = require('../models/StockMovement'); // Keep for instance creation
+const StockMovement = require('../models/StockMovement');
+const logger = require('../utils/logger'); // Keep for instance creation
 
 class StockMovementService {
   /**
@@ -128,13 +129,13 @@ class StockMovementService {
             notes,
           });
         } catch (invErr) {
-          console.error('Error updating Inventory record for stock movement:', invErr);
+          logger.error('Error updating Inventory record for stock movement:', invErr);
         }
       }
 
       return movement;
     } catch (error) {
-      console.error('Error creating stock movement:', error);
+      logger.error('Error creating stock movement:', error);
       throw error;
     }
   }
@@ -162,7 +163,7 @@ class StockMovementService {
         }, user);
       }
     } catch (error) {
-      console.error('Error tracking purchase order:', error);
+      logger.error('Error tracking purchase order:', error);
       throw error;
     }
   }
@@ -195,7 +196,7 @@ class StockMovementService {
         }, user);
       }
     } catch (error) {
-      console.error('Error tracking sales order:', error);
+      logger.error('Error tracking sales order:', error);
       throw error;
     }
   }
@@ -226,7 +227,7 @@ class StockMovementService {
         }, user);
       }
     } catch (error) {
-      console.error('Error tracking return:', error);
+      logger.error('Error tracking return:', error);
       throw error;
     }
   }
@@ -251,7 +252,7 @@ class StockMovementService {
         notes: adjustmentData.notes
       }, user);
     } catch (error) {
-      console.error('Error tracking adjustment:', error);
+      logger.error('Error tracking adjustment:', error);
       throw error;
     }
   }
@@ -295,7 +296,7 @@ class StockMovementService {
         notes: `Transfer: ${transferData.transferNumber}`
       }, user);
     } catch (error) {
-      console.error('Error tracking transfer:', error);
+      logger.error('Error tracking transfer:', error);
       throw error;
     }
   }
@@ -320,7 +321,7 @@ class StockMovementService {
         notes: writeOffData.notes
       }, user);
     } catch (error) {
-      console.error('Error tracking write-off:', error);
+      logger.error('Error tracking write-off:', error);
       throw error;
     }
   }
@@ -341,7 +342,7 @@ class StockMovementService {
         totalValueOut: 0
       };
     } catch (error) {
-      console.error('Error getting product summary:', error);
+      logger.error('Error getting product summary:', error);
       throw error;
     }
   }
@@ -356,7 +357,7 @@ class StockMovementService {
     try {
       return await StockMovement.getProductMovements(productId, options);
     } catch (error) {
-      console.error('Error getting product movements:', error);
+      logger.error('Error getting product movements:', error);
       throw error;
     }
   }
@@ -387,7 +388,7 @@ class StockMovementService {
 
       return reversedMovement;
     } catch (error) {
-      console.error('Error reversing movement:', error);
+      logger.error('Error reversing movement:', error);
       throw error;
     }
   }

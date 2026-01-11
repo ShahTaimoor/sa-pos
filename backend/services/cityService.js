@@ -6,10 +6,14 @@ class CityService {
   /**
    * Build filter query from request parameters
    * @param {object} queryParams - Request query parameters
+   * @param {string} tenantId - Tenant ID to scope the filter (optional but recommended)
    * @returns {object} - MongoDB filter object
    */
-  buildFilter(queryParams) {
+  buildFilter(queryParams, tenantId = null) {
     const filter = {};
+    if (tenantId) {
+      filter.tenantId = tenantId; // Always include tenantId for isolation
+    }
 
     // Search filter
     if (queryParams.search) {
@@ -36,13 +40,14 @@ class CityService {
   /**
    * Get cities with filtering and pagination
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID to scope the query (optional but recommended)
    * @returns {Promise<object>}
    */
-  async getCities(queryParams) {
+  async getCities(queryParams, tenantId = null) {
     const page = parseInt(queryParams.page) || 1;
     const limit = parseInt(queryParams.limit) || 50;
 
-    const filter = this.buildFilter(queryParams);
+    const filter = this.buildFilter(queryParams, tenantId);
 
     const result = await cityRepository.findWithPagination(filter, {
       page,
@@ -59,19 +64,25 @@ class CityService {
 
   /**
    * Get active cities (for dropdowns)
+   * @param {string} tenantId - Tenant ID to scope the query (optional but recommended)
    * @returns {Promise<Array>}
    */
-  async getActiveCities() {
-    return await cityRepository.findActive();
+  async getActiveCities(tenantId = null) {
+    return await cityRepository.findActive({}, tenantId);
   }
 
   /**
    * Get single city by ID
    * @param {string} id - City ID
+   * @param {string} tenantId - Tenant ID to scope the query (optional but recommended)
    * @returns {Promise<City>}
    */
-  async getCityById(id) {
-    const city = await cityRepository.findById(id);
+  async getCityById(id, tenantId = null) {
+    const query = { _id: id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    const city = await cityRepository.findOne(query);
     
     if (!city) {
       throw new Error('City not found');
@@ -90,11 +101,17 @@ class CityService {
    * Create new city
    * @param {object} cityData - City data
    * @param {string} userId - User ID creating the city
+   * @param {object} options - Options including tenantId
    * @returns {Promise<{city: City, message: string}>}
    */
-  async createCity(cityData, userId) {
-    // Check if city name already exists
-    const nameExists = await cityRepository.nameExists(cityData.name);
+  async createCity(cityData, userId, options = {}) {
+    const tenantId = options.tenantId;
+    if (!tenantId) {
+      throw new Error('tenantId is required for city creation');
+    }
+    
+    // Check if city name already exists (within tenant)
+    const nameExists = await cityRepository.nameExists(cityData.name, null, tenantId);
     if (nameExists) {
       throw new Error('City with this name already exists');
     }
@@ -105,6 +122,7 @@ class CityService {
       country: cityData.country ? cityData.country.trim() : 'US',
       description: cityData.description ? cityData.description.trim() : undefined,
       isActive: cityData.isActive !== undefined ? cityData.isActive : true,
+      tenantId: tenantId, // Ensure tenantId is set
       createdBy: userId
     };
 
@@ -124,17 +142,24 @@ class CityService {
    * @param {string} id - City ID
    * @param {object} updateData - Data to update
    * @param {string} userId - User ID updating the city
+   * @param {object} options - Options including tenantId
    * @returns {Promise<{city: City, message: string}>}
    */
-  async updateCity(id, updateData, userId) {
-    const city = await cityRepository.findById(id);
+  async updateCity(id, updateData, userId, options = {}) {
+    const tenantId = options.tenantId;
+    const query = { _id: id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    const city = await cityRepository.findOne(query);
     if (!city) {
       throw new Error('City not found');
     }
 
-    // Check if name is being changed and if new name already exists
+    // Check if name is being changed and if new name already exists (within tenant)
     if (updateData.name && updateData.name.trim() !== city.name) {
-      const nameExists = await cityRepository.nameExists(updateData.name, id);
+      const finalTenantId = tenantId || city.tenantId;
+      const nameExists = await cityRepository.nameExists(updateData.name, id, finalTenantId);
       if (nameExists) {
         throw new Error('City with this name already exists');
       }
@@ -171,21 +196,30 @@ class CityService {
   /**
    * Delete city
    * @param {string} id - City ID
+   * @param {object} options - Options including tenantId
    * @returns {Promise<{message: string}>}
    */
-  async deleteCity(id) {
-    const city = await cityRepository.findById(id);
+  async deleteCity(id, options = {}) {
+    const tenantId = options.tenantId;
+    const query = { _id: id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    const city = await cityRepository.findOne(query);
     if (!city) {
       throw new Error('City not found');
     }
 
-    // Check if city is being used by customers or suppliers
+    // Check if city is being used by customers or suppliers (within tenant)
+    const finalTenantId = tenantId || city.tenantId;
     const customersUsingCity = await customerRepository.findOne({
-      'addresses.city': city.name
+      'addresses.city': city.name,
+      tenantId: finalTenantId
     });
 
     const suppliersUsingCity = await supplierRepository.findOne({
-      'addresses.city': city.name
+      'addresses.city': city.name,
+      tenantId: finalTenantId
     });
 
     if (customersUsingCity || suppliersUsingCity) {

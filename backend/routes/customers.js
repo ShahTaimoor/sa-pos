@@ -8,11 +8,15 @@ const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 const { auth, requirePermission } = require('../middleware/auth');
+const { blockManualCustomerBalanceEdit } = require('../middleware/dataIntegrityMiddleware');
 const ledgerAccountService = require('../services/ledgerAccountService');
 const customerService = require('../services/customerService');
 const customerRepository = require('../repositories/CustomerRepository');
 const { retryMongoTransaction, isDuplicateKeyError } = require('../utils/retry');
 const { preventDuplicates } = require('../middleware/duplicatePrevention');
+const customerAuditLogService = require('../services/customerAuditLogService');
+const customerTransactionService = require('../services/customerTransactionService');
+const customerCreditPolicyService = require('../services/customerCreditPolicyService');
 
 // Helper function to transform customer names to uppercase
 const transformCustomerToUppercase = (customer) => {
@@ -62,12 +66,12 @@ const runWithOptionalTransaction = async (operation, context = 'operation') => {
       try {
         await session.abortTransaction();
       } catch (abortError) {
-        console.error(`Failed to abort transaction for ${context}:`, abortError);
+        logger.error(`Failed to abort transaction for ${context}:`, abortError);
       }
     }
 
     if (!transactionStarted && isTransactionNotSupportedError(error)) {
-      console.warn(`Transactions not supported for MongoDB deployment. Retrying ${context} without session.`);
+      logger.warn(`Transactions not supported for MongoDB deployment. Retrying ${context} without session.`);
       return await operation(null);
     }
 
@@ -125,8 +129,11 @@ const upload = multer({
 // @route   GET /api/customers
 // @desc    Get all customers with filtering and pagination
 // @access  Private
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
+const logger = require('../utils/logger');
 router.get('/', [
   auth,
+  tenantMiddleware,
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 999999 }),
   query('all').optional({ checkFalsy: true }).isBoolean(),
@@ -143,15 +150,26 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    // Call service to get customers
-    const result = await customerService.getCustomers(req.query);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ 
+        message: 'Tenant ID is required',
+        customers: [],
+        pagination: { currentPage: 1, totalPages: 0, totalItems: 0, itemsPerPage: 20 }
+      });
+    }
+    
+    // Call service to get customers with tenantId
+    const result = await customerService.getCustomers({ ...req.query, tenantId });
     
     res.json({
-      customers: result.customers,
-      pagination: result.pagination
+      data: {
+        customers: result.customers,
+        pagination: result.pagination
+      }
     });
   } catch (error) {
-    console.error('Get customers error:', error);
+    logger.error('Get customers error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -161,16 +179,18 @@ router.get('/', [
 // @access  Private
 router.get('/cities', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    const cities = await customerService.getUniqueCities();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const cities = await customerService.getUniqueCities(tenantId);
     res.json({
       success: true,
       data: cities
     });
   } catch (error) {
-    console.error('Get cities error:', error);
+    logger.error('Get cities error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -184,6 +204,7 @@ router.get('/cities', [
 // @access  Private
 router.get('/by-cities', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('cities').optional().isString().withMessage('Cities must be a comma-separated string'),
   query('showZeroBalance').optional().isIn(['true', 'false']).withMessage('showZeroBalance must be true or false')
@@ -194,6 +215,7 @@ router.get('/by-cities', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
     const citiesParam = req.query.cities;
     const showZeroBalance = req.query.showZeroBalance === 'true';
     
@@ -202,7 +224,7 @@ router.get('/by-cities', [
       : [];
     
     // Call service to get customers by cities
-    const formattedCustomers = await customerService.getCustomersByCities(citiesArray, showZeroBalance);
+    const formattedCustomers = await customerService.getCustomersByCities(citiesArray, showZeroBalance, tenantId);
     
     res.json({
       success: true,
@@ -210,7 +232,7 @@ router.get('/by-cities', [
       count: formattedCustomers.length
     });
   } catch (error) {
-    console.error('Get customers by cities error:', error);
+    logger.error('Get customers by cities error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -230,7 +252,7 @@ router.get('/:id', [auth, validateCustomerIdParam], async (req, res) => {
     if (error.message === 'Customer not found') {
       return res.status(404).json({ message: 'Customer not found' });
     }
-    console.error('Get customer error:', error);
+    logger.error('Get customer error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -239,13 +261,14 @@ router.get('/:id', [auth, validateCustomerIdParam], async (req, res) => {
 // @route   GET /api/customers/search/:query
 // @desc    Search customers by name, email, or phone
 // @access  Private
-router.get('/search/:query', auth, async (req, res) => {
+router.get('/search/:query', [auth, tenantMiddleware], async (req, res) => {
   try {
     const query = req.params.query;
-    const customers = await customerService.searchCustomers(query, 10);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const customers = await customerService.searchCustomers(query, 10, tenantId);
     res.json({ customers });
   } catch (error) {
-    console.error('Search customers error:', error);
+    logger.error('Search customers error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -253,19 +276,20 @@ router.get('/search/:query', auth, async (req, res) => {
 // @route   GET /api/customers/check-email/:email
 // @desc    Check if email already exists
 // @access  Private
-router.get('/check-email/:email', auth, async (req, res) => {
+router.get('/check-email/:email', [auth, tenantMiddleware], async (req, res) => {
   try {
     const email = req.params.email;
     const excludeId = req.query.excludeId; // Optional: exclude current customer when editing
+    const tenantId = req.tenantId || req.user?.tenantId;
     
     if (!email || email.trim() === '') {
       return res.json({ exists: false });
     }
     
-    const exists = await customerService.checkEmailExists(email, excludeId);
+    const exists = await customerService.checkEmailExists(email, excludeId, tenantId);
     return res.json({ exists });
   } catch (error) {
-    console.error('Check email error:', error);
+    logger.error('Check email error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -273,23 +297,24 @@ router.get('/check-email/:email', auth, async (req, res) => {
 // @route   GET /api/customers/check-business-name/:businessName
 // @desc    Check if business name already exists
 // @access  Private
-router.get('/check-business-name/:businessName', auth, async (req, res) => {
+router.get('/check-business-name/:businessName', [auth, tenantMiddleware], async (req, res) => {
   try {
     const businessName = req.params.businessName;
     const excludeId = req.query.excludeId; // Optional: exclude current customer when editing
+    const tenantId = req.tenantId || req.user?.tenantId;
     
     if (!businessName || businessName.trim() === '') {
       return res.json({ exists: false });
     }
     
-    const exists = await customerService.checkBusinessNameExists(businessName, excludeId);
+    const exists = await customerService.checkBusinessNameExists(businessName, excludeId, tenantId);
     
     res.json({ 
       exists,
       businessName: businessName.trim()
     });
   } catch (error) {
-    console.error('Check business name error:', error);
+    logger.error('Check business name error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -320,7 +345,7 @@ router.post('/:id/address', [
       customer
     });
   } catch (error) {
-    console.error('Add address error:', error);
+    logger.error('Add address error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -351,7 +376,7 @@ router.put('/:id/credit-limit', [
       customer
     });
   } catch (error) {
-    console.error('Update credit limit error:', error);
+    logger.error('Update credit limit error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -379,8 +404,10 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
     const result = await customerService.createCustomer(req.body, req.user._id, {
-      openingBalance: req.body.openingBalance
+      openingBalance: req.body.openingBalance,
+      tenantId: tenantId
     });
 
     res.status(201).json({
@@ -389,14 +416,14 @@ router.post('/', [
       customer: result.customer
     });
   } catch (error) {
-    console.error('Create customer error:', {
+    logger.error('Create customer error:', { error: {
       name: error.name,
       code: error.code,
       codeName: error.codeName,
       message: error.message,
       keyPattern: error.keyPattern,
       keyValue: error.keyValue
-    });
+    } });
 
     // Handle duplicate key errors (11000) - return HTTP 409 Conflict
     if (isDuplicateKeyError(error)) {
@@ -495,6 +522,7 @@ router.put('/:id', [
   auth,
   validateCustomerIdParam,
   requirePermission('edit_customers'),
+  blockManualCustomerBalanceEdit, // BLOCK manual balance edits
   preventDuplicates({ windowMs: 10000 }), // Prevent duplicate submissions within 10 seconds
   body('name').optional().trim().isLength({ min: 1 }).withMessage('Name cannot be empty'),
   body('email').optional({ nullable: true, checkFalsy: true }).isEmail().withMessage('Valid email is required'),
@@ -512,8 +540,24 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const result = await customerService.updateCustomer(req.params.id, req.body, req.user._id, {
-      openingBalance: req.body.openingBalance
+    // Include version for optimistic locking
+    const updateData = {
+      ...req.body,
+      version: req.body.version !== undefined ? req.body.version : undefined
+    };
+
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const result = await retryMongoTransaction(async () => {
+      return await customerService.updateCustomer(
+        req.params.id,
+        updateData,
+        req.user._id,
+        { openingBalance: req.body.openingBalance, tenantId: tenantId }
+      );
+    }, {
+      maxRetries: 5,
+      initialDelay: 100,
+      maxDelay: 3000
     });
 
     res.json({
@@ -522,14 +566,14 @@ router.put('/:id', [
       customer: result.customer
     });
   } catch (error) {
-    console.error('Update customer error:', {
+    logger.error('Update customer error:', { error: {
       name: error.name,
       code: error.code,
       codeName: error.codeName,
       message: error.message,
       keyPattern: error.keyPattern,
       keyValue: error.keyValue
-    });
+    } });
 
     // Handle duplicate key errors (11000) - return HTTP 409 Conflict
     if (isDuplicateKeyError(error)) {
@@ -606,11 +650,15 @@ router.delete('/:id', [
   requirePermission('delete_customers')
 ], async (req, res) => {
   try {
-    const result = await customerService.deleteCustomer(req.params.id, req.user._id);
+    const reason = req.body.reason || 'Customer deleted';
+    const result = await customerService.deleteCustomer(req.params.id, req.user._id, reason);
 
     res.json({ message: result.message });
   } catch (error) {
-    console.error('Delete customer error:', error);
+    logger.error('Delete customer error:', { error: error });
+    if (error.message.includes('outstanding balance') || error.message.includes('pending orders')) {
+      return res.status(400).json({ message: error.message });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -624,17 +672,11 @@ router.post('/:id/restore', [
   requirePermission('delete_customers')
 ], async (req, res) => {
   try {
-    const customerRepository = require('../repositories/CustomerRepository');
-    const customer = await customerRepository.findDeletedById(req.params.id);
-    if (!customer) {
-      return res.status(404).json({ message: 'Deleted customer not found' });
-    }
-    
-    await customerRepository.restore(req.params.id);
-    res.json({ message: 'Customer restored successfully' });
+    const result = await customerService.restoreCustomer(req.params.id, req.user._id);
+    res.json({ success: true, message: result.message, customer: result.customer });
   } catch (error) {
-    console.error('Restore customer error:', error);
-    res.status(500).json({ message: 'Server error' });
+    logger.error('Restore customer error:', { error: error });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
@@ -646,48 +688,33 @@ router.get('/deleted', [
   requirePermission('view_customers')
 ], async (req, res) => {
   try {
-    const customerRepository = require('../repositories/CustomerRepository');
-    const deletedCustomers = await customerRepository.findDeleted({}, {
-      sort: { deletedAt: -1 }
-    });
-    res.json(deletedCustomers);
+    const result = await customerService.getDeletedCustomers(req.query);
+    res.json({ success: true, ...result });
   } catch (error) {
-    console.error('Get deleted customers error:', error);
-    res.status(500).json({ message: 'Server error' });
+    logger.error('Get deleted customers error:', { error: error });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
 // @route   PUT /api/customers/:id/balance
-// @desc    Manually update customer balance
+// @desc    Manually update customer balance - BLOCKED: Balances are ledger-driven only
 // @access  Private
+// @note    This endpoint is blocked. Use /api/customer-transactions to update balances via transaction records.
 router.put('/:id/balance', [
   auth,
-  validateCustomerIdParam,
-  requirePermission('edit_customers'),
-  body('pendingBalance').optional().isFloat({ min: 0 }).withMessage('Pending balance must be a positive number'),
-  body('currentBalance').optional().isFloat().withMessage('Current balance must be a number'),
-  body('advanceBalance').optional().isFloat({ min: 0 }).withMessage('Advance balance must be a positive number')
+  validateCustomerIdParam
 ], async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+  // BLOCKED: Manual balance edits are not allowed
+  // Balances are ledger-driven only and must be updated via CustomerTransaction records
+  return res.status(403).json({
+    success: false,
+    error: {
+      code: 'MANUAL_BALANCE_EDIT_BLOCKED',
+      message: 'Cannot manually edit customer balances. Balances are ledger-driven only.',
+      details: 'Use /api/customer-transactions to create transactions which update balances automatically.',
+      alternativeEndpoint: '/api/customer-transactions'
     }
-
-    const { pendingBalance, currentBalance, advanceBalance } = req.body;
-    const balanceData = {};
-    if (pendingBalance !== undefined) balanceData.pendingBalance = pendingBalance;
-    if (currentBalance !== undefined) balanceData.currentBalance = currentBalance;
-    if (advanceBalance !== undefined) balanceData.advanceBalance = advanceBalance;
-
-    // Call service to update balance
-    const result = await customerService.updateCustomerBalance(req.params.id, balanceData);
-    
-    res.json(result);
-  } catch (error) {
-    console.error('Update customer balance error:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
+  });
 });
 
 // @route   POST /api/customers/import/excel
@@ -801,7 +828,7 @@ router.post('/import/excel', [
     });
     
   } catch (error) {
-    console.error('Excel import error:', error);
+    logger.error('Excel import error:', { error: error });
     res.status(500).json({ message: 'Import failed' });
   }
 });
@@ -874,7 +901,7 @@ router.post('/export/excel', [auth, requirePermission('view_customers')], async 
     });
     
   } catch (error) {
-    console.error('Excel export error:', error);
+    logger.error('Excel export error:', { error: error });
     res.status(500).json({ message: 'Export failed' });
   }
 });
@@ -893,13 +920,13 @@ router.get('/download/:filename', [auth, requirePermission('view_customers')], (
     
     res.download(filepath, filename, (err) => {
       if (err) {
-        console.error('Download error:', err);
+        logger.error('Download error:', { error: err });
         res.status(500).json({ message: 'Download failed' });
       }
     });
     
   } catch (error) {
-    console.error('Download error:', error);
+    logger.error('Download error:', { error: error });
     res.status(500).json({ message: 'Download failed' });
   }
 });
@@ -958,14 +985,186 @@ router.get('/template/excel', [auth, requirePermission('create_customers')], (re
     
     res.download(filepath, filename, (err) => {
       if (err) {
-        console.error('Download error:', err);
+        logger.error('Download error:', { error: err });
         res.status(500).json({ message: 'Failed to download template' });
       }
     });
     
   } catch (error) {
-    console.error('Template error:', error);
+    logger.error('Template error:', { error: error });
     res.status(500).json({ message: 'Failed to generate template' });
+  }
+});
+
+// @route   GET /api/customers/:id/audit-logs
+// @desc    Get audit logs for a customer
+// @access  Private
+router.get('/:id/audit-logs', [
+  auth,
+  validateCustomerIdParam,
+  requirePermission('view_audit_logs')
+], async (req, res) => {
+  try {
+    const options = {
+      limit: parseInt(req.query.limit) || 50,
+      skip: parseInt(req.query.skip) || 0,
+      action: req.query.action,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate
+    };
+
+    const logs = await customerAuditLogService.getCustomerAuditLogs(req.params.id, options);
+    res.json({ success: true, data: logs });
+  } catch (error) {
+    logger.error('Get customer audit logs error:', { error: error });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @route   GET /api/customers/:id/transactions
+// @desc    Get customer transaction history
+// @access  Private
+router.get('/:id/transactions', [
+  auth,
+  validateCustomerIdParam,
+  requirePermission('view_customer_transactions')
+], async (req, res) => {
+  try {
+    const options = {
+      limit: parseInt(req.query.limit) || 50,
+      skip: parseInt(req.query.skip) || 0,
+      transactionType: req.query.transactionType,
+      status: req.query.status,
+      startDate: req.query.startDate,
+      endDate: req.query.endDate,
+      includeReversed: req.query.includeReversed === 'true'
+    };
+
+    const result = await customerTransactionService.getCustomerTransactions(req.params.id, options);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    logger.error('Get customer transactions error:', { error: error });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @route   GET /api/customers/:id/overdue
+// @desc    Get overdue invoices for a customer
+// @access  Private
+router.get('/:id/overdue', [
+  auth,
+  validateCustomerIdParam,
+  requirePermission('view_customer_transactions')
+], async (req, res) => {
+  try {
+    const overdueInvoices = await customerTransactionService.getOverdueInvoices(req.params.id);
+    res.json({ success: true, data: overdueInvoices });
+  } catch (error) {
+    logger.error('Get overdue invoices error:', { error: error });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @route   GET /api/customers/:id/aging
+// @desc    Get customer aging report
+// @access  Private
+router.get('/:id/aging', [
+  auth,
+  validateCustomerIdParam,
+  requirePermission('view_customer_reports')
+], async (req, res) => {
+  try {
+    const aging = await customerTransactionService.getCustomerAging(req.params.id);
+    res.json({ success: true, data: aging });
+  } catch (error) {
+    logger.error('Get customer aging error:', { error: error });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @route   POST /api/customers/:id/apply-payment
+// @desc    Apply payment to customer invoices
+// @access  Private
+router.post('/:id/apply-payment', [
+  auth,
+  validateCustomerIdParam,
+  requirePermission('create_customer_transactions'),
+  body('paymentAmount').isFloat({ min: 0.01 }).withMessage('Payment amount must be positive'),
+  body('applications').isArray().withMessage('Applications must be an array'),
+  body('applications.*.invoiceId').isMongoId().withMessage('Valid invoice ID is required'),
+  body('applications.*.amount').isFloat({ min: 0.01 }).withMessage('Application amount must be positive')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    const paymentApplication = await customerTransactionService.applyPayment(
+      req.params.id,
+      req.body.paymentAmount,
+      req.body.applications,
+      req.user
+    );
+    res.status(201).json({ success: true, data: paymentApplication });
+  } catch (error) {
+    logger.error('Apply payment error:', { error: error });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @route   GET /api/customers/credit-policy/overdue
+// @desc    Get all customers with overdue invoices
+// @access  Private
+router.get('/credit-policy/overdue', [
+  auth,
+  requirePermission('view_customer_reports')
+], async (req, res) => {
+  try {
+    const options = {
+      minDaysOverdue: parseInt(req.query.minDaysOverdue) || 0,
+      maxDaysOverdue: req.query.maxDaysOverdue ? parseInt(req.query.maxDaysOverdue) : null,
+      includeSuspended: req.query.includeSuspended === 'true'
+    };
+
+    const customers = await customerCreditPolicyService.getCustomersWithOverdueInvoices(options);
+    res.json({ success: true, data: customers });
+  } catch (error) {
+    logger.error('Get overdue customers error:', { error: error });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @route   POST /api/customers/credit-policy/check-suspensions
+// @desc    Check and auto-suspend overdue customers
+// @access  Private
+router.post('/credit-policy/check-suspensions', [
+  auth,
+  requirePermission('manage_customer_credit')
+], async (req, res) => {
+  try {
+    const results = await customerCreditPolicyService.checkAndSuspendOverdueCustomers();
+    res.json({ success: true, data: results });
+  } catch (error) {
+    logger.error('Check suspensions error:', { error: error });
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @route   GET /api/customers/:id/credit-score
+// @desc    Get customer credit score
+// @access  Private
+router.get('/:id/credit-score', [
+  auth,
+  validateCustomerIdParam,
+  requirePermission('view_customer_reports')
+], async (req, res) => {
+  try {
+    const creditScore = await customerCreditPolicyService.calculateCreditScore(req.params.id);
+    res.json({ success: true, data: creditScore });
+  } catch (error) {
+    logger.error('Get credit score error:', { error: error });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 

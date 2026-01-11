@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Filter, X, Calendar, Tag, Percent, DollarSign } from 'lucide-react';
+import { Search, Filter, X, Calendar, Tag, Percent, TrendingUp } from 'lucide-react';
 
 const DiscountFilters = ({ filters, onFilterChange, isLoading }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -233,7 +233,7 @@ const DiscountFilters = ({ filters, onFilterChange, isLoading }) => {
             <div className="flex flex-wrap gap-2">
               {filters.type && (
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                  {filters.type === 'percentage' ? <Percent className="h-3 w-3 mr-1" /> : <DollarSign className="h-3 w-3 mr-1" />}
+                  {filters.type === 'percentage' ? <Percent className="h-3 w-3 mr-1" /> : <TrendingUp className="h-3 w-3 mr-1" />}
                   Type: {filters.type.replace('_', ' ')}
                   <button
                     onClick={() => handleFilterChange('type', '')}

@@ -1,12 +1,14 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const recommendationEngine = require('../services/recommendationEngine');
 const UserBehavior = require('../models/UserBehavior'); // Still needed for static methods
 const Recommendation = require('../models/Recommendation'); // Still needed for model reference
 const Product = require('../models/Product'); // Still needed for model reference
 const recommendationRepository = require('../repositories/RecommendationRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -15,6 +17,7 @@ const router = express.Router();
 // @access  Private (requires 'view_recommendations' permission)
 router.post('/generate', [
   auth,
+  tenantMiddleware,
   requirePermission('view_recommendations'),
   sanitizeRequest,
   body('sessionId').optional().custom((value) => {
@@ -61,7 +64,7 @@ router.post('/generate', [
         },
       });
     } catch (trackingError) {
-      console.warn('Failed to track recommendation behavior:', trackingError.message);
+      logger.warn('Failed to track recommendation behavior:', trackingError.message);
       // Continue with recommendation generation even if tracking fails
     }
 
@@ -80,7 +83,7 @@ router.post('/generate', [
       recommendationId: recommendations._id || null,
     });
   } catch (error) {
-    console.error('Error generating recommendations:', error);
+    logger.error('Error generating recommendations:', error);
     res.status(500).json({ message: 'Server error generating recommendations', error: error.message });
   }
 });
@@ -90,6 +93,7 @@ router.post('/generate', [
 // @access  Private (requires 'view_recommendations' permission)
 router.get('/:recommendationId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_recommendations'),
   sanitizeRequest,
   param('recommendationId').isMongoId().withMessage('Valid Recommendation ID is required'),
@@ -118,7 +122,7 @@ router.get('/:recommendationId', [
 
     res.json(recommendation);
   } catch (error) {
-    console.error('Error fetching recommendation:', error);
+    logger.error('Error fetching recommendation:', error);
     res.status(500).json({ message: 'Server error fetching recommendation', error: error.message });
   }
 });
@@ -128,6 +132,7 @@ router.get('/:recommendationId', [
 // @access  Private (requires 'view_recommendations' permission)
 router.post('/:recommendationId/interact', [
   auth,
+  tenantMiddleware,
   requirePermission('view_recommendations'),
   sanitizeRequest,
   param('recommendationId').isMongoId().withMessage('Valid Recommendation ID is required'),
@@ -175,7 +180,7 @@ router.post('/:recommendationId/interact', [
       recommendation: recommendation._id,
     });
   } catch (error) {
-    console.error('Error tracking recommendation interaction:', error);
+    logger.error('Error tracking recommendation interaction:', error);
     res.status(500).json({ message: 'Server error tracking interaction', error: error.message });
   }
 });
@@ -209,7 +214,7 @@ router.get('/trending', [
       period: `${days} days`,
     });
   } catch (error) {
-    console.error('Error fetching trending products:', error);
+    logger.error('Error fetching trending products:', error);
     res.status(500).json({ message: 'Server error fetching trending products', error: error.message });
   }
 });
@@ -238,7 +243,7 @@ router.get('/frequently-bought/:productId', [
       })),
     });
   } catch (error) {
-    console.error('Error fetching frequently bought together:', error);
+    logger.error('Error fetching frequently bought together:', error);
     res.status(500).json({ message: 'Server error fetching frequently bought together', error: error.message });
   }
 });
@@ -271,7 +276,7 @@ router.get('/similar/:productId', [
       })),
     });
   } catch (error) {
-    console.error('Error fetching similar products:', error);
+    logger.error('Error fetching similar products:', error);
     res.status(500).json({ message: 'Server error fetching similar products', error: error.message });
   }
 });
@@ -281,6 +286,7 @@ router.get('/similar/:productId', [
 // @access  Private (requires 'view_recommendations' permission)
 router.post('/behavior', [
   auth,
+  tenantMiddleware,
   requirePermission('view_recommendations'),
   sanitizeRequest,
   body('sessionId').notEmpty().withMessage('Session ID is required'),
@@ -314,7 +320,7 @@ router.post('/behavior', [
       behaviorId: behavior._id,
     });
   } catch (error) {
-    console.error('Error tracking behavior:', error);
+    logger.error('Error tracking behavior:', error);
     res.status(500).json({ message: 'Server error tracking behavior', error: error.message });
   }
 });
@@ -324,6 +330,7 @@ router.post('/behavior', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/performance', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('startDate').optional().isISO8601().toDate(),
@@ -406,7 +413,7 @@ router.get('/performance', [
 
     res.json(metrics);
   } catch (error) {
-    console.error('Error fetching recommendation performance:', error);
+    logger.error('Error fetching recommendation performance:', error);
     res.status(500).json({ message: 'Server error fetching recommendation performance', error: error.message });
   }
 });
@@ -416,6 +423,7 @@ router.get('/performance', [
 // @access  Private (requires 'view_recommendations' permission)
 router.get('/user/:userId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_recommendations'),
   sanitizeRequest,
   param('userId').isMongoId().withMessage('Valid User ID is required'),
@@ -447,7 +455,7 @@ router.get('/user/:userId', [
       count: recommendations.length,
     });
   } catch (error) {
-    console.error('Error fetching user recommendations:', error);
+    logger.error('Error fetching user recommendations:', error);
     res.status(500).json({ message: 'Server error fetching user recommendations', error: error.message });
   }
 });

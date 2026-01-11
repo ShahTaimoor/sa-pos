@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, query, validationResult } = require('express-validator');
 const { auth, requireAnyPermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const Attendance = require('../models/Attendance'); // Still needed for new Attendance() and static methods
 const Employee = require('../models/Employee'); // Still needed for model reference
 const attendanceRepository = require('../repositories/AttendanceRepository');
@@ -12,6 +13,7 @@ const router = express.Router();
 // Clock in
 router.post('/clock-in', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['clock_attendance', 'clock_in']),
   body('storeId').optional().isString(),
   body('deviceId').optional().isString(),
@@ -82,6 +84,7 @@ router.post('/clock-in', [
 // Clock out
 router.post('/clock-out', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['clock_attendance', 'clock_out']),
   body('notesOut').optional().isString(),
   body('employeeId').optional().isMongoId(), // For managers clocking out other employees

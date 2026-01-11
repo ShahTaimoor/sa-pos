@@ -1,8 +1,10 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const categoryService = require('../services/categoryService');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -11,6 +13,7 @@ const router = express.Router();
 // @access  Private (requires 'view_products' permission)
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_products'),
   sanitizeRequest,
   query('page').optional().isInt({ min: 1 }),
@@ -35,7 +38,7 @@ router.get('/', [
       pagination: result.pagination
     });
   } catch (error) {
-    console.error('Error fetching categories:', error);
+    logger.error('Error fetching categories:', error);
     res.status(500).json({ message: 'Server error fetching categories', error: error.message });
   }
 });
@@ -45,14 +48,16 @@ router.get('/', [
 // @access  Private (requires 'view_products' permission)
 router.get('/tree', [
   auth,
+  tenantMiddleware,
   requirePermission('view_products'),
   sanitizeRequest,
 ], async (req, res) => {
   try {
-    const categoryTree = await categoryService.getCategoryTree();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const categoryTree = await categoryService.getCategoryTree(tenantId);
     res.json(categoryTree);
   } catch (error) {
-    console.error('Error fetching category tree:', error);
+    logger.error('Error fetching category tree:', error);
     res.status(500).json({ message: 'Server error fetching category tree', error: error.message });
   }
 });
@@ -62,6 +67,7 @@ router.get('/tree', [
 // @access  Private (requires 'view_products' permission)
 router.get('/:categoryId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_products'),
   sanitizeRequest,
   param('categoryId').isMongoId().withMessage('Valid Category ID is required'),
@@ -72,7 +78,7 @@ router.get('/:categoryId', [
     const category = await categoryService.getCategoryById(categoryId);
     res.json(category);
   } catch (error) {
-    console.error('Error fetching category:', error);
+    logger.error('Error fetching category:', error);
     res.status(500).json({ message: 'Server error fetching category', error: error.message });
   }
 });
@@ -82,6 +88,7 @@ router.get('/:categoryId', [
 // @access  Private (requires 'manage_products' permission)
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_products'),
   sanitizeRequest,
   body('name').trim().isLength({ min: 1, max: 100 }).withMessage('Name is required and must be 1-100 characters'),
@@ -92,10 +99,11 @@ router.post('/', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const result = await categoryService.createCategory(req.body, req.user._id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const result = await categoryService.createCategory(req.body, req.user._id, { tenantId });
     res.status(201).json(result);
   } catch (error) {
-    console.error('Error creating category:', error);
+    logger.error('Error creating category:', error);
     if (error.message === 'Category name already exists') {
       res.status(400).json({ message: error.message });
     } else {
@@ -124,7 +132,7 @@ router.put('/:categoryId', [
     const result = await categoryService.updateCategory(categoryId, req.body);
     res.json(result);
   } catch (error) {
-    console.error('Error updating category:', error);
+    logger.error('Error updating category:', error);
     if (error.message === 'Category not found') {
       return res.status(404).json({ message: 'Category not found' });
     }
@@ -151,7 +159,7 @@ router.delete('/:categoryId', [
     const result = await categoryService.deleteCategory(categoryId);
     res.json(result);
   } catch (error) {
-    console.error('Error deleting category:', error);
+    logger.error('Error deleting category:', error);
     if (error.message === 'Category not found') {
       return res.status(404).json({ message: 'Category not found' });
     }
@@ -167,6 +175,7 @@ router.delete('/:categoryId', [
 // @access  Private (requires 'view_products' permission)
 router.get('/stats', [
   auth,
+  tenantMiddleware,
   requirePermission('view_products'),
   sanitizeRequest,
 ], async (req, res) => {
@@ -174,7 +183,7 @@ router.get('/stats', [
     const stats = await categoryService.getStats();
     res.json(stats);
   } catch (error) {
-    console.error('Error fetching category stats:', error);
+    logger.error('Error fetching category stats:', error);
     res.status(500).json({ message: 'Server error fetching category stats', error: error.message });
   }
 });

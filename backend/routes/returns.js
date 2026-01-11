@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const Sales = require('../models/Sales');
 const SalesOrder = require('../models/SalesOrder');
@@ -8,6 +9,7 @@ const PurchaseInvoice = require('../models/PurchaseInvoice');
 const PurchaseOrder = require('../models/PurchaseOrder');
 const returnManagementService = require('../services/returnManagementService');
 const ReturnRepository = require('../repositories/ReturnRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -35,6 +37,7 @@ const transformProductToUppercase = (product) => {
 // @access  Private (requires 'create_orders' permission)
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('create_orders'),
   sanitizeRequest,
   body('originalOrder').isMongoId().withMessage('Valid original order ID is required'),
@@ -95,7 +98,7 @@ router.post('/', [
       return: returnRequest
     });
   } catch (error) {
-    console.error('Error creating return:', error);
+    logger.error('Error creating return:', error);
     res.status(400).json({ message: error.message });
   }
 });
@@ -105,6 +108,7 @@ router.post('/', [
 // @access  Private (requires 'view_orders' permission)
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_orders'),
   sanitizeRequest,
   query('page').optional({ checkFalsy: true }).customSanitizer((value) => {
@@ -225,7 +229,7 @@ router.get('/', [
       pagination: result.pagination
     });
   } catch (error) {
-    console.error('Error fetching returns:', error);
+    logger.error('Error fetching returns:', error);
     res.status(500).json({ message: 'Server error fetching returns', error: error.message });
   }
 });
@@ -275,7 +279,7 @@ router.get('/stats', [
 
     res.json(response);
   } catch (error) {
-    console.error('Error fetching return stats:', error);
+    logger.error('Error fetching return stats:', error);
     res.status(500).json({ message: 'Server error fetching return stats', error: error.message });
   }
 });
@@ -299,7 +303,7 @@ router.get('/trends', [
       totalPeriods: trends.length
     });
   } catch (error) {
-    console.error('Error fetching return trends:', error);
+    logger.error('Error fetching return trends:', error);
     res.status(500).json({ message: 'Server error fetching return trends', error: error.message });
   }
 });
@@ -395,7 +399,7 @@ router.get('/:returnId', [
     if (error.message === 'Return request not found') {
       return res.status(404).json({ message: 'Return request not found' });
     }
-    console.error('Error fetching return:', error);
+    logger.error('Error fetching return:', error);
     res.status(500).json({ message: 'Server error fetching return', error: error.message });
   }
 });
@@ -405,6 +409,7 @@ router.get('/:returnId', [
 // @access  Private (requires 'edit_orders' permission)
 router.put('/:returnId/status', [
   auth,
+  tenantMiddleware,
   requirePermission('edit_orders'),
   sanitizeRequest,
   param('returnId').isMongoId().withMessage('Valid Return ID is required'),
@@ -457,7 +462,7 @@ router.put('/:returnId/status', [
       return: returnRequest
     });
   } catch (error) {
-    console.error('Error updating return status:', error);
+    logger.error('Error updating return status:', error);
     res.status(400).json({ message: error.message });
   }
 });
@@ -492,7 +497,7 @@ router.put('/:returnId/inspection', [
       return: returnRequest
     });
   } catch (error) {
-    console.error('Error updating inspection:', error);
+    logger.error('Error updating inspection:', error);
     res.status(500).json({ message: 'Server error updating inspection', error: error.message });
   }
 });
@@ -502,6 +507,7 @@ router.put('/:returnId/inspection', [
 // @access  Private (requires 'view_orders' permission)
 router.post('/:returnId/notes', [
   auth,
+  tenantMiddleware,
   requirePermission('view_orders'),
   sanitizeRequest,
   param('returnId').isMongoId().withMessage('Valid Return ID is required'),
@@ -520,7 +526,7 @@ router.post('/:returnId/notes', [
       return: returnRequest
     });
   } catch (error) {
-    console.error('Error adding note:', error);
+    logger.error('Error adding note:', error);
     res.status(500).json({ message: 'Server error adding note', error: error.message });
   }
 });
@@ -549,7 +555,7 @@ router.post('/:returnId/communication', [
       return: returnRequest
     });
   } catch (error) {
-    console.error('Error adding communication:', error);
+    logger.error('Error adding communication:', error);
     res.status(500).json({ message: 'Server error adding communication', error: error.message });
   }
 });
@@ -559,6 +565,7 @@ router.post('/:returnId/communication', [
 // @access  Private (requires 'view_orders' permission)
 router.get('/order/:orderId/eligible-items', [
   auth,
+  tenantMiddleware,
   requirePermission('view_orders'),
   sanitizeRequest,
   param('orderId').isMongoId().withMessage('Valid Order ID is required'),
@@ -624,7 +631,7 @@ router.get('/order/:orderId/eligible-items', [
       eligibleItems
     });
   } catch (error) {
-    console.error('Error fetching eligible items:', error);
+    logger.error('Error fetching eligible items:', error);
     res.status(500).json({ message: 'Server error fetching eligible items', error: error.message });
   }
 });
@@ -692,7 +699,7 @@ router.get('/purchase-order/:orderId/eligible-items', [
       eligibleItems
     });
   } catch (error) {
-    console.error('Error fetching eligible purchase items:', error);
+    logger.error('Error fetching eligible purchase items:', error);
     res.status(500).json({ message: 'Server error fetching eligible purchase items', error: error.message });
   }
 });
@@ -702,6 +709,7 @@ router.get('/purchase-order/:orderId/eligible-items', [
 // @access  Private (requires 'edit_orders' permission)
 router.put('/:returnId/cancel', [
   auth,
+  tenantMiddleware,
   requirePermission('edit_orders'),
   sanitizeRequest,
   param('returnId').isMongoId().withMessage('Valid Return ID is required'),
@@ -714,7 +722,7 @@ router.put('/:returnId/cancel', [
 
     res.json({ message: 'Return request cancelled successfully' });
   } catch (error) {
-    console.error('Error cancelling return:', error);
+    logger.error('Error cancelling return:', error);
     res.status(500).json({ message: 'Server error cancelling return', error: error.message });
   }
 });
@@ -724,6 +732,7 @@ router.put('/:returnId/cancel', [
 // @access  Private (Admin only)
 router.delete('/:returnId', [
   auth,
+  tenantMiddleware,
   requirePermission('delete_returns'),
   sanitizeRequest,
   param('returnId').isMongoId().withMessage('Valid Return ID is required'),
@@ -736,7 +745,7 @@ router.delete('/:returnId', [
 
     res.json({ message: result.message });
   } catch (error) {
-    console.error('Error deleting return:', error);
+    logger.error('Error deleting return:', error);
     res.status(500).json({ message: 'Server error deleting return', error: error.message });
   }
 });

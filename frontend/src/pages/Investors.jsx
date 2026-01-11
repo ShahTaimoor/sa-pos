@@ -10,7 +10,6 @@ import {
   Mail,
   Phone,
   MapPin,
-  DollarSign,
   TrendingUp,
   Eye,
   Calendar,
@@ -216,7 +215,7 @@ const InvestorFormModal = ({ investor, onSave, onCancel, isSubmitting }) => {
                     Total Investment ($)
                   </label>
                   <div className="relative">
-                    <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <TrendingUp className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <input
                       {...register('totalInvestment', { 
                         valueAsNumber: true,
@@ -548,7 +547,7 @@ export const Investors = ({ tabId }) => {
                             className="text-primary-600 hover:text-primary-800"
                             title="Record Payout (Pay Money)"
                           >
-                            <DollarSign className="h-5 w-5" />
+                            <TrendingUp className="h-5 w-5" />
                           </button>
                         )}
                         <button
@@ -954,7 +953,7 @@ const PayoutModal = ({ investor, onSave, onCancel, isSubmitting }) => {
                 Payout Amount ($) *
               </label>
               <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <TrendingUp className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <input
                   type="number"
                   step="0.01"

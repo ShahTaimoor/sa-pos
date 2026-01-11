@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   AlertTriangle, 
   TrendingDown,
-  DollarSign,
+  TrendingUp,
   Package,
   CreditCard,
   Users,
@@ -80,10 +80,10 @@ const AnomalyDetection = () => {
   };
 
   const typeIcons = {
-    large_transaction: DollarSign,
+    large_transaction: TrendingUp,
     rapid_transactions: RefreshCw,
     unusual_discount: TrendingDown,
-    price_anomaly: DollarSign,
+    price_anomaly: TrendingUp,
     quantity_anomaly: Package,
     customer_anomaly: Users,
     new_customer_large_transaction: Users,

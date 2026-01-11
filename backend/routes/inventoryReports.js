@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const inventoryReportService = require('../services/inventoryReportService');
 const InventoryReport = require('../models/InventoryReport'); // Still needed for model reference
@@ -16,6 +17,7 @@ const router = express.Router();
 // @access  Private (requires 'view_reports' permission)
 router.post('/generate', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   body('reportType')
@@ -68,7 +70,7 @@ router.post('/generate', [
       }
     });
   } catch (error) {
-    console.error('Error generating inventory report:', error);
+    logger.error('Error generating inventory report:', error);
     res.status(500).json({ 
       message: 'Server error generating inventory report', 
       error: error.message 
@@ -81,6 +83,7 @@ router.post('/generate', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('page').optional().isInt({ min: 1 }),
@@ -99,7 +102,7 @@ router.get('/', [
     
     res.json(result);
   } catch (error) {
-    console.error('Error fetching inventory reports:', error);
+    logger.error('Error fetching inventory reports:', error);
     res.status(500).json({ 
       message: 'Server error fetching inventory reports', 
       error: error.message 
@@ -112,6 +115,7 @@ router.get('/', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/:reportId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('reportId').isLength({ min: 1 }).withMessage('Report ID is required'),
@@ -125,7 +129,7 @@ router.get('/:reportId', [
     
     res.json(report);
   } catch (error) {
-    console.error('Error fetching inventory report:', error);
+    logger.error('Error fetching inventory report:', error);
     if (error.message === 'Inventory report not found') {
       res.status(404).json({ message: error.message });
     } else {
@@ -142,6 +146,7 @@ router.get('/:reportId', [
 // @access  Private (requires 'manage_reports' permission)
 router.delete('/:reportId', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_reports'),
   sanitizeRequest,
   param('reportId').isLength({ min: 1 }).withMessage('Report ID is required'),
@@ -155,7 +160,7 @@ router.delete('/:reportId', [
     
     res.json(result);
   } catch (error) {
-    console.error('Error deleting inventory report:', error);
+    logger.error('Error deleting inventory report:', error);
     if (error.message === 'Inventory report not found') {
       res.status(404).json({ message: error.message });
     } else {
@@ -172,6 +177,7 @@ router.delete('/:reportId', [
 // @access  Private (requires 'view_reports' permission)
 router.put('/:reportId/favorite', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('reportId').isLength({ min: 1 }).withMessage('Report ID is required'),
@@ -195,7 +201,7 @@ router.put('/:reportId/favorite', [
       isFavorite: report.isFavorite
     });
   } catch (error) {
-    console.error('Error updating favorite status:', error);
+    logger.error('Error updating favorite status:', error);
     res.status(500).json({ 
       message: 'Server error updating favorite status', 
       error: error.message 
@@ -208,6 +214,7 @@ router.put('/:reportId/favorite', [
 // @access  Private (requires 'view_reports' permission)
 router.post('/:reportId/export', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('reportId').isLength({ min: 1 }).withMessage('Report ID is required'),
@@ -234,7 +241,7 @@ router.post('/:reportId/export', [
       status: 'processing'
     });
   } catch (error) {
-    console.error('Error exporting inventory report:', error);
+    logger.error('Error exporting inventory report:', error);
     res.status(500).json({ 
       message: 'Server error exporting inventory report', 
       error: error.message 
@@ -247,6 +254,7 @@ router.post('/:reportId/export', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/quick/stock-levels', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('limit').optional().isInt({ min: 1, max: 50 }),
@@ -257,6 +265,7 @@ router.get('/quick/stock-levels', [
     const { limit = 10, status } = req.query;
     
     const Product = require('../models/Product');
+const logger = require('../utils/logger');
     
     // Build match criteria
     const matchCriteria = {};
@@ -311,7 +320,7 @@ router.get('/quick/stock-levels', [
       }
     });
   } catch (error) {
-    console.error('Error fetching quick stock levels:', error);
+    logger.error('Error fetching quick stock levels:', error);
     res.status(500).json({ 
       message: 'Server error fetching quick stock levels', 
       error: error.message 
@@ -324,6 +333,7 @@ router.get('/quick/stock-levels', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/quick/turnover-rates', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('limit').optional().isInt({ min: 1, max: 50 }),
@@ -417,7 +427,7 @@ router.get('/quick/turnover-rates', [
       }
     });
   } catch (error) {
-    console.error('Error fetching quick turnover rates:', error);
+    logger.error('Error fetching quick turnover rates:', error);
     res.status(500).json({ 
       message: 'Server error fetching quick turnover rates', 
       error: error.message 
@@ -430,6 +440,7 @@ router.get('/quick/turnover-rates', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/quick/aging-analysis', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('limit').optional().isInt({ min: 1, max: 50 }),
@@ -516,7 +527,7 @@ router.get('/quick/aging-analysis', [
       }
     });
   } catch (error) {
-    console.error('Error fetching quick aging analysis:', error);
+    logger.error('Error fetching quick aging analysis:', error);
     res.status(500).json({ 
       message: 'Server error fetching quick aging analysis', 
       error: error.message 
@@ -529,6 +540,7 @@ router.get('/quick/aging-analysis', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/quick/summary', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
 ], async (req, res) => {
@@ -606,8 +618,8 @@ router.get('/quick/summary', [
       }
     });
   } catch (error) {
-    console.error('Error fetching quick inventory summary:', error);
-    console.error('Error details:', {
+    logger.error('Error fetching quick inventory summary:', error);
+    logger.error('Error details:', {
       name: error.name,
       message: error.message,
       stack: error.stack
@@ -625,6 +637,7 @@ router.get('/quick/summary', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/stats', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('startDate').optional().isISO8601(),
@@ -640,7 +653,7 @@ router.get('/stats', [
     
     res.json(stats);
   } catch (error) {
-    console.error('Error fetching inventory report stats:', error);
+    logger.error('Error fetching inventory report stats:', error);
     res.status(500).json({ 
       message: 'Server error fetching inventory report stats', 
       error: error.message 

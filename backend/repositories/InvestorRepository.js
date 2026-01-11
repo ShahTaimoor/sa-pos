@@ -31,11 +31,14 @@ class InvestorRepository extends BaseRepository {
   /**
    * Find investor by email
    * @param {string} email - Email address
+   * @param {string} tenantId - Tenant ID
    * @param {object} options - Query options
    * @returns {Promise<Investor|null>}
    */
-  async findByEmail(email, options = {}) {
-    return await this.findOne({ email: email.toLowerCase() }, options);
+  async findByEmail(email, tenantId = null, options = {}) {
+    const query = { email: email.toLowerCase() };
+    if (tenantId) query.tenantId = tenantId;
+    return await this.findOne(query, options);
   }
 
   /**
@@ -51,11 +54,13 @@ class InvestorRepository extends BaseRepository {
   /**
    * Check if email exists
    * @param {string} email - Email address
+   * @param {string} tenantId - Tenant ID
    * @param {string} excludeId - ID to exclude from check
    * @returns {Promise<boolean>}
    */
-  async emailExists(email, excludeId) {
+  async emailExists(email, tenantId = null, excludeId = null) {
     const query = { email: email.toLowerCase() };
+    if (tenantId) query.tenantId = tenantId;
     if (excludeId) query._id = { $ne: excludeId };
     return await this.Model.exists(query);
   }

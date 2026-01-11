@@ -11,7 +11,7 @@ import {
   Mail,
   User,
   Calendar,
-  DollarSign,
+  TrendingUp,
   FileText,
   Edit,
   Send,
@@ -483,9 +483,9 @@ const ReturnDetailModal = ({
                         </span>
                       </div>
                       <div className="flex items-center">
-                        <DollarSign className="h-5 w-5 text-gray-400 mr-3" />
+                        <TrendingUp className="h-5 w-5 text-gray-400 mr-3" />
                         <span>
-                          ${returnInfo.originalOrder?.total?.toFixed(2)}
+                          {returnInfo.originalOrder?.total?.toFixed(2)}
                         </span>
                       </div>
                     </div>

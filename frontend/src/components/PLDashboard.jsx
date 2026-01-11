@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   TrendingUp,
   TrendingDown,
-  DollarSign,
+  TrendingUp,
   Percent,
   Calendar,
   BarChart3,
@@ -247,7 +247,7 @@ const PLDashboard = ({ period = { months: 12 }, onPeriodChange }) => {
             value={comparisons.revenue.value}
             change={comparisons.revenue.change}
             changePercent={comparisons.revenue.changePercent}
-            icon={DollarSign}
+            icon={TrendingUp}
             color="blue"
           />
           <MetricCard
@@ -283,7 +283,7 @@ const PLDashboard = ({ period = { months: 12 }, onPeriodChange }) => {
           data={revenueChart}
           type="bar"
           title="Revenue Trend"
-          icon={DollarSign}
+          icon={TrendingUp}
         />
         <SimpleChart
           data={profitChart}

@@ -2,6 +2,9 @@ const productRepository = require('../repositories/ProductRepository');
 const investorRepository = require('../repositories/InvestorRepository');
 const purchaseInvoiceRepository = require('../repositories/PurchaseInvoiceRepository');
 const Inventory = require('../models/Inventory');
+const auditLogService = require('./auditLogService');
+const costingService = require('./costingService');
+const logger = require('../utils/logger');
 
 class ProductService {
   /**
@@ -11,6 +14,11 @@ class ProductService {
    */
   buildFilter(queryParams) {
     const filter = {};
+
+    // Tenant ID filter (required for multi-tenant isolation)
+    if (queryParams.tenantId) {
+      filter.tenantId = queryParams.tenantId;
+    }
 
     // Multi-field search
     if (queryParams.search) {
@@ -194,9 +202,10 @@ class ProductService {
   /**
    * Get single product by ID
    * @param {string} id - Product ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<Product>}
    */
-  async getProductById(id) {
+  async getProductById(id, tenantId = null) {
     const product = await productRepository.findById(id, {
       populate: [
         { path: 'category', select: 'name' },
@@ -208,6 +217,11 @@ class ProductService {
       throw new Error('Product not found');
     }
 
+    // Verify tenantId matches (if provided)
+    if (tenantId && product.tenantId && product.tenantId.toString() !== tenantId.toString()) {
+      throw new Error('Product not found');
+    }
+
     return this.transformProductToUppercase(product);
   }
 
@@ -215,37 +229,57 @@ class ProductService {
    * Create new product
    * @param {object} productData - Product data
    * @param {string} userId - User ID creating the product
+   * @param {object} req - Express request object (for audit logging)
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<{product: Product, message: string}>}
    */
-  async createProduct(productData, userId) {
-    // Check if product name already exists
+  async createProduct(productData, userId, req = null, tenantId = null) {
+    // Get tenantId from req if not provided
+    if (!tenantId && req && req.tenantId) {
+      tenantId = req.tenantId;
+    }
+    if (!tenantId && req && req.user && req.user.tenantId) {
+      tenantId = req.user.tenantId;
+    }
+    if (!tenantId) {
+      throw new Error('tenantId is required to create a product');
+    }
+
+    // Check if product name already exists (within same tenant)
     if (productData.name) {
-      const nameExists = await productRepository.nameExists(productData.name);
+      const nameExists = await productRepository.nameExists(productData.name, null, tenantId);
       if (nameExists) {
         throw new Error('A product with this name already exists. Please choose a different name.');
       }
     }
 
-    // Check if SKU already exists
+    // Check if SKU already exists (within same tenant)
     if (productData.sku) {
-      const skuExists = await productRepository.skuExists(productData.sku);
+      const skuExists = await productRepository.skuExists(productData.sku, null, tenantId);
       if (skuExists) {
         throw new Error('A product with this SKU already exists.');
       }
     }
 
-    // Check if barcode already exists
+    // Check if barcode already exists (within same tenant)
     if (productData.barcode) {
-      const barcodeExists = await productRepository.barcodeExists(productData.barcode);
+      const barcodeExists = await productRepository.barcodeExists(productData.barcode, null, tenantId);
       if (barcodeExists) {
         throw new Error('A product with this barcode already exists.');
       }
     }
 
+    // Set default costing method if not provided
+    if (!productData.costingMethod) {
+      productData.costingMethod = 'standard';
+    }
+
     const dataWithUser = {
       ...productData,
+      tenantId: tenantId, // Include tenantId
       createdBy: userId,
-      lastModifiedBy: userId
+      lastModifiedBy: userId,
+      version: 0 // Initialize version for optimistic locking
     };
 
     const product = await productRepository.create(dataWithUser);
@@ -253,6 +287,7 @@ class ProductService {
     // Automatically create inventory record for the new product
     try {
       const inventoryRecord = new Inventory({
+        tenantId: tenantId, // Include tenantId
         product: product._id,
         currentStock: product.inventory?.currentStock || 0,
         reorderPoint: product.inventory?.reorderPoint || 10,
@@ -264,12 +299,28 @@ class ProductService {
           shelf: 'S1'
         },
         movements: [],
+        cost: {
+          average: product.pricing?.cost || 0,
+          lastPurchase: product.pricing?.cost || 0,
+          fifo: []
+        },
         createdBy: userId
       });
       await inventoryRecord.save();
     } catch (inventoryError) {
       // Don't fail the product creation if inventory creation fails
       // Log error but continue
+      logger.error('Inventory creation error:', { error: inventoryError });
+    }
+
+    // Log audit trail
+    try {
+      if (req) {
+        await auditLogService.logProductCreation(product, { _id: userId }, req);
+      }
+    } catch (auditError) {
+      // Don't fail product creation if audit logging fails
+      logger.error('Audit logging error:', { error: auditError });
     }
 
     return {
@@ -279,53 +330,104 @@ class ProductService {
   }
 
   /**
-   * Update product
+   * Update product with optimistic locking
    * @param {string} id - Product ID
    * @param {object} updateData - Data to update
    * @param {string} userId - User ID updating the product
+   * @param {object} req - Express request object (for audit logging)
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<{product: Product, message: string}>}
    */
-  async updateProduct(id, updateData, userId) {
-    // Check if product name already exists (excluding current product)
+  async updateProduct(id, updateData, userId, req = null, tenantId = null) {
+    // Get tenantId from req if not provided
+    if (!tenantId && req && req.tenantId) {
+      tenantId = req.tenantId;
+    }
+    if (!tenantId && req && req.user && req.user.tenantId) {
+      tenantId = req.user.tenantId;
+    }
+
+    // Get current product for optimistic locking check
+    const currentProduct = await productRepository.findById(id);
+    if (!currentProduct) {
+      throw new Error('Product not found');
+    }
+
+    // Verify tenantId matches (if provided)
+    if (tenantId && currentProduct.tenantId && currentProduct.tenantId.toString() !== tenantId.toString()) {
+      throw new Error('Product not found');
+    }
+
+    // Check version for optimistic locking
+    if (updateData.version !== undefined && updateData.version !== currentProduct.__v) {
+      throw new Error('Product was modified by another user. Please refresh and try again.');
+    }
+
+    // Use tenantId from current product if not provided
+    const finalTenantId = tenantId || currentProduct.tenantId;
+
+    // Check if product name already exists (excluding current product, within same tenant)
     if (updateData.name) {
-      const nameExists = await productRepository.nameExists(updateData.name, id);
+      const nameExists = await productRepository.nameExists(updateData.name, id, finalTenantId);
       if (nameExists) {
         throw new Error('A product with this name already exists. Please choose a different name.');
       }
     }
 
-    // Check if SKU already exists (excluding current product)
+    // Check if SKU already exists (excluding current product, within same tenant)
     if (updateData.sku) {
-      const skuExists = await productRepository.skuExists(updateData.sku, id);
+      const skuExists = await productRepository.skuExists(updateData.sku, id, finalTenantId);
       if (skuExists) {
         throw new Error('A product with this SKU already exists.');
       }
     }
 
-    // Check if barcode already exists (excluding current product)
+    // Check if barcode already exists (excluding current product, within same tenant)
     if (updateData.barcode) {
-      const barcodeExists = await productRepository.barcodeExists(updateData.barcode, id);
+      const barcodeExists = await productRepository.barcodeExists(updateData.barcode, id, finalTenantId);
       if (barcodeExists) {
         throw new Error('A product with this barcode already exists.');
       }
     }
 
+    // Remove version from updateData (Mongoose handles __v automatically)
+    const { version, ...dataToUpdate } = updateData;
+
     const dataWithUser = {
-      ...updateData,
+      ...dataToUpdate,
       lastModifiedBy: userId
     };
 
-    const product = await productRepository.updateById(id, dataWithUser, {
-      new: true,
-      runValidators: true
-    });
+    // Use findOneAndUpdate with version check for atomic update
+    const updatedProduct = await productRepository.Model.findOneAndUpdate(
+      { _id: id, __v: currentProduct.__v }, // Include version in filter
+      { $set: dataWithUser, $inc: { __v: 1 } }, // Increment version
+      { new: true, runValidators: true }
+    );
 
-    if (!product) {
-      throw new Error('Product not found');
+    if (!updatedProduct) {
+      throw new Error('Product was modified by another user. Please refresh and try again.');
+    }
+
+    // Log audit trail
+    try {
+      if (req) {
+        const reason = updateData.reason || 'Product updated';
+        await auditLogService.logProductUpdate(
+          currentProduct,
+          updatedProduct,
+          { _id: userId },
+          req,
+          reason
+        );
+      }
+    } catch (auditError) {
+      // Don't fail update if audit logging fails
+      logger.error('Audit logging error:', { error: auditError });
     }
 
     return {
-      product,
+      product: updatedProduct,
       message: 'Product updated successfully'
     };
   }
@@ -333,15 +435,25 @@ class ProductService {
   /**
    * Delete product (soft delete)
    * @param {string} id - Product ID
+   * @param {object} req - Express request object (for audit logging)
    * @returns {Promise<{message: string}>}
    */
-  async deleteProduct(id) {
+  async deleteProduct(id, req = null) {
     const product = await productRepository.findById(id);
     if (!product) {
       throw new Error('Product not found');
     }
 
     await productRepository.softDelete(id);
+
+    // Log audit trail
+    try {
+      if (req) {
+        await auditLogService.logProductDeletion(product, { _id: req.user?._id }, req);
+      }
+    } catch (auditError) {
+      logger.error('Audit logging error:', { error: auditError });
+    }
 
     return {
       message: 'Product deleted successfully'
@@ -469,11 +581,15 @@ class ProductService {
    * Get low stock products
    * @returns {Promise<Array>}
    */
-  async getLowStockProducts() {
+  async getLowStockProducts(tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get low stock products');
+    }
     const products = await productRepository.findLowStock({
       select: 'name inventory pricing',
       sort: { 'inventory.currentStock': 1 },
-      populate: null
+      populate: null,
+      filter: { tenantId: tenantId }
     });
 
     return products.map(p => this.transformProductToUppercase(p));

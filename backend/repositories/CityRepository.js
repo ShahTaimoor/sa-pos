@@ -10,11 +10,16 @@ class CityRepository extends BaseRepository {
    * Find city by name
    * @param {string} name - City name
    * @param {object} options - Query options
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<City|null>}
    */
-  async findByName(name, options = {}) {
+  async findByName(name, options = {}, tenantId = null) {
     if (!name) return null;
-    return await this.findOne({ name: { $regex: `^${name.trim()}$`, $options: 'i' } }, options);
+    const query = { name: { $regex: `^${name.trim()}$`, $options: 'i' } };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    return await this.findOne(query, options);
   }
 
   /**
@@ -89,10 +94,15 @@ class CityRepository extends BaseRepository {
   /**
    * Find active cities
    * @param {object} options - Query options
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Array>}
    */
-  async findActive(options = {}) {
-    return await this.findAll({ isActive: true }, {
+  async findActive(options = {}, tenantId = null) {
+    const filter = { isActive: true };
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
+    return await this.findAll(filter, {
       ...options,
       sort: { name: 1 },
       select: 'name state country'
@@ -113,11 +123,15 @@ class CityRepository extends BaseRepository {
    * Check if city name exists
    * @param {string} name - City name to check
    * @param {string} excludeId - City ID to exclude from check
+   * @param {string} tenantId - Tenant ID to scope the check
    * @returns {Promise<boolean>}
    */
-  async nameExists(name, excludeId = null) {
+  async nameExists(name, excludeId = null, tenantId = null) {
     if (!name) return false;
     const query = { name: { $regex: `^${name.trim()}$`, $options: 'i' } };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     if (excludeId) {
       query._id = { $ne: excludeId };
     }

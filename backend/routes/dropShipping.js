@@ -6,10 +6,12 @@ const Supplier = require('../models/Supplier'); // Still needed for model refere
 const Customer = require('../models/Customer'); // Still needed for model reference
 const Product = require('../models/Product'); // Still needed for model reference
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const dropShippingRepository = require('../repositories/DropShippingRepository');
 const supplierRepository = require('../repositories/SupplierRepository');
 const customerRepository = require('../repositories/CustomerRepository');
 const productRepository = require('../repositories/ProductRepository');
+const logger = require('../utils/logger');
 
 // Helper function to handle validation errors
 const handleValidationErrors = (req, res, next) => {
@@ -52,7 +54,7 @@ const transformProductToUppercase = (product) => {
 // @route   GET /api/drop-shipping
 // @desc    Get all drop shipping transactions with filters
 // @access  Private
-router.get('/', auth, async (req, res) => {
+router.get('/', [auth, tenantMiddleware], async (req, res) => {
   try {
     const {
       page = 1,
@@ -100,7 +102,7 @@ router.get('/', auth, async (req, res) => {
       pagination
     });
   } catch (error) {
-    console.error('Get drop shipping transactions error:', error);
+    logger.error('Get drop shipping transactions error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -154,7 +156,7 @@ router.get('/stats', auth, async (req, res) => {
       statusBreakdown
     });
   } catch (error) {
-    console.error('Get drop shipping stats error:', error);
+    logger.error('Get drop shipping stats error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -162,7 +164,7 @@ router.get('/stats', auth, async (req, res) => {
 // @route   GET /api/drop-shipping/:id
 // @desc    Get single drop shipping transaction
 // @access  Private
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
     const transaction = await dropShippingRepository.findById(req.params.id, {
       populate: [
@@ -180,7 +182,7 @@ router.get('/:id', auth, async (req, res) => {
 
     res.json({ transaction });
   } catch (error) {
-    console.error('Get drop shipping transaction error:', error);
+    logger.error('Get drop shipping transaction error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -190,6 +192,7 @@ router.get('/:id', auth, async (req, res) => {
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('create_drop_shipping'),
   body('supplier').isMongoId().withMessage('Valid supplier is required'),
   body('customer').isMongoId().withMessage('Valid customer is required'),
@@ -283,7 +286,7 @@ router.post('/', [
       transaction
     });
   } catch (error) {
-    console.error('Create drop shipping transaction error:', error);
+    logger.error('Create drop shipping transaction error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -293,6 +296,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('update_drop_shipping'),
   body('supplier').optional().isMongoId().withMessage('Valid supplier is required'),
   body('customer').optional().isMongoId().withMessage('Valid customer is required'),
@@ -377,7 +381,7 @@ router.put('/:id', [
       transaction
     });
   } catch (error) {
-    console.error('Update drop shipping transaction error:', error);
+    logger.error('Update drop shipping transaction error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -387,6 +391,7 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('delete_drop_shipping')
 ], async (req, res) => {
   try {
@@ -413,7 +418,7 @@ router.delete('/:id', [
 
     res.json({ message: 'Drop shipping transaction deleted successfully' });
   } catch (error) {
-    console.error('Delete drop shipping transaction error:', error);
+    logger.error('Delete drop shipping transaction error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -423,6 +428,7 @@ router.delete('/:id', [
 // @access  Private
 router.put('/:id/status', [
   auth,
+  tenantMiddleware,
   body('status').isIn(['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'completed']).withMessage('Valid status is required'),
   handleValidationErrors
 ], async (req, res) => {
@@ -456,7 +462,7 @@ router.put('/:id/status', [
       transaction: updatedTransaction
     });
   } catch (error) {
-    console.error('Update status error:', error);
+    logger.error('Update status error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

@@ -36,10 +36,16 @@ const journalVoucherEntrySchema = new mongoose.Schema({
 }, { _id: false });
 
 const journalVoucherSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
+  
   voucherNumber: {
     type: String,
     required: true,
-    unique: true,
     trim: true
   },
   voucherDate: {
@@ -85,8 +91,8 @@ const journalVoucherSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['draft', 'posted'],
-    default: 'posted'
+    enum: ['draft', 'pending_approval', 'approved', 'rejected', 'posted'],
+    default: 'draft'
   },
   notes: {
     type: String,
@@ -100,6 +106,49 @@ const journalVoucherSchema = new mongoose.Schema({
   approvedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  // Approval Workflow (CRITICAL: SOX Compliance)
+  requiresApproval: {
+    type: Boolean,
+    default: false
+  },
+  approvalThreshold: {
+    type: Number,
+    default: 10000 // Amount requiring approval (configurable)
+  },
+  approvalWorkflow: {
+    status: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending'
+    },
+    approvers: [{
+      user: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      role: {
+        type: String,
+        enum: ['accountant', 'controller', 'cfo', 'manager']
+      },
+      status: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected'],
+        default: 'pending'
+      },
+      approvedAt: Date,
+      notes: String
+    }],
+    currentApproverIndex: {
+      type: Number,
+      default: 0
+    },
+    approvedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    approvedAt: Date,
+    rejectionReason: String
   },
   metadata: mongoose.Schema.Types.Mixed
 }, {
@@ -131,9 +180,45 @@ journalVoucherSchema.pre('validate', function(next) {
   next();
 });
 
-// voucherNumber index removed - already has unique: true in field definition
-journalVoucherSchema.index({ voucherDate: -1 });
-journalVoucherSchema.index({ status: 1, voucherDate: -1 });
+// Compound indexes for multi-tenant performance
+journalVoucherSchema.index({ tenantId: 1, voucherNumber: 1 }, { unique: true });
+journalVoucherSchema.index({ tenantId: 1, voucherDate: -1 });
+journalVoucherSchema.index({ tenantId: 1, status: 1, voucherDate: -1 });
+journalVoucherSchema.index({ tenantId: 1, 'approvalWorkflow.status': 1 });
+journalVoucherSchema.index({ tenantId: 1, requiresApproval: 1, 'approvalWorkflow.status': 1 });
+
+// Instance method to check if approval is required
+journalVoucherSchema.methods.requiresApprovalCheck = function(threshold = 10000) {
+  return this.totalDebit >= threshold;
+};
+
+// Instance method to check if can be approved by user
+journalVoucherSchema.methods.canBeApprovedBy = function(userId) {
+  // Cannot approve own work (segregation of duties)
+  if (this.createdBy && this.createdBy.toString() === userId.toString()) {
+    return { allowed: false, reason: 'Cannot approve own journal entry (segregation of duties)' };
+  }
+  
+  // Check if already approved
+  if (this.approvalWorkflow.status === 'approved') {
+    return { allowed: false, reason: 'Journal entry already approved' };
+  }
+  
+  // Check if rejected
+  if (this.approvalWorkflow.status === 'rejected') {
+    return { allowed: false, reason: 'Journal entry was rejected' };
+  }
+  
+  // Check if current approver
+  if (this.approvalWorkflow.approvers && this.approvalWorkflow.approvers.length > 0) {
+    const currentApprover = this.approvalWorkflow.approvers[this.approvalWorkflow.currentApproverIndex];
+    if (currentApprover && currentApprover.user.toString() !== userId.toString()) {
+      return { allowed: false, reason: 'Not the current approver for this journal entry' };
+    }
+  }
+  
+  return { allowed: true };
+};
 
 journalVoucherSchema.pre('save', async function(next) {
   if (!this.voucherNumber) {

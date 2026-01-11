@@ -7,12 +7,19 @@ class AccountingService {
   /**
    * Validate that an account exists and is active
    * @param {String} accountCode - Account code to validate
+   * @param {String} tenantId - Tenant ID (required)
    * @returns {Promise<Object>} Account object
    */
-  static async validateAccount(accountCode) {
+  static async validateAccount(accountCode, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for validateAccount');
+    }
+    
     const account = await ChartOfAccountsRepository.findOne({ 
       accountCode: accountCode.toUpperCase(),
-      isActive: true 
+      tenantId: tenantId,
+      isActive: true,
+      isDeleted: false
     });
     
     if (!account) {
@@ -30,14 +37,21 @@ class AccountingService {
    * Get account code by account name and type
    * @param {String} accountName - Account name (partial match)
    * @param {String} accountType - Account type (asset, liability, etc.)
+   * @param {String} tenantId - Tenant ID (required)
    * @param {String} accountCategory - Account category (optional)
    * @returns {Promise<String>} Account code
    */
-  static async getAccountCode(accountName, accountType, accountCategory = null) {
+  static async getAccountCode(accountName, accountType, tenantId, accountCategory = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getAccountCode');
+    }
+    
     const query = {
       accountName: { $regex: new RegExp(accountName, 'i') },
       accountType: accountType,
+      tenantId: tenantId,
       isActive: true,
+      isDeleted: false,
       allowDirectPosting: true
     };
     
@@ -51,11 +65,13 @@ class AccountingService {
       // Fallback: Try to find by account name only
       const fallbackAccount = await ChartOfAccountsRepository.findOne({
         accountName: { $regex: new RegExp(accountName, 'i') },
-        isActive: true
+        tenantId: tenantId,
+        isActive: true,
+        isDeleted: false
       });
       
       if (fallbackAccount) {
-        console.warn(`Account found but type mismatch: ${accountName}. Expected: ${accountType}, Found: ${fallbackAccount.accountType}`);
+        logger.warn(`Account found but type mismatch: ${accountName}. Expected: ${accountType}, Found: ${fallbackAccount.accountType}`);
         return fallbackAccount.accountCode;
       }
       
@@ -67,50 +83,55 @@ class AccountingService {
 
   /**
    * Get default account codes (with fallback to hardcoded if not found)
+   * @param {String} tenantId - Tenant ID (required)
    * @returns {Promise<Object>} Object with account codes
    */
-  static async getDefaultAccountCodes() {
+  static async getDefaultAccountCodes(tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getDefaultAccountCodes');
+    }
+    
     const codes = {};
     
     try {
-      codes.cash = await this.getAccountCode('Cash', 'asset', 'current_assets').catch((err) => {
-        console.warn(`Account lookup failed for Cash, using fallback '1001':`, err.message);
+      codes.cash = await this.getAccountCode('Cash', 'asset', tenantId, 'current_assets').catch((err) => {
+        logger.warn(`Account lookup failed for Cash, using fallback '1001':`, err.message);
         return '1001';
       });
-      codes.bank = await this.getAccountCode('Bank', 'asset', 'current_assets').catch((err) => {
-        console.warn(`Account lookup failed for Bank, using fallback '1002':`, err.message);
+      codes.bank = await this.getAccountCode('Bank', 'asset', tenantId, 'current_assets').catch((err) => {
+        logger.warn(`Account lookup failed for Bank, using fallback '1002':`, err.message);
         return '1002';
       });
-      codes.accountsReceivable = await this.getAccountCode('Accounts Receivable', 'asset', 'current_assets').catch((err) => {
-        console.warn(`Account lookup failed for Accounts Receivable, using fallback '1201':`, err.message);
+      codes.accountsReceivable = await this.getAccountCode('Accounts Receivable', 'asset', tenantId, 'current_assets').catch((err) => {
+        logger.warn(`Account lookup failed for Accounts Receivable, using fallback '1201':`, err.message);
         return '1201';
       });
-      codes.inventory = await this.getAccountCode('Inventory', 'asset', 'inventory').catch((err) => {
-        console.warn(`Account lookup failed for Inventory, using fallback '1301':`, err.message);
+      codes.inventory = await this.getAccountCode('Inventory', 'asset', tenantId, 'inventory').catch((err) => {
+        logger.warn(`Account lookup failed for Inventory, using fallback '1301':`, err.message);
         return '1301';
       });
-      codes.accountsPayable = await this.getAccountCode('Accounts Payable', 'liability', 'current_liabilities').catch((err) => {
-        console.warn(`Account lookup failed for Accounts Payable, using fallback '2001':`, err.message);
+      codes.accountsPayable = await this.getAccountCode('Accounts Payable', 'liability', tenantId, 'current_liabilities').catch((err) => {
+        logger.warn(`Account lookup failed for Accounts Payable, using fallback '2001':`, err.message);
         return '2001';
       });
-      codes.salesRevenue = await this.getAccountCode('Sales Revenue', 'revenue', 'sales_revenue').catch((err) => {
-        console.warn(`Account lookup failed for Sales Revenue, using fallback '4001':`, err.message);
+      codes.salesRevenue = await this.getAccountCode('Sales Revenue', 'revenue', tenantId, 'sales_revenue').catch((err) => {
+        logger.warn(`Account lookup failed for Sales Revenue, using fallback '4001':`, err.message);
         return '4001';
       });
-      codes.otherRevenue = await this.getAccountCode('Other Revenue', 'revenue', 'other_revenue').catch((err) => {
-        console.warn(`Account lookup failed for Other Revenue, using fallback '4003':`, err.message);
+      codes.otherRevenue = await this.getAccountCode('Other Revenue', 'revenue', tenantId, 'other_revenue').catch((err) => {
+        logger.warn(`Account lookup failed for Other Revenue, using fallback '4003':`, err.message);
         return '4003';
       });
-      codes.costOfGoodsSold = await this.getAccountCode('Cost of Goods Sold', 'expense', 'cost_of_goods_sold').catch((err) => {
-        console.warn(`Account lookup failed for Cost of Goods Sold, using fallback '5001':`, err.message);
+      codes.costOfGoodsSold = await this.getAccountCode('Cost of Goods Sold', 'expense', tenantId, 'cost_of_goods_sold').catch((err) => {
+        logger.warn(`Account lookup failed for Cost of Goods Sold, using fallback '5001':`, err.message);
         return '5001';
       });
-      codes.otherExpenses = await this.getAccountCode('Other Expenses', 'expense', 'other_expenses').catch((err) => {
-        console.warn(`Account lookup failed for Other Expenses, using fallback '5430':`, err.message);
+      codes.otherExpenses = await this.getAccountCode('Other Expenses', 'expense', tenantId, 'other_expenses').catch((err) => {
+        logger.warn(`Account lookup failed for Other Expenses, using fallback '5430':`, err.message);
         return '5430';
       });
     } catch (error) {
-      console.error('Error loading default account codes, using fallback values:', error);
+      logger.error('Error loading default account codes, using fallback values:', error);
       // Fallback to hardcoded values if lookup fails
       codes.cash = '1001';
       codes.bank = '1002';
@@ -132,8 +153,12 @@ class AccountingService {
    */
   static async recordCashReceipt(cashReceipt) {
     try {
+      if (!cashReceipt.tenantId) {
+        throw new Error('Tenant ID is required in cashReceipt');
+      }
+      
       const transactions = [];
-      const accountCodes = await this.getDefaultAccountCodes();
+      const accountCodes = await this.getDefaultAccountCodes(cashReceipt.tenantId);
       
       // Debit: Cash Account
       const cashTransaction = await this.createTransaction({
@@ -200,10 +225,10 @@ class AccountingService {
       // Validate double-entry balance
       const balance = await this.validateBalance(transactions, `cash receipt ${cashReceipt.voucherCode || cashReceipt._id}`);
 
-      console.log(`Created ${transactions.length} accounting entries for cash receipt ${cashReceipt._id} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
+      logger.info(`Created ${transactions.length} accounting entries for cash receipt ${cashReceipt._id} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
       return transactions;
     } catch (error) {
-      console.error('Error creating accounting entries for cash receipt:', error);
+      logger.error('Error creating accounting entries for cash receipt:', error);
       throw error;
     }
   }
@@ -215,8 +240,12 @@ class AccountingService {
    */
   static async recordCashPayment(cashPayment) {
     try {
+      if (!cashPayment.tenantId) {
+        throw new Error('Tenant ID is required in cashPayment');
+      }
+      
       const transactions = [];
-      const accountCodes = await this.getDefaultAccountCodes();
+      const accountCodes = await this.getDefaultAccountCodes(cashPayment.tenantId);
       
       // Credit: Cash Account
       const cashTransaction = await this.createTransaction({
@@ -284,14 +313,17 @@ class AccountingService {
         let expenseAccountCode = accountCodes.otherExpenses;
         if (cashPayment.expenseAccount) {
           try {
-            const expenseAccount = await ChartOfAccounts.findById(cashPayment.expenseAccount).select('accountCode accountName');
+            const expenseAccount = await ChartOfAccounts.findOne({ 
+              _id: cashPayment.expenseAccount,
+              tenantId: cashPayment.tenantId 
+            }).select('accountCode accountName');
             if (expenseAccount?.accountCode) {
               expenseAccountCode = expenseAccount.accountCode;
             } else {
-              console.warn(`Expense account ${cashPayment.expenseAccount} not found or missing accountCode. Falling back to Other Expenses.`);
+              logger.warn(`Expense account ${cashPayment.expenseAccount} not found or missing accountCode. Falling back to Other Expenses.`);
             }
           } catch (lookupError) {
-            console.error(`Error resolving expense account ${cashPayment.expenseAccount} for cash payment ${cashPayment._id}:`, lookupError);
+            logger.error(`Error resolving expense account ${cashPayment.expenseAccount} for cash payment ${cashPayment._id}:`, lookupError);
           }
         }
 
@@ -316,10 +348,10 @@ class AccountingService {
       // Validate double-entry balance
       const balance = await this.validateBalance(transactions, `cash payment ${cashPayment.voucherCode || cashPayment._id}`);
 
-      console.log(`Created ${transactions.length} accounting entries for cash payment ${cashPayment._id} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
+      logger.info(`Created ${transactions.length} accounting entries for cash payment ${cashPayment._id} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
       return transactions;
     } catch (error) {
-      console.error('Error creating accounting entries for cash payment:', error);
+      logger.error('Error creating accounting entries for cash payment:', error);
       throw error;
     }
   }
@@ -331,8 +363,12 @@ class AccountingService {
    */
   static async recordBankReceipt(bankReceipt) {
     try {
+      if (!bankReceipt.tenantId) {
+        throw new Error('Tenant ID is required in bankReceipt');
+      }
+      
       const transactions = [];
-      const accountCodes = await this.getDefaultAccountCodes();
+      const accountCodes = await this.getDefaultAccountCodes(bankReceipt.tenantId);
       
       // Debit: Bank Account
       const bankTransaction = await this.createTransaction({
@@ -396,10 +432,10 @@ class AccountingService {
       // Validate double-entry balance
       const balance = await this.validateBalance(transactions, `bank receipt ${bankReceipt.transactionReference || bankReceipt._id}`);
 
-      console.log(`Created ${transactions.length} accounting entries for bank receipt ${bankReceipt._id} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
+      logger.info(`Created ${transactions.length} accounting entries for bank receipt ${bankReceipt._id} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
       return transactions;
     } catch (error) {
-      console.error('Error creating accounting entries for bank receipt:', error);
+      logger.error('Error creating accounting entries for bank receipt:', error);
       throw error;
     }
   }
@@ -411,8 +447,12 @@ class AccountingService {
    */
   static async recordBankPayment(bankPayment) {
     try {
+      if (!bankPayment.tenantId) {
+        throw new Error('Tenant ID is required in bankPayment');
+      }
+      
       const transactions = [];
-      const accountCodes = await this.getDefaultAccountCodes();
+      const accountCodes = await this.getDefaultAccountCodes(bankPayment.tenantId);
       
       // Credit: Bank Account
       const bankTransaction = await this.createTransaction({
@@ -478,14 +518,18 @@ class AccountingService {
         let expenseAccountCode = accountCodes.otherExpenses;
         if (bankPayment.expenseAccount) {
           try {
-            const expenseAccount = await ChartOfAccounts.findById(bankPayment.expenseAccount).select('accountCode accountName');
+            const expenseAccount = await ChartOfAccounts.findOne({ 
+              _id: bankPayment.expenseAccount,
+              tenantId: bankPayment.tenantId,
+              isDeleted: false
+            }).select('accountCode accountName');
             if (expenseAccount?.accountCode) {
               expenseAccountCode = expenseAccount.accountCode;
             } else {
-              console.warn(`Expense account ${bankPayment.expenseAccount} not found or missing accountCode. Falling back to Other Expenses.`);
+              logger.warn(`Expense account ${bankPayment.expenseAccount} not found or missing accountCode. Falling back to Other Expenses.`);
             }
           } catch (lookupError) {
-            console.error(`Error resolving expense account ${bankPayment.expenseAccount} for bank payment ${bankPayment._id}:`, lookupError);
+            logger.error(`Error resolving expense account ${bankPayment.expenseAccount} for bank payment ${bankPayment._id}:`, lookupError);
           }
         }
 
@@ -510,10 +554,10 @@ class AccountingService {
       // Validate double-entry balance
       const balance = await this.validateBalance(transactions, `bank payment ${bankPayment.transactionReference || bankPayment._id}`);
 
-      console.log(`Created ${transactions.length} accounting entries for bank payment ${bankPayment._id} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
+      logger.info(`Created ${transactions.length} accounting entries for bank payment ${bankPayment._id} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
       return transactions;
     } catch (error) {
-      console.error('Error creating accounting entries for bank payment:', error);
+      logger.error('Error creating accounting entries for bank payment:', error);
       throw error;
     }
   }
@@ -537,7 +581,7 @@ class AccountingService {
             await Transaction.findByIdAndDelete(transaction._id);
           }
         } catch (error) {
-          console.error(`Failed to delete unbalanced transaction ${transaction._id}:`, error);
+          logger.error(`Failed to delete unbalanced transaction ${transaction._id}:`, error);
         }
       }
       throw new Error(`Unbalanced transaction entries for ${reference}: Debits ${totalDebits.toFixed(2)} ≠ Credits ${totalCredits.toFixed(2)}`);
@@ -562,7 +606,7 @@ class AccountingService {
       await transaction.save();
       return transaction;
     } catch (error) {
-      console.error('Error creating transaction:', error);
+      logger.error('Error creating transaction:', error);
       throw error;
     }
   }
@@ -571,12 +615,18 @@ class AccountingService {
    * Get account balance for a specific account code
    * @param {String} accountCode - Account code
    * @param {Date} asOfDate - Date to calculate balance as of
+   * @param {String} tenantId - Tenant ID (required)
    * @returns {Promise<Number>} Account balance
    */
-  static async getAccountBalance(accountCode, asOfDate = new Date()) {
+  static async getAccountBalance(accountCode, asOfDate = new Date(), tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getAccountBalance');
+    }
+    
     try {
       const transactions = await Transaction.find({
         accountCode,
+        tenantId: tenantId,
         transactionDate: { $lte: asOfDate },
         status: 'completed'
       });
@@ -587,7 +637,7 @@ class AccountingService {
 
       return balance;
     } catch (error) {
-      console.error('Error calculating account balance:', error);
+      logger.error('Error calculating account balance:', error);
       throw error;
     }
   }
@@ -595,15 +645,24 @@ class AccountingService {
   /**
    * Get trial balance for all accounts
    * @param {Date} asOfDate - Date to calculate trial balance as of
+   * @param {String} tenantId - Tenant ID (required)
    * @returns {Promise<Array>} Trial balance data
    */
-  static async getTrialBalance(asOfDate = new Date()) {
+  static async getTrialBalance(asOfDate = new Date(), tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getTrialBalance');
+    }
+    
     try {
-      const accounts = await ChartOfAccountsRepository.findAll({ isActive: true });
+      const accounts = await ChartOfAccountsRepository.findAll({ 
+        tenantId: tenantId,
+        isActive: true,
+        isDeleted: false 
+      });
       const trialBalance = [];
 
       for (const account of accounts) {
-        const balance = await this.getAccountBalance(account.accountCode, asOfDate);
+        const balance = await this.getAccountBalance(account.accountCode, asOfDate, tenantId);
         if (balance !== 0) {
           trialBalance.push({
             accountCode: account.accountCode,
@@ -617,7 +676,7 @@ class AccountingService {
 
       return trialBalance;
     } catch (error) {
-      console.error('Error generating trial balance:', error);
+      logger.error('Error generating trial balance:', error);
       throw error;
     }
   }
@@ -629,11 +688,15 @@ class AccountingService {
    */
   static async recordSale(order) {
     try {
+      if (!order.tenantId) {
+        throw new Error('Tenant ID is required in order');
+      }
+      
       const transactions = [];
       const orderTotal = order.pricing.total;
       const amountPaid = order.payment.amountPaid || 0;
       const unpaidAmount = orderTotal - amountPaid;
-      const accountCodes = await this.getDefaultAccountCodes();
+      const accountCodes = await this.getDefaultAccountCodes(order.tenantId);
       
       // Handle payment method and partial payments
       // For partial payments, debit both Cash and AR
@@ -704,6 +767,7 @@ class AccountingService {
       // Debit: Cost of Goods Sold (COGS)
       let totalCOGS = 0;
       const Product = require('../models/Product');
+const logger = require('../utils/logger');
       for (const item of order.items) {
         const product = await Product.findById(item.product);
         if (product && product.pricing?.cost) {
@@ -758,10 +822,10 @@ class AccountingService {
       // Validate double-entry balance
       const balance = await this.validateBalance(transactions, `sales order ${order.orderNumber}`);
 
-      console.log(`Created ${transactions.length} accounting entries for sales order ${order.orderNumber} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
+      logger.info(`Created ${transactions.length} accounting entries for sales order ${order.orderNumber} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
       return transactions;
     } catch (error) {
-      console.error('Error creating accounting entries for sales order:', error);
+      logger.error('Error creating accounting entries for sales order:', error);
       throw error;
     }
   }
@@ -773,8 +837,12 @@ class AccountingService {
    */
   static async recordPurchase(purchaseOrder) {
     try {
+      if (!purchaseOrder.tenantId) {
+        throw new Error('Tenant ID is required in purchaseOrder');
+      }
+      
       const transactions = [];
-      const accountCodes = await this.getDefaultAccountCodes();
+      const accountCodes = await this.getDefaultAccountCodes(purchaseOrder.tenantId);
       
       // Debit: Inventory (increase inventory value)
       const inventoryTransaction = await this.createTransaction({
@@ -819,10 +887,10 @@ class AccountingService {
       // Validate double-entry balance
       const balance = await this.validateBalance(transactions, `purchase order ${purchaseOrder.poNumber}`);
 
-      console.log(`Created ${transactions.length} accounting entries for purchase order ${purchaseOrder.poNumber} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
+      logger.info(`Created ${transactions.length} accounting entries for purchase order ${purchaseOrder.poNumber} (Debits: ${balance.totalDebits.toFixed(2)} = Credits: ${balance.totalCredits.toFixed(2)})`);
       return transactions;
     } catch (error) {
-      console.error('Error creating accounting entries for purchase order:', error);
+      logger.error('Error creating accounting entries for purchase order:', error);
       throw error;
     }
   }
@@ -830,16 +898,24 @@ class AccountingService {
   /**
    * Update balance sheet with current account balances
    * @param {Date} statementDate - Statement date
+   * @param {String} tenantId - Tenant ID (required)
    * @returns {Promise<Object>} Updated balance sheet
    */
-  static async updateBalanceSheet(statementDate = new Date()) {
+  static async updateBalanceSheet(statementDate = new Date(), tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for updateBalanceSheet');
+    }
+    
     try {
+      // Get account codes dynamically for this tenant
+      const accountCodes = await this.getDefaultAccountCodes(tenantId);
+      
       // Get current balances for key accounts
-      const cashBalance = await this.getAccountBalance('1001', statementDate);
-      const bankBalance = await this.getAccountBalance('1002', statementDate);
-      const accountsReceivable = await this.getAccountBalance('1201', statementDate);
-      const inventoryBalance = await this.getAccountBalance('1301', statementDate);
-      const accountsPayable = await this.getAccountBalance('2001', statementDate);
+      const cashBalance = await this.getAccountBalance(accountCodes.cash, statementDate, tenantId);
+      const bankBalance = await this.getAccountBalance(accountCodes.bank, statementDate, tenantId);
+      const accountsReceivable = await this.getAccountBalance(accountCodes.accountsReceivable, statementDate, tenantId);
+      const inventoryBalance = await this.getAccountBalance(accountCodes.inventory, statementDate, tenantId);
+      const accountsPayable = await this.getAccountBalance(accountCodes.accountsPayable, statementDate, tenantId);
 
       // Create or update balance sheet
       const statementNumber = `BS-${statementDate.getFullYear()}-${String(statementDate.getMonth() + 1).padStart(2, '0')}`;
@@ -906,10 +982,10 @@ class AccountingService {
         { upsert: true, new: true }
       );
 
-      console.log(`Updated balance sheet ${statementNumber} with current balances`);
+      logger.info(`Updated balance sheet ${statementNumber} with current balances`);
       return balanceSheet;
     } catch (error) {
-      console.error('Error updating balance sheet:', error);
+      logger.error('Error updating balance sheet:', error);
       throw error;
     }
   }

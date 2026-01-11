@@ -75,13 +75,13 @@ const navigation = [
   { type: 'heading', name: 'Master Data Section', color: 'bg-purple-500' },
   { name: 'Products', href: '/products', icon: Package, permission: 'view_products' },
   { name: 'Product Variants', href: '/product-variants', icon: Tag, permission: 'view_products' },
-  { name: 'Product Transformations', href: '/product-transformations', icon: ArrowRight, permission: 'update_inventory' },
+  // { name: 'Product Transformations', href: '/product-transformations', icon: ArrowRight, permission: 'update_inventory' },
   { name: 'Customers', href: '/customers', icon: Users, permission: 'view_customers' },
   { name: 'Customer Analytics', href: '/customer-analytics', icon: BarChart3, permission: 'view_customer_analytics' },
   { name: 'Suppliers', href: '/suppliers', icon: Building, permission: 'view_suppliers' },
   { name: 'Banks', href: '/banks', icon: Building2, permission: null },
-  { name: 'Investors', href: '/investors', icon: TrendingUp, permission: 'view_investors' },
-  { name: 'Drop Shipping', href: '/drop-shipping', icon: ArrowRight, permission: 'create_drop_shipping' },
+  // { name: 'Investors', href: '/investors', icon: TrendingUp, permission: 'view_investors' },
+  // { name: 'Drop Shipping', href: '/drop-shipping', icon: ArrowRight, permission: 'create_drop_shipping' },
   { name: 'Cities', href: '/cities', icon: MapPin, permission: 'manage_users' },
   
   // Inventory Section
@@ -89,22 +89,22 @@ const navigation = [
   { name: 'Inventory', href: '/inventory', icon: Warehouse, permission: 'view_inventory' },
   { name: 'Inventory Alerts', href: '/inventory-alerts', icon: AlertTriangle, permission: 'view_inventory' },
   { name: 'Warehouses', href: '/warehouses', icon: Warehouse, permission: 'view_inventory' },
-  { name: 'Stock Movements', href: '/stock-movements', icon: ArrowUpDown, permission: 'view_stock_movements' },
+  // { name: 'Stock Movements', href: '/stock-movements', icon: ArrowUpDown, permission: 'view_stock_movements' },
   
   // Accounting Section
   { type: 'heading', name: 'Accounting Section', color: 'bg-pink-500' },
   { name: 'Chart of Accounts', href: '/chart-of-accounts', icon: FolderTree, permission: 'view_chart_of_accounts' },
   { name: 'Journal Vouchers', href: '/journal-vouchers', icon: FileText, permission: 'view_reports', allowMultiple: true },
-  { name: 'Account Ledger', href: '/account-ledger', icon: FileText, permission: 'view_reports', allowMultiple: true },
+  { name: 'Account Ledger Summary', href: '/account-ledger-summary', icon: BarChart3, permission: 'view_reports', allowMultiple: true },
   
   // Reports & Analytics Section
   { type: 'heading', name: 'Reports & Analytics', color: 'bg-indigo-500' },
   { name: 'P&L Statements', href: '/pl-statements', icon: BarChart3, permission: 'view_pl_statements' },
   { name: 'Balance Sheets', href: '/balance-sheets', icon: FileText, permission: 'view_balance_sheets' },
   { name: 'Sales Performance', href: '/sales-performance', icon: TrendingUp, permission: 'view_sales_performance' },
-  { name: 'Inventory Reports', href: '/inventory-reports', icon: Warehouse, permission: 'view_inventory_reports' },
+  // { name: 'Inventory Reports', href: '/inventory-reports', icon: Warehouse, permission: 'view_inventory_reports' },
   { name: 'Anomaly Detection', href: '/anomaly-detection', icon: AlertTriangle, permission: 'view_anomaly_detection' },
-  { name: 'Reports', href: '/reports', icon: BarChart3, permission: 'view_general_reports' },
+  // { name: 'Reports', href: '/reports', icon: BarChart3, permission: 'view_general_reports' },
   { name: 'Backdate Report', href: '/backdate-report', icon: Clock, permission: 'view_backdate_report' },
   
   // HR/Admin Section

@@ -1,8 +1,10 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const discountService = require('../services/discountService');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -11,6 +13,7 @@ const router = express.Router();
 // @access  Private (requires 'manage_discounts' permission)
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_discounts'),
   sanitizeRequest,
   body('name').trim().isLength({ min: 1, max: 100 }).withMessage('Name is required and must be 1-100 characters'),
@@ -35,7 +38,7 @@ router.post('/', [
       discount
     });
   } catch (error) {
-    console.error('Error creating discount:', error);
+    logger.error('Error creating discount:', error);
     res.status(400).json({ message: error.message });
   }
 });
@@ -45,6 +48,7 @@ router.post('/', [
 // @access  Private (requires 'view_discounts' permission)
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_discounts'),
   sanitizeRequest,
   query('page').optional().isInt({ min: 1 }),
@@ -75,7 +79,7 @@ router.get('/', [
       pagination: result.pagination
     });
   } catch (error) {
-    console.error('Error fetching discounts:', error);
+    logger.error('Error fetching discounts:', error);
     res.status(500).json({ message: 'Server error fetching discounts', error: error.message });
   }
 });
@@ -85,6 +89,7 @@ router.get('/', [
 // @access  Private (requires 'view_discounts' permission)
 router.get('/:discountId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_discounts'),
   sanitizeRequest,
   param('discountId').isMongoId().withMessage('Valid Discount ID is required'),
@@ -96,7 +101,7 @@ router.get('/:discountId', [
     const discount = await discountService.getDiscountById(discountId);
     res.json(discount);
   } catch (error) {
-    console.error('Error fetching discount:', error);
+    logger.error('Error fetching discount:', error);
     if (error.message === 'Discount not found') {
       res.status(404).json({ message: error.message });
     } else {
@@ -110,6 +115,7 @@ router.get('/:discountId', [
 // @access  Private (requires 'manage_discounts' permission)
 router.put('/:discountId', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_discounts'),
   sanitizeRequest,
   param('discountId').isMongoId().withMessage('Valid Discount ID is required'),
@@ -131,7 +137,7 @@ router.put('/:discountId', [
       discount
     });
   } catch (error) {
-    console.error('Error updating discount:', error);
+    logger.error('Error updating discount:', error);
     if (error.message === 'Discount not found') {
       res.status(404).json({ message: error.message });
     } else {
@@ -145,6 +151,7 @@ router.put('/:discountId', [
 // @access  Private (requires 'manage_discounts' permission)
 router.delete('/:discountId', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_discounts'),
   sanitizeRequest,
   param('discountId').isMongoId().withMessage('Valid Discount ID is required'),
@@ -156,7 +163,7 @@ router.delete('/:discountId', [
     const result = await discountService.deleteDiscount(discountId, req.user._id);
     res.json(result);
   } catch (error) {
-    console.error('Error deleting discount:', error);
+    logger.error('Error deleting discount:', error);
     if (error.message === 'Discount not found') {
       res.status(404).json({ message: error.message });
     } else {
@@ -170,6 +177,7 @@ router.delete('/:discountId', [
 // @access  Private (requires 'manage_discounts' permission)
 router.put('/:discountId/toggle-status', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_discounts'),
   sanitizeRequest,
   param('discountId').isMongoId().withMessage('Valid Discount ID is required'),
@@ -185,7 +193,7 @@ router.put('/:discountId/toggle-status', [
       discount
     });
   } catch (error) {
-    console.error('Error toggling discount status:', error);
+    logger.error('Error toggling discount status:', error);
     if (error.message === 'Discount not found') {
       res.status(404).json({ message: error.message });
     } else {
@@ -199,6 +207,7 @@ router.put('/:discountId/toggle-status', [
 // @access  Private (requires 'view_discounts' permission)
 router.post('/apply', [
   auth,
+  tenantMiddleware,
   requirePermission('view_discounts'),
   sanitizeRequest,
   body('orderId').isMongoId().withMessage('Valid Order ID is required'),
@@ -216,7 +225,7 @@ router.post('/apply', [
       ...result
     });
   } catch (error) {
-    console.error('Error applying discount:', error);
+    logger.error('Error applying discount:', error);
     res.status(400).json({ message: error.message });
   }
 });
@@ -226,6 +235,7 @@ router.post('/apply', [
 // @access  Private (requires 'view_discounts' permission)
 router.post('/remove', [
   auth,
+  tenantMiddleware,
   requirePermission('view_discounts'),
   sanitizeRequest,
   body('orderId').isMongoId().withMessage('Valid Order ID is required'),
@@ -242,7 +252,7 @@ router.post('/remove', [
       ...result
     });
   } catch (error) {
-    console.error('Error removing discount:', error);
+    logger.error('Error removing discount:', error);
     res.status(400).json({ message: error.message });
   }
 });
@@ -288,7 +298,7 @@ router.post('/check-applicable', [
       }))
     });
   } catch (error) {
-    console.error('Error checking applicable discounts:', error);
+    logger.error('Error checking applicable discounts:', error);
     res.status(500).json({ message: 'Server error checking applicable discounts', error: error.message });
   }
 });
@@ -298,6 +308,7 @@ router.post('/check-applicable', [
 // @access  Private (requires 'view_discounts' permission)
 router.get('/code/:code', [
   auth,
+  tenantMiddleware,
   requirePermission('view_discounts'),
   sanitizeRequest,
   param('code').trim().isLength({ min: 1, max: 20 }).withMessage('Valid discount code is required'),
@@ -313,7 +324,7 @@ router.get('/code/:code', [
     
     res.json(discount);
   } catch (error) {
-    console.error('Error fetching discount by code:', error);
+    logger.error('Error fetching discount by code:', error);
     res.status(500).json({ message: 'Server error fetching discount', error: error.message });
   }
 });
@@ -338,7 +349,7 @@ router.get('/code/:code/availability', [
       available: isAvailable
     });
   } catch (error) {
-    console.error('Error checking discount code availability:', error);
+    logger.error('Error checking discount code availability:', error);
     res.status(500).json({ message: 'Server error checking code availability', error: error.message });
   }
 });
@@ -348,6 +359,7 @@ router.get('/code/:code/availability', [
 // @access  Private (requires 'view_discounts' permission)
 router.post('/generate-code-suggestions', [
   auth,
+  tenantMiddleware,
   requirePermission('view_discounts'),
   sanitizeRequest,
   body('name').trim().isLength({ min: 1 }).withMessage('Name is required'),
@@ -363,7 +375,7 @@ router.post('/generate-code-suggestions', [
       suggestions
     });
   } catch (error) {
-    console.error('Error generating code suggestions:', error);
+    logger.error('Error generating code suggestions:', error);
     res.status(500).json({ message: 'Server error generating suggestions', error: error.message });
   }
 });
@@ -387,7 +399,7 @@ router.get('/stats', [
     
     res.json(stats);
   } catch (error) {
-    console.error('Error fetching discount stats:', error);
+    logger.error('Error fetching discount stats:', error);
     res.status(500).json({ message: 'Server error fetching discount stats', error: error.message });
   }
 });
@@ -397,6 +409,7 @@ router.get('/stats', [
 // @access  Private (requires 'view_discounts' permission)
 router.get('/active', [
   auth,
+  tenantMiddleware,
   requirePermission('view_discounts'),
   sanitizeRequest,
 ], async (req, res) => {
@@ -405,7 +418,7 @@ router.get('/active', [
     
     res.json(discounts);
   } catch (error) {
-    console.error('Error fetching active discounts:', error);
+    logger.error('Error fetching active discounts:', error);
     res.status(500).json({ message: 'Server error fetching active discounts', error: error.message });
   }
 });

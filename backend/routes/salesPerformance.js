@@ -1,11 +1,13 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const salesPerformanceService = require('../services/salesPerformanceService');
 const SalesPerformance = require('../models/SalesPerformance'); // Still needed for static methods
 const salesPerformanceRepository = require('../repositories/SalesPerformanceRepository');
 const salesRepository = require('../repositories/SalesRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -14,6 +16,7 @@ const router = express.Router();
 // @access  Private (requires 'view_reports' permission)
 router.post('/generate', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   body('reportType')
@@ -68,7 +71,7 @@ router.post('/generate', [
       }
     });
   } catch (error) {
-    console.error('Error generating sales performance report:', error);
+    logger.error('Error generating sales performance report:', error);
     res.status(500).json({ 
       message: 'Server error generating sales performance report', 
       error: error.message 
@@ -81,6 +84,7 @@ router.post('/generate', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('page').optional({ checkFalsy: true }).isInt({ min: 1 }),
@@ -99,7 +103,7 @@ router.get('/', [
     
     res.json(result);
   } catch (error) {
-    console.error('Error fetching sales performance reports:', error);
+    logger.error('Error fetching sales performance reports:', error);
     res.status(500).json({ 
       message: 'Server error fetching sales performance reports', 
       error: error.message 
@@ -112,6 +116,7 @@ router.get('/', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/:reportId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('reportId').isLength({ min: 1 }).withMessage('Report ID is required'),
@@ -125,7 +130,7 @@ router.get('/:reportId', [
     
     res.json(report);
   } catch (error) {
-    console.error('Error fetching sales performance report:', error);
+    logger.error('Error fetching sales performance report:', error);
     if (error.message === 'Sales performance report not found') {
       res.status(404).json({ message: error.message });
     } else {
@@ -142,6 +147,7 @@ router.get('/:reportId', [
 // @access  Private (requires 'manage_reports' permission)
 router.delete('/:reportId', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_reports'),
   sanitizeRequest,
   param('reportId').isLength({ min: 1 }).withMessage('Report ID is required'),
@@ -155,7 +161,7 @@ router.delete('/:reportId', [
     
     res.json(result);
   } catch (error) {
-    console.error('Error deleting sales performance report:', error);
+    logger.error('Error deleting sales performance report:', error);
     if (error.message === 'Sales performance report not found') {
       res.status(404).json({ message: error.message });
     } else {
@@ -172,6 +178,7 @@ router.delete('/:reportId', [
 // @access  Private (requires 'view_reports' permission)
 router.put('/:reportId/favorite', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('reportId').isLength({ min: 1 }).withMessage('Report ID is required'),
@@ -195,7 +202,7 @@ router.put('/:reportId/favorite', [
       isFavorite: report.isFavorite
     });
   } catch (error) {
-    console.error('Error updating favorite status:', error);
+    logger.error('Error updating favorite status:', error);
     res.status(500).json({ 
       message: 'Server error updating favorite status', 
       error: error.message 
@@ -208,6 +215,7 @@ router.put('/:reportId/favorite', [
 // @access  Private (requires 'view_reports' permission)
 router.put('/:reportId/tags', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('reportId').isLength({ min: 1 }).withMessage('Report ID is required'),
@@ -232,7 +240,7 @@ router.put('/:reportId/tags', [
       tags: report.tags
     });
   } catch (error) {
-    console.error('Error updating tags:', error);
+    logger.error('Error updating tags:', error);
     res.status(500).json({ 
       message: 'Server error updating tags', 
       error: error.message 
@@ -245,6 +253,7 @@ router.put('/:reportId/tags', [
 // @access  Private (requires 'view_reports' permission)
 router.put('/:reportId/notes', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('reportId').isLength({ min: 1 }).withMessage('Report ID is required'),
@@ -268,7 +277,7 @@ router.put('/:reportId/notes', [
       notes: report.notes
     });
   } catch (error) {
-    console.error('Error updating notes:', error);
+    logger.error('Error updating notes:', error);
     res.status(500).json({ 
       message: 'Server error updating notes', 
       error: error.message 
@@ -308,7 +317,7 @@ router.post('/:reportId/export', [
       reportName: report.reportName
     });
   } catch (error) {
-    console.error('Error exporting report:', error);
+    logger.error('Error exporting report:', error);
     res.status(500).json({ 
       message: 'Server error exporting report', 
       error: error.message 
@@ -321,6 +330,7 @@ router.post('/:reportId/export', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/stats/overview', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('startDate').optional().isISO8601(),
@@ -331,7 +341,7 @@ router.get('/stats/overview', [
     const stats = await SalesPerformance.getReportStats(req.query);
     res.json(stats);
   } catch (error) {
-    console.error('Error fetching report stats:', error);
+    logger.error('Error fetching report stats:', error);
     res.status(500).json({ 
       message: 'Server error fetching report stats', 
       error: error.message 
@@ -344,6 +354,7 @@ router.get('/stats/overview', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/quick/top-products', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('limit').optional().isInt({ min: 1, max: 20 }),
@@ -420,7 +431,7 @@ router.get('/quick/top-products', [
       period: { startDate, endDate }
     });
   } catch (error) {
-    console.error('Error fetching quick top products:', error);
+    logger.error('Error fetching quick top products:', error);
     res.status(500).json({ 
       message: 'Server error fetching quick top products', 
       error: error.message 
@@ -433,6 +444,7 @@ router.get('/quick/top-products', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/quick/top-customers', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('limit').optional().isInt({ min: 1, max: 20 }),
@@ -562,7 +574,7 @@ router.get('/quick/top-customers', [
       period: { startDate, endDate }
     });
   } catch (error) {
-    console.error('Error fetching quick top customers:', error);
+    logger.error('Error fetching quick top customers:', error);
     res.status(500).json({ 
       message: 'Server error fetching quick top customers', 
       error: error.message 
@@ -575,6 +587,7 @@ router.get('/quick/top-customers', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/quick/top-sales-reps', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('limit').optional().isInt({ min: 1, max: 20 }),
@@ -619,7 +632,7 @@ router.get('/quick/top-sales-reps', [
       period: { startDate, endDate }
     });
   } catch (error) {
-    console.error('Error fetching quick top sales reps:', error);
+    logger.error('Error fetching quick top sales reps:', error);
     res.status(500).json({ 
       message: 'Server error fetching quick top sales reps', 
       error: error.message 
@@ -632,6 +645,7 @@ router.get('/quick/top-sales-reps', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/quick/summary', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('period').optional().isIn(['7d', '30d', '90d', '1y']),
@@ -756,7 +770,7 @@ router.get('/quick/summary', [
       period: { startDate, endDate }
     });
   } catch (error) {
-    console.error('Error fetching quick summary:', error);
+    logger.error('Error fetching quick summary:', error);
     res.status(500).json({ 
       message: 'Server error fetching quick summary', 
       error: error.message 

@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
+const logger = require('../utils/logger');
 const CashPayment = require('../models/CashPayment'); // Still needed for new CashPayment() and static methods
 const Sales = require('../models/Sales'); // Still needed for model reference in populate
 const cashPaymentRepository = require('../repositories/CashPaymentRepository');
@@ -15,6 +17,7 @@ const salesRepository = require('../repositories/SalesRepository');
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
@@ -126,7 +129,7 @@ router.get('/', [
       }
     });
   } catch (error) {
-    console.error('Get cash payments error:', error);
+    logger.error('Get cash payments error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -140,6 +143,7 @@ router.get('/', [
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('create_orders'),
   body('date').optional().isISO8601().withMessage('Date must be a valid date'),
   body('amount').isFloat({ min: 0 }).withMessage('Amount must be a positive number'),
@@ -202,9 +206,20 @@ router.post('/', [
       }
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+
     let expenseAccountDoc = null;
     if (expenseAccount) {
-      expenseAccountDoc = await chartOfAccountsRepository.findById(expenseAccount);
+      expenseAccountDoc = await chartOfAccountsRepository.findOne({ 
+        _id: expenseAccount,
+        tenantId: tenantId 
+      });
       if (!expenseAccountDoc) {
         return res.status(400).json({
           success: false,
@@ -221,6 +236,7 @@ router.post('/', [
 
     // Create cash payment
     const cashPaymentData = {
+      tenantId: tenantId,
       date: date ? new Date(date) : new Date(),
       amount: parseFloat(amount),
       particular: resolvedParticular,
@@ -242,7 +258,7 @@ router.post('/', [
         const SupplierBalanceService = require('../services/supplierBalanceService');
         await SupplierBalanceService.recordPayment(supplier, amount, order);
       } catch (error) {
-        console.error('Error updating supplier balance for cash payment:', error);
+        logger.error('Error updating supplier balance for cash payment', { error: error.message });
         // Don't fail the cash payment creation if balance update fails
       }
     }
@@ -256,7 +272,7 @@ router.post('/', [
         const CustomerBalanceService = require('../services/customerBalanceService');
         await CustomerBalanceService.recordRefund(customer, amount, order);
       } catch (error) {
-        console.error('Error updating customer balance for cash payment:', error);
+        logger.error('Error updating customer balance for cash payment:', error);
         // Don't fail the cash payment creation if balance update fails
       }
     }
@@ -266,7 +282,7 @@ router.post('/', [
       const AccountingService = require('../services/accountingService');
       await AccountingService.recordCashPayment(cashPayment);
     } catch (error) {
-      console.error('Error creating accounting entries for cash payment:', error);
+      logger.error('Error creating accounting entries for cash payment', { error: error.message });
       // Don't fail the cash payment creation if accounting fails
     }
 
@@ -285,8 +301,8 @@ router.post('/', [
       data: cashPayment
     });
   } catch (error) {
-    console.error('Create cash payment error:', error);
-    console.error('Error stack:', error.stack);
+    logger.error('Create cash payment error:', { error: error });
+    logger.error('Error stack:', error.stack);
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -300,6 +316,7 @@ router.post('/', [
 // @access  Private
 router.get('/summary/date-range', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('fromDate').isISO8601().withMessage('From date is required and must be a valid date'),
   query('toDate').isISO8601().withMessage('To date is required and must be a valid date')
@@ -339,7 +356,7 @@ router.get('/summary/date-range', [
       }
     });
   } catch (error) {
-    console.error('Get cash payments summary error:', error);
+    logger.error('Get cash payments summary error', { error: error.message });
     res.status(500).json({ 
       success: false,
       message: 'Server error',

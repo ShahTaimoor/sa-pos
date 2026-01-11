@@ -11,6 +11,7 @@
  */
 
 const expenseAccountMapping = require('../config/expenseAccountMapping');
+const logger = require('../utils/logger');
 
 class ExpenseCategorizationService {
   constructor() {
@@ -359,7 +360,7 @@ class ExpenseCategorizationService {
     // This is a placeholder for future ML-based learning
     // Could store patterns in database for future use
     // For now, we'll just log it for analysis
-    console.log('Learning from categorization:', {
+    logger.info('Learning from categorization:', {
       accountCode: expenseData.accountCode,
       accountName: expenseData.accountName,
       description: expenseData.description,

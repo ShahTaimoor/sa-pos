@@ -9,32 +9,44 @@ class ChartOfAccountsRepository extends BaseRepository {
   /**
    * Find account by account code
    * @param {string} accountCode - Account code
+   * @param {string} tenantId - Tenant ID (required)
    * @param {object} options - Query options
    * @returns {Promise<ChartOfAccounts|null>}
    */
-  async findByAccountCode(accountCode, options = {}) {
-    return await this.findOne({ accountCode }, options);
+  async findByAccountCode(accountCode, tenantId, options = {}) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for findByAccountCode');
+    }
+    return await this.findOne({ accountCode, tenantId }, options);
   }
 
   /**
    * Find accounts by account type
    * @param {string} accountType - Account type
+   * @param {string} tenantId - Tenant ID (required)
    * @param {object} options - Query options
    * @returns {Promise<Array>}
    */
-  async findByAccountType(accountType, options = {}) {
-    return await this.findAll({ accountType }, options);
+  async findByAccountType(accountType, tenantId, options = {}) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for findByAccountType');
+    }
+    return await this.findAll({ accountType, tenantId }, options);
   }
 
   /**
    * Find accounts by account name (case-insensitive search)
    * @param {string} accountName - Account name pattern
+   * @param {string} tenantId - Tenant ID (required)
    * @param {object} options - Query options
    * @returns {Promise<Array>}
    */
-  async findByAccountName(accountName, options = {}) {
+  async findByAccountName(accountName, tenantId, options = {}) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for findByAccountName');
+    }
     return await this.findAll(
-      { accountName: { $regex: accountName, $options: 'i' } },
+      { accountName: { $regex: accountName, $options: 'i' }, tenantId },
       options
     );
   }
@@ -42,12 +54,16 @@ class ChartOfAccountsRepository extends BaseRepository {
   /**
    * Find accounts matching a pattern in account name
    * @param {string} pattern - Pattern to match
+   * @param {string} tenantId - Tenant ID (required)
    * @param {object} options - Query options
    * @returns {Promise<Array>}
    */
-  async findMatchingAccountName(pattern, options = {}) {
+  async findMatchingAccountName(pattern, tenantId, options = {}) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for findMatchingAccountName');
+    }
     return await this.findAll(
-      { accountName: { $regex: pattern, $options: 'i' } },
+      { accountName: { $regex: pattern, $options: 'i' }, tenantId },
       options
     );
   }
@@ -55,22 +71,39 @@ class ChartOfAccountsRepository extends BaseRepository {
   /**
    * Get account codes for matching account names
    * @param {string} accountName - Account name pattern
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<Array<string>>} - Array of account codes
    */
-  async getAccountCodesByName(accountName) {
+  async getAccountCodesByName(accountName, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getAccountCodesByName');
+    }
     const accounts = await this.Model.find({
-      accountName: { $regex: accountName, $options: 'i' }
+      accountName: { $regex: accountName, $options: 'i' },
+      tenantId: tenantId,
+      isDeleted: false,
+      isActive: true
     }).select('accountCode').lean();
     return accounts.map(a => a.accountCode);
   }
 
   /**
    * Resolve cash and bank account codes
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<{cashCode: string, bankCode: string}>}
    */
-  async resolveCashBankCodes() {
+  async resolveCashBankCodes(tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for resolving cash/bank codes');
+    }
+    
     try {
-      const accounts = await this.Model.find({ accountType: 'asset' })
+      const accounts = await this.Model.find({ 
+        tenantId: tenantId,
+        accountType: 'asset',
+        isDeleted: false,
+        isActive: true
+      })
         .select('accountCode accountName')
         .lean();
       const cash = accounts.find(a => /cash/i.test(a.accountName))?.accountCode || '1001';
@@ -84,42 +117,55 @@ class ChartOfAccountsRepository extends BaseRepository {
   /**
    * Find child accounts by parent account ID
    * @param {string} parentAccountId - Parent account ID
+   * @param {string} tenantId - Tenant ID (required)
    * @param {object} options - Query options
    * @returns {Promise<Array>}
    */
-  async findChildAccounts(parentAccountId, options = {}) {
-    return await this.findAll({ parentAccount: parentAccountId }, options);
+  async findChildAccounts(parentAccountId, tenantId, options = {}) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for findChildAccounts');
+    }
+    return await this.findAll({ parentAccount: parentAccountId, tenantId }, options);
   }
 
   /**
    * Get account hierarchy (uses model static method)
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<Array>}
    */
-  async getAccountHierarchy() {
-    return await this.Model.getAccountHierarchy();
+  async getAccountHierarchy(tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for account hierarchy');
+    }
+    return await this.Model.getAccountHierarchy(tenantId);
   }
 
   /**
    * Get account statistics
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<object>}
    */
-  async getStats() {
+  async getStats(tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for account statistics');
+    }
+    
     const [totalAccounts, accountsByType, totalAssets, totalLiabilities, totalEquity] = await Promise.all([
-      this.Model.countDocuments({ isActive: true }),
+      this.Model.countDocuments({ tenantId: tenantId, isActive: true, isDeleted: false }),
       this.Model.aggregate([
-        { $match: { isActive: true } },
+        { $match: { tenantId: tenantId, isActive: true, isDeleted: false } },
         { $group: { _id: '$accountType', count: { $sum: 1 } } }
       ]),
       this.Model.aggregate([
-        { $match: { accountType: 'asset', isActive: true } },
+        { $match: { tenantId: tenantId, accountType: 'asset', isActive: true, isDeleted: false } },
         { $group: { _id: null, total: { $sum: '$currentBalance' } } }
       ]),
       this.Model.aggregate([
-        { $match: { accountType: 'liability', isActive: true } },
+        { $match: { tenantId: tenantId, accountType: 'liability', isActive: true, isDeleted: false } },
         { $group: { _id: null, total: { $sum: '$currentBalance' } } }
       ]),
       this.Model.aggregate([
-        { $match: { accountType: 'equity', isActive: true } },
+        { $match: { tenantId: tenantId, accountType: 'equity', isActive: true, isDeleted: false } },
         { $group: { _id: null, total: { $sum: '$currentBalance' } } }
       ])
     ]);

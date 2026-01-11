@@ -197,17 +197,18 @@ const stockMovementSchema = new mongoose.Schema({
 });
 
 // Indexes for better performance
-stockMovementSchema.index({ product: 1, createdAt: -1 });
-stockMovementSchema.index({ movementType: 1, createdAt: -1 });
-stockMovementSchema.index({ referenceType: 1, referenceId: 1 });
-stockMovementSchema.index({ user: 1, createdAt: -1 });
-stockMovementSchema.index({ location: 1, createdAt: -1 });
-stockMovementSchema.index({ status: 1, createdAt: -1 });
-stockMovementSchema.index({ createdAt: -1 }); // For date range queries
-stockMovementSchema.index({ product: 1, movementType: 1, createdAt: -1 }); // Compound for product movements
-stockMovementSchema.index({ referenceNumber: 1 }); // For reference number lookups
-stockMovementSchema.index({ customer: 1, createdAt: -1 }); // For customer-related movements
-stockMovementSchema.index({ supplier: 1, createdAt: -1 }); // For supplier-related movements
+// Compound indexes for multi-tenant performance
+stockMovementSchema.index({ tenantId: 1, product: 1, createdAt: -1 });
+stockMovementSchema.index({ tenantId: 1, movementType: 1, createdAt: -1 });
+stockMovementSchema.index({ tenantId: 1, referenceType: 1, referenceId: 1 });
+stockMovementSchema.index({ tenantId: 1, user: 1, createdAt: -1 });
+stockMovementSchema.index({ tenantId: 1, location: 1, createdAt: -1 });
+stockMovementSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
+stockMovementSchema.index({ tenantId: 1, createdAt: -1 });
+stockMovementSchema.index({ tenantId: 1, product: 1, movementType: 1, createdAt: -1 });
+stockMovementSchema.index({ tenantId: 1, referenceNumber: 1 });
+stockMovementSchema.index({ tenantId: 1, customer: 1, createdAt: -1 });
+stockMovementSchema.index({ tenantId: 1, supplier: 1, createdAt: -1 });
 
 // Virtual for movement direction
 stockMovementSchema.virtual('isStockIn').get(function() {

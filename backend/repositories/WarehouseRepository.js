@@ -51,21 +51,27 @@ class WarehouseRepository extends BaseRepository {
   /**
    * Find warehouse by code
    * @param {string} code - Warehouse code
+   * @param {string} tenantId - Tenant ID
    * @param {object} options - Query options
    * @returns {Promise<Warehouse|null>}
    */
-  async findByCode(code, options = {}) {
-    const query = this.hasSoftDelete ? { code, isDeleted: false } : { code };
+  async findByCode(code, tenantId = null, options = {}) {
+    const query = { code };
+    if (tenantId) query.tenantId = tenantId;
+    if (this.hasSoftDelete) query.isDeleted = false;
     return this.Model.findOne(query, null, options);
   }
 
   /**
    * Find primary warehouse
+   * @param {string} tenantId - Tenant ID
    * @param {object} options - Query options
    * @returns {Promise<Warehouse|null>}
    */
-  async findPrimary(options = {}) {
-    const query = this.hasSoftDelete ? { isPrimary: true, isDeleted: false } : { isPrimary: true };
+  async findPrimary(tenantId = null, options = {}) {
+    const query = { isPrimary: true };
+    if (tenantId) query.tenantId = tenantId;
+    if (this.hasSoftDelete) query.isDeleted = false;
     return this.Model.findOne(query, null, options);
   }
 
@@ -82,11 +88,13 @@ class WarehouseRepository extends BaseRepository {
   /**
    * Check if warehouse code exists
    * @param {string} code - Warehouse code
+   * @param {string} tenantId - Tenant ID
    * @param {string} excludeId - ID to exclude from check
    * @returns {Promise<boolean>}
    */
-  async codeExists(code, excludeId = null) {
+  async codeExists(code, tenantId = null, excludeId = null) {
     const query = { code };
+    if (tenantId) query.tenantId = tenantId;
     if (excludeId) query._id = { $ne: excludeId };
     if (this.hasSoftDelete) query.isDeleted = false;
     return this.Model.exists(query);

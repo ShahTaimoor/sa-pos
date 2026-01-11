@@ -123,7 +123,7 @@ export const validateCurrency = (value, fieldName = 'This field') => {
     return `${fieldName} must be a valid currency amount`;
   }
   if (num > 999999.99) {
-    return `${fieldName} must be less than $999,999.99`;
+    return `${fieldName} must be less than 999,999.99`;
   }
   return null;
 };

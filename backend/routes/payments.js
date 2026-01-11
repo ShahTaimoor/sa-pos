@@ -2,7 +2,9 @@ const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const paymentService = require('../services/paymentService');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { sanitizeRequest, handleValidationErrors } = require('../middleware/validation');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -12,6 +14,7 @@ const router = express.Router();
 router.post('/process', [
   sanitizeRequest,
   auth,
+  tenantMiddleware,
   requirePermission('process_payments'),
   body('orderId').isMongoId().withMessage('Valid order ID is required'),
   body('paymentMethod').isIn(['cash', 'credit_card', 'debit_card', 'digital_wallet', 'bank_transfer', 'check', 'gift_card', 'store_credit']).withMessage('Valid payment method is required'),
@@ -40,7 +43,7 @@ router.post('/process', [
     });
 
   } catch (error) {
-    console.error('Payment processing error:', error);
+    logger.error('Payment processing error:', { error: error });
     res.status(400).json({
       success: false,
       message: error.message || 'Payment processing failed'
@@ -80,7 +83,7 @@ router.post('/:paymentId/refund', [
     });
 
   } catch (error) {
-    console.error('Refund processing error:', error);
+    logger.error('Refund processing error:', { error: error });
     res.status(400).json({
       success: false,
       message: error.message || 'Refund processing failed'
@@ -119,7 +122,7 @@ router.post('/transactions/:transactionId/void', [
     });
 
   } catch (error) {
-    console.error('Void transaction error:', error);
+    logger.error('Void transaction error:', { error: error });
     res.status(400).json({
       success: false,
       message: error.message || 'Void transaction failed'
@@ -133,6 +136,7 @@ router.post('/transactions/:transactionId/void', [
 router.get('/', [
   sanitizeRequest,
   auth,
+  tenantMiddleware,
   requirePermission('view_payments'),
   query('orderId').optional().isMongoId().withMessage('Valid order ID is required'),
   query('paymentId').optional().isMongoId().withMessage('Valid payment ID is required'),
@@ -160,7 +164,7 @@ router.get('/', [
     });
 
   } catch (error) {
-    console.error('Get payment history error:', error);
+    logger.error('Get payment history error:', { error: error });
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to get payment history'
@@ -174,6 +178,7 @@ router.get('/', [
 router.get('/stats', [
   sanitizeRequest,
   auth,
+  tenantMiddleware,
   requirePermission('view_payment_stats'),
   query('startDate').optional().isISO8601().withMessage('Valid start date is required'),
   query('endDate').optional().isISO8601().withMessage('Valid end date is required')
@@ -196,7 +201,7 @@ router.get('/stats', [
     });
 
   } catch (error) {
-    console.error('Get payment stats error:', error);
+    logger.error('Get payment stats error:', { error: error });
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to get payment statistics'
@@ -293,7 +298,7 @@ router.get('/methods', [
     });
 
   } catch (error) {
-    console.error('Get payment methods error:', error);
+    logger.error('Get payment methods error:', { error: error });
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to get payment methods'
@@ -307,6 +312,7 @@ router.get('/methods', [
 router.get('/:paymentId', [
   sanitizeRequest,
   auth,
+  tenantMiddleware,
   requirePermission('view_payments'),
   param('paymentId').isMongoId().withMessage('Valid payment ID is required')
 ], async (req, res) => {
@@ -332,7 +338,7 @@ router.get('/:paymentId', [
         message: error.message
       });
     }
-    console.error('Get payment details error:', error);
+    logger.error('Get payment details error:', { error: error });
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to get payment details'

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const BankPayment = require('../models/BankPayment'); // Still needed for new BankPayment() and static methods
 const Bank = require('../models/Bank'); // Still needed for model reference in populate
 const Sales = require('../models/Sales'); // Still needed for model reference in populate
@@ -17,6 +18,7 @@ const salesRepository = require('../repositories/SalesRepository');
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
@@ -129,7 +131,7 @@ router.get('/', [
       }
     });
   } catch (error) {
-    console.error('Get bank payments error:', error);
+    logger.error('Get bank payments error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -143,6 +145,7 @@ router.get('/', [
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('create_orders'),
   body('date').optional().isISO8601().withMessage('Date must be a valid date'),
   body('amount').isFloat({ min: 0 }).withMessage('Amount must be a positive number'),
@@ -227,9 +230,20 @@ router.post('/', [
       });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+
     let expenseAccountDoc = null;
     if (expenseAccount) {
-      expenseAccountDoc = await chartOfAccountsRepository.findById(expenseAccount);
+      expenseAccountDoc = await chartOfAccountsRepository.findOne({ 
+        _id: expenseAccount,
+        tenantId: tenantId 
+      });
       if (!expenseAccountDoc) {
         return res.status(400).json({
           success: false,
@@ -246,6 +260,7 @@ router.post('/', [
 
     // Create bank payment
     const bankPaymentData = {
+      tenantId: tenantId,
       date: date ? new Date(date) : new Date(),
       amount: parseFloat(amount),
       particular: resolvedParticular,
@@ -268,7 +283,7 @@ router.post('/', [
         const SupplierBalanceService = require('../services/supplierBalanceService');
         await SupplierBalanceService.recordPayment(supplier, amount, order);
       } catch (error) {
-        console.error('Error updating supplier balance for bank payment:', error);
+        logger.error('Error updating supplier balance for bank payment:', error);
         // Don't fail the bank payment creation if balance update fails
       }
     }
@@ -282,7 +297,7 @@ router.post('/', [
         const CustomerBalanceService = require('../services/customerBalanceService');
         await CustomerBalanceService.recordRefund(customer, amount, order);
       } catch (error) {
-        console.error('Error updating customer balance for bank payment:', error);
+        logger.error('Error updating customer balance for bank payment:', error);
         // Don't fail the bank payment creation if balance update fails
       }
     }
@@ -290,9 +305,10 @@ router.post('/', [
     // Create accounting entries
     try {
       const AccountingService = require('../services/accountingService');
+const logger = require('../utils/logger');
       await AccountingService.recordBankPayment(bankPayment);
     } catch (error) {
-      console.error('Error creating accounting entries for bank payment:', error);
+      logger.error('Error creating accounting entries for bank payment:', error);
       // Don't fail the bank payment creation if accounting fails
     }
 
@@ -312,7 +328,7 @@ router.post('/', [
       data: bankPayment
     });
   } catch (error) {
-    console.error('Create bank payment error:', error);
+    logger.error('Create bank payment error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -326,6 +342,7 @@ router.post('/', [
 // @access  Private
 router.get('/summary/date-range', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('fromDate').isISO8601().withMessage('From date is required and must be a valid date'),
   query('toDate').isISO8601().withMessage('To date is required and must be a valid date')
@@ -365,7 +382,7 @@ router.get('/summary/date-range', [
       }
     });
   } catch (error) {
-    console.error('Get bank payments summary error:', error);
+    logger.error('Get bank payments summary error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',

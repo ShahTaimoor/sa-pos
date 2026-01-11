@@ -48,7 +48,7 @@ class StripeGateway {
       };
 
     } catch (error) {
-      console.error('Stripe payment error:', error);
+      logger.error('Stripe payment error:', { error: error });
       
       return {
         success: false,
@@ -87,7 +87,7 @@ class StripeGateway {
       };
 
     } catch (error) {
-      console.error('Stripe refund error:', error);
+      logger.error('Stripe refund error:', { error: error });
       
       return {
         success: false,
@@ -118,7 +118,7 @@ class StripeGateway {
       };
 
     } catch (error) {
-      console.error('Stripe void error:', error);
+      logger.error('Stripe void error:', { error: error });
       
       return {
         success: false,
@@ -227,7 +227,7 @@ class StripeGateway {
 
       return customer;
     } catch (error) {
-      console.error('Stripe create customer error:', error);
+      logger.error('Stripe create customer error:', { error: error });
       throw error;
     }
   }
@@ -242,7 +242,7 @@ class StripeGateway {
 
       return paymentMethods.data;
     } catch (error) {
-      console.error('Stripe get payment methods error:', error);
+      logger.error('Stripe get payment methods error:', { error: error });
       throw error;
     }
   }

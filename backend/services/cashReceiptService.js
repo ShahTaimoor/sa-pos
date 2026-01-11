@@ -102,7 +102,10 @@ class CashReceiptService {
    * @returns {Promise<Array>}
    */
   async getCustomersByIds(customerIds) {
-    return await CustomerRepository.findByIds(customerIds, ['name', 'businessName']);
+    return await CustomerRepository.findByIds(customerIds, { 
+      select: 'name businessName',
+      lean: true 
+    });
   }
 }
 

@@ -4,6 +4,7 @@ const { query, validationResult } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const InventoryAlertService = require('../services/inventoryAlertService');
 const AutoPurchaseOrderService = require('../services/autoPurchaseOrderService');
+const logger = require('../utils/logger');
 
 // @route   GET /api/inventory-alerts
 // @desc    Get low stock alerts
@@ -35,7 +36,7 @@ router.get('/', [
       count: alerts.length
     });
   } catch (error) {
-    console.error('Get inventory alerts error:', error);
+    logger.error('Get inventory alerts error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -59,7 +60,7 @@ router.get('/summary', [
       data: summary
     });
   } catch (error) {
-    console.error('Get alert summary error:', error);
+    logger.error('Get alert summary error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -84,7 +85,7 @@ router.get('/products-needing-reorder', [
       count: products.length
     });
   } catch (error) {
-    console.error('Get products needing reorder error:', error);
+    logger.error('Get products needing reorder error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -127,8 +128,8 @@ router.post('/generate-purchase-orders', [
       ...result
     });
   } catch (error) {
-    console.error('Generate purchase orders error:', error);
-    console.error('Error stack:', error.stack);
+    logger.error('Generate purchase orders error:', { error: error });
+    logger.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Server error',

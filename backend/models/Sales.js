@@ -57,11 +57,17 @@ const orderItemSchema = new mongoose.Schema({
 });
 
 const orderSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
+  
   // Order Information
   orderNumber: {
     type: String,
-    required: false,
-    unique: true
+    required: false
   },
   orderType: {
     type: String,
@@ -220,16 +226,14 @@ const orderSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes for better query performance
-// orderNumber index removed - already has unique: true in field definition
-orderSchema.index({ customer: 1, createdAt: -1 });
-orderSchema.index({ status: 1, createdAt: -1 });
-orderSchema.index({ 'payment.status': 1 });
-orderSchema.index({ createdAt: -1 }); // For date range queries
-orderSchema.index({ orderType: 1, status: 1, createdAt: -1 }); // Compound index for common filters
-orderSchema.index({ createdBy: 1, createdAt: -1 }); // For user-specific queries
-orderSchema.index({ 'pricing.total': -1 }); // For sorting by total
-orderSchema.index({ status: 1, 'payment.status': 1 }); // For payment status filtering
+// Compound indexes for multi-tenant performance
+orderSchema.index({ tenantId: 1, orderNumber: 1 }, { unique: true, sparse: true });
+orderSchema.index({ tenantId: 1, createdAt: -1 }); // Date-based queries with tenant
+orderSchema.index({ tenantId: 1, customer: 1, createdAt: -1 });
+orderSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
+orderSchema.index({ tenantId: 1, 'payment.status': 1, createdAt: -1 });
+orderSchema.index({ tenantId: 1, orderType: 1, status: 1, createdAt: -1 });
+orderSchema.index({ tenantId: 1, createdBy: 1, createdAt: -1 });
 
 // Pre-save middleware to generate order number using atomic Counter
 orderSchema.pre('save', async function(next) {

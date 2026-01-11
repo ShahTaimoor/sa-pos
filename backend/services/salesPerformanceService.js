@@ -4,6 +4,7 @@ const Product = require('../models/Product');
 const Customer = require('../models/Customer');
 const User = require('../models/User');
 const Category = require('../models/Category');
+const logger = require('../utils/logger');
 
 class SalesPerformanceService {
   constructor() {
@@ -102,7 +103,7 @@ class SalesPerformanceService {
         throw error;
       }
     } catch (error) {
-      console.error('Error generating sales performance report:', error);
+      logger.error('Error generating sales performance report:', error);
       throw error;
     }
   }
@@ -216,7 +217,7 @@ class SalesPerformanceService {
       report.topProducts = topProducts;
       await report.save();
     } catch (error) {
-      console.error('Error generating top products data:', error);
+      logger.error('Error generating top products data:', error);
       throw error;
     }
   }
@@ -387,7 +388,7 @@ class SalesPerformanceService {
       report.topCustomers = topCustomers;
       await report.save();
     } catch (error) {
-      console.error('Error generating top customers data:', error);
+      logger.error('Error generating top customers data:', error);
       throw error;
     }
   }
@@ -485,7 +486,7 @@ class SalesPerformanceService {
       report.topSalesReps = topSalesReps;
       await report.save();
     } catch (error) {
-      console.error('Error generating top sales reps data:', error);
+      logger.error('Error generating top sales reps data:', error);
       throw error;
     }
   }
@@ -606,7 +607,7 @@ class SalesPerformanceService {
       report.categoryPerformance = categoryPerformanceData;
       await report.save();
     } catch (error) {
-      console.error('Error generating category performance data:', error);
+      logger.error('Error generating category performance data:', error);
       throw error;
     }
   }
@@ -675,7 +676,7 @@ class SalesPerformanceService {
 
       await report.save();
     } catch (error) {
-      console.error('Error generating summary data:', error);
+      logger.error('Error generating summary data:', error);
       throw error;
     }
   }
@@ -751,7 +752,7 @@ class SalesPerformanceService {
 
       await report.save();
     } catch (error) {
-      console.error('Error generating comparison data:', error);
+      logger.error('Error generating comparison data:', error);
       throw error;
     }
   }
@@ -824,7 +825,7 @@ class SalesPerformanceService {
 
       await report.save();
     } catch (error) {
-      console.error('Error generating time series data:', error);
+      logger.error('Error generating time series data:', error);
       throw error;
     }
   }
@@ -836,7 +837,7 @@ class SalesPerformanceService {
       report.insights = insights;
       await report.save();
     } catch (error) {
-      console.error('Error generating insights:', error);
+      logger.error('Error generating insights:', error);
       throw error;
     }
   }
@@ -1184,7 +1185,7 @@ class SalesPerformanceService {
         }
       };
     } catch (error) {
-      console.error('Error fetching sales performance reports:', error);
+      logger.error('Error fetching sales performance reports:', error);
       throw error;
     }
   }
@@ -1207,7 +1208,7 @@ class SalesPerformanceService {
 
       return report;
     } catch (error) {
-      console.error('Error fetching sales performance report:', error);
+      logger.error('Error fetching sales performance report:', error);
       throw error;
     }
   }
@@ -1223,7 +1224,7 @@ class SalesPerformanceService {
       await SalesPerformance.findOneAndDelete({ reportId });
       return { message: 'Sales performance report deleted successfully' };
     } catch (error) {
-      console.error('Error deleting sales performance report:', error);
+      logger.error('Error deleting sales performance report:', error);
       throw error;
     }
   }

@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const ledgerAccountService = require('../services/ledgerAccountService');
 const supplierService = require('../services/supplierService');
 const supplierRepository = require('../repositories/SupplierRepository');
@@ -176,6 +177,7 @@ const deleteSupplierWithLedger = async (supplierId, userId) => {
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 999999 }),
   query('all').optional({ checkFalsy: true }).isBoolean(),
@@ -198,7 +200,7 @@ router.get('/', [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      console.error('Suppliers validation errors:', errors.array());
+      logger.error('Suppliers validation errors:', errors.array());
       return res.status(400).json({ 
         message: 'Invalid request. Please check your input.',
         errors: errors.array() 
@@ -213,7 +215,7 @@ router.get('/', [
       pagination: result.pagination
     });
   } catch (error) {
-    console.error('Get suppliers error:', error);
+    logger.error('Get suppliers error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -221,7 +223,7 @@ router.get('/', [
 // @route   GET /api/suppliers/:id
 // @desc    Get single supplier
 // @access  Private
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
     const supplier = await supplierService.getSupplierById(req.params.id);
     res.json({ supplier });
@@ -229,7 +231,7 @@ router.get('/:id', auth, async (req, res) => {
     if (error.message === 'Supplier not found') {
       return res.status(404).json({ message: 'Supplier not found' });
     }
-    console.error('Get supplier error:', error);
+    logger.error('Get supplier error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -239,6 +241,7 @@ router.get('/:id', auth, async (req, res) => {
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('create_suppliers'),
   body('companyName').trim().isLength({ min: 1 }).withMessage('Company name is required'),
   body('contactPerson.name').trim().isLength({ min: 1 }).withMessage('Contact name is required'),
@@ -265,8 +268,26 @@ router.post('/', [
     if (cleanData.taxId === '') cleanData.taxId = undefined;
     if (cleanData.openingBalance === '') cleanData.openingBalance = undefined;
     
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Check uniqueness within tenant before creating
+    if (cleanData.email) {
+      const emailExists = await supplierService.checkEmailExists(cleanData.email, null, tenantId);
+      if (emailExists) {
+        return res.status(400).json({ message: 'Supplier with this email already exists' });
+      }
+    }
+    
+    if (cleanData.companyName) {
+      const companyNameExists = await supplierService.checkCompanyNameExists(cleanData.companyName, null, tenantId);
+      if (companyNameExists) {
+        return res.status(400).json({ message: 'Supplier with this company name already exists' });
+      }
+    }
+    
     const supplierData = {
       ...cleanData,
+      tenantId: tenantId, // Ensure tenantId is set
       createdBy: req.user._id
     };
     
@@ -277,7 +298,7 @@ router.post('/', [
       supplier
     });
   } catch (error) {
-    console.error('Create supplier error:', error);
+    logger.error('Create supplier error:', { error: error });
     if (error.code === 11000) {
       return res.status(400).json({ message: 'Supplier with this email already exists' });
     }
@@ -294,6 +315,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('edit_suppliers'),
   body('companyName').optional().trim().isLength({ min: 1 }),
   body('contactPerson.name').optional().trim().isLength({ min: 1 }),
@@ -313,6 +335,23 @@ router.put('/:id', [
     if (req.body.openingBalance === '') {
       req.body.openingBalance = undefined;
     }
+    
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Check uniqueness within tenant before updating
+    if (req.body.email) {
+      const emailExists = await supplierService.checkEmailExists(req.body.email, req.params.id, tenantId);
+      if (emailExists) {
+        return res.status(400).json({ message: 'Supplier with this email already exists' });
+      }
+    }
+    
+    if (req.body.companyName) {
+      const companyNameExists = await supplierService.checkCompanyNameExists(req.body.companyName, req.params.id, tenantId);
+      if (companyNameExists) {
+        return res.status(400).json({ message: 'Supplier with this company name already exists' });
+      }
+    }
 
     const supplier = await updateSupplierWithLedger(
       req.params.id,
@@ -329,7 +368,7 @@ router.put('/:id', [
       supplier
     });
   } catch (error) {
-    console.error('Update supplier error:', error);
+    logger.error('Update supplier error:', { error: error });
     if (error.code === 11000) {
       return res.status(400).json({ message: 'Supplier with this email already exists' });
     }
@@ -342,6 +381,7 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('delete_suppliers')
 ], async (req, res) => {
   try {
@@ -353,7 +393,7 @@ router.delete('/:id', [
     
     res.json({ message: 'Supplier deleted successfully' });
   } catch (error) {
-    console.error('Delete supplier error:', error);
+    logger.error('Delete supplier error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -363,6 +403,7 @@ router.delete('/:id', [
 // @access  Private
 router.post('/:id/restore', [
   auth,
+  tenantMiddleware,
   requirePermission('delete_suppliers')
 ], async (req, res) => {
   try {
@@ -375,7 +416,7 @@ router.post('/:id/restore', [
     await supplierRepository.restore(req.params.id);
     res.json({ message: 'Supplier restored successfully' });
   } catch (error) {
-    console.error('Restore supplier error:', error);
+    logger.error('Restore supplier error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -385,16 +426,18 @@ router.post('/:id/restore', [
 // @access  Private
 router.get('/deleted', [
   auth,
+  tenantMiddleware,
   requirePermission('view_suppliers')
 ], async (req, res) => {
   try {
     const supplierRepository = require('../repositories/SupplierRepository');
+const logger = require('../utils/logger');
     const deletedSuppliers = await supplierRepository.findDeleted({}, {
       sort: { deletedAt: -1 }
     });
     res.json(deletedSuppliers);
   } catch (error) {
-    console.error('Get deleted suppliers error:', error);
+    logger.error('Get deleted suppliers error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -402,13 +445,14 @@ router.get('/deleted', [
 // @route   GET /api/suppliers/search/:query
 // @desc    Search suppliers by company name, contact person, or email
 // @access  Private
-router.get('/search/:query', auth, async (req, res) => {
+router.get('/search/:query', [auth, tenantMiddleware], async (req, res) => {
   try {
     const query = req.params.query;
-    const suppliers = await supplierService.searchSuppliers(query, 10);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const suppliers = await supplierService.searchSuppliers(query, 10, tenantId);
     res.json({ suppliers });
   } catch (error) {
-    console.error('Search suppliers error:', error);
+    logger.error('Search suppliers error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -416,7 +460,7 @@ router.get('/search/:query', auth, async (req, res) => {
 // @route   GET /api/suppliers/check-email/:email
 // @desc    Check if email already exists
 // @access  Private
-router.get('/check-email/:email', auth, async (req, res) => {
+router.get('/check-email/:email', [auth, tenantMiddleware], async (req, res) => {
   try {
     const email = req.params.email;
     const excludeId = req.query.excludeId; // Optional: exclude current supplier when editing
@@ -426,20 +470,17 @@ router.get('/check-email/:email', auth, async (req, res) => {
     }
     
     // Use case-insensitive search to match how emails are stored (lowercase)
+    const tenantId = req.tenantId || req.user?.tenantId;
     const emailLower = email.trim().toLowerCase();
-    const query = { email: emailLower };
-    if (excludeId && isValidObjectId(excludeId)) {
-      query._id = { $ne: excludeId };
-    }
     
-    const exists = await supplierService.supplierExists(query);
+    const exists = await supplierService.checkEmailExists(emailLower, excludeId, tenantId);
     
     res.json({ 
       exists,
       email: emailLower
     });
   } catch (error) {
-    console.error('Check email error:', error);
+    logger.error('Check email error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -447,23 +488,24 @@ router.get('/check-email/:email', auth, async (req, res) => {
 // @route   GET /api/suppliers/check-company-name/:companyName
 // @desc    Check if company name already exists
 // @access  Private
-router.get('/check-company-name/:companyName', auth, async (req, res) => {
+router.get('/check-company-name/:companyName', [auth, tenantMiddleware], async (req, res) => {
   try {
     const companyName = req.params.companyName;
     const excludeId = req.query.excludeId; // Optional: exclude current supplier when editing
+    const tenantId = req.tenantId || req.user?.tenantId;
     
     if (!companyName || companyName.trim() === '') {
       return res.json({ exists: false });
     }
     
-    const exists = await supplierService.checkCompanyNameExists(companyName, excludeId);
+    const exists = await supplierService.checkCompanyNameExists(companyName, excludeId, tenantId);
     
     res.json({ 
       exists,
       companyName: companyName.trim()
     });
   } catch (error) {
-    console.error('Check company name error:', error);
+    logger.error('Check company name error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -471,7 +513,7 @@ router.get('/check-company-name/:companyName', auth, async (req, res) => {
 // @route   GET /api/suppliers/check-contact-name/:contactName
 // @desc    Check if contact person name already exists
 // @access  Private
-router.get('/check-contact-name/:contactName', auth, async (req, res) => {
+router.get('/check-contact-name/:contactName', [auth, tenantMiddleware], async (req, res) => {
   try {
     const contactName = req.params.contactName;
     const excludeId = req.query.excludeId; // Optional: exclude current supplier when editing
@@ -481,8 +523,12 @@ router.get('/check-contact-name/:contactName', auth, async (req, res) => {
     }
     
     // Use case-insensitive search (contact names are stored in uppercase via transform)
+    const tenantId = req.tenantId || req.user?.tenantId;
     const contactNameTrimmed = contactName.trim();
-    const query = { 'contactPerson.name': { $regex: new RegExp(`^${contactNameTrimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } };
+    const query = { 
+      'contactPerson.name': { $regex: new RegExp(`^${contactNameTrimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+      tenantId: tenantId // Scope to tenant
+    };
     if (excludeId && isValidObjectId(excludeId)) {
       query._id = { $ne: excludeId };
     }
@@ -494,7 +540,7 @@ router.get('/check-contact-name/:contactName', auth, async (req, res) => {
       contactName: contactNameTrimmed
     });
   } catch (error) {
-    console.error('Check contact name error:', error);
+    logger.error('Check contact name error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -541,18 +587,31 @@ router.post('/', [
     
     const supplierData = cleanData;
     
-    // Check if supplier with same email already exists (only if email is provided)
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Check if supplier with same email already exists (only if email is provided, within tenant)
     if (supplierData.email) {
-      const emailExists = await supplierService.supplierExists({ email: supplierData.email });
+      const emailExists = await supplierService.checkEmailExists(supplierData.email, null, tenantId);
       if (emailExists) {
         return res.status(400).json({ 
           message: 'Supplier with this email already exists' 
         });
       }
     }
+    
+    // Check if supplier with same company name already exists (within tenant)
+    if (supplierData.companyName) {
+      const companyNameExists = await supplierService.checkCompanyNameExists(supplierData.companyName, null, tenantId);
+      if (companyNameExists) {
+        return res.status(400).json({ 
+          message: 'Supplier with this company name already exists' 
+        });
+      }
+    }
 
     const supplier = await saveSupplierWithLedger({
       ...supplierData,
+      tenantId: tenantId, // Ensure tenantId is set
       createdBy: req.user._id
     }, req.user._id);
 
@@ -562,7 +621,7 @@ router.post('/', [
       supplier
     });
   } catch (error) {
-    console.error('Create supplier error:', error);
+    logger.error('Create supplier error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -570,15 +629,16 @@ router.post('/', [
 // @route   GET /api/suppliers/active/list
 // @desc    Get list of active suppliers for dropdowns
 // @access  Private
-router.get('/active/list', auth, async (req, res) => {
+router.get('/active/list', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const suppliers = await supplierService.getAllSuppliers({ status: 'active' });
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const suppliers = await supplierService.getAllSuppliers({ status: 'active', tenantId: tenantId });
     
     // Transform supplier names to uppercase
     const transformedSuppliers = suppliers.map(transformSupplierToUppercase);
     res.json({ suppliers: transformedSuppliers });
   } catch (error) {
-    console.error('Get active suppliers list error:', error);
+    logger.error('Get active suppliers list error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -588,6 +648,7 @@ router.get('/active/list', auth, async (req, res) => {
 // @access  Private
 router.post('/import/excel', [
   auth,
+  tenantMiddleware,
   requirePermission('create_suppliers'),
   upload.single('file')
 ], async (req, res) => {
@@ -648,12 +709,15 @@ router.post('/import/excel', [
           continue;
         }
         
-        // Check if supplier already exists
-        const supplierExists = await supplierService.supplierExists({ 
-          companyName: supplierData.companyName.toString().trim()
-        });
+        // Check if supplier already exists (within tenant)
+        const tenantId = req.tenantId || req.user?.tenantId;
+        const companyNameExists = await supplierService.checkCompanyNameExists(
+          supplierData.companyName.toString().trim(), 
+          null, 
+          tenantId
+        );
         
-        if (supplierExists) {
+        if (companyNameExists) {
           results.errors.push({
             row: i + 2,
             error: `Supplier already exists with company name: ${supplierData.companyName}`
@@ -678,6 +742,7 @@ router.post('/import/excel', [
           rating: parseFloat(supplierData.rating) || 3,
           status: supplierData.status.toString().toLowerCase(),
           notes: supplierData.notes.toString().trim() || '',
+          tenantId: tenantId, // Ensure tenantId is set
           createdBy: req.user._id
         });
         
@@ -701,7 +766,7 @@ router.post('/import/excel', [
     });
     
   } catch (error) {
-    console.error('Excel import error:', error);
+    logger.error('Excel import error:', { error: error });
     res.status(500).json({ message: 'Import failed' });
   }
 });
@@ -709,17 +774,18 @@ router.post('/import/excel', [
 // @route   POST /api/suppliers/export/excel
 // @desc    Export suppliers to Excel
 // @access  Private
-router.post('/export/excel', [auth, requirePermission('view_suppliers')], async (req, res) => {
+router.post('/export/excel', [auth, tenantMiddleware, requirePermission('view_suppliers')], async (req, res) => {
   try {
     const { filters = {} } = req.body;
     
     // Build query based on filters
+    const tenantId = req.tenantId || req.user?.tenantId;
     const query = {};
     if (filters.businessType) query.businessType = filters.businessType;
     if (filters.status) query.status = filters.status;
     if (filters.reliability) query.reliability = filters.reliability;
     
-    const suppliers = await supplierService.getSuppliersForExport(query);
+    const suppliers = await supplierService.getSuppliersForExport(query, tenantId);
     
     // Prepare Excel data
     const excelData = suppliers.map(supplier => ({
@@ -783,7 +849,7 @@ router.post('/export/excel', [auth, requirePermission('view_suppliers')], async 
     });
     
   } catch (error) {
-    console.error('Excel export error:', error);
+    logger.error('Excel export error:', { error: error });
     res.status(500).json({ message: 'Export failed' });
   }
 });
@@ -791,7 +857,7 @@ router.post('/export/excel', [auth, requirePermission('view_suppliers')], async 
 // @route   GET /api/suppliers/download/:filename
 // @desc    Download exported file
 // @access  Private
-router.get('/download/:filename', [auth, requirePermission('view_suppliers')], (req, res) => {
+router.get('/download/:filename', [auth, tenantMiddleware, requirePermission('view_suppliers')], (req, res) => {
   try {
     const filename = req.params.filename;
     const filepath = path.join('exports', filename);
@@ -802,13 +868,13 @@ router.get('/download/:filename', [auth, requirePermission('view_suppliers')], (
     
     res.download(filepath, filename, (err) => {
       if (err) {
-        console.error('Download error:', err);
+        logger.error('Download error:', { error: err });
         res.status(500).json({ message: 'Download failed' });
       }
     });
     
   } catch (error) {
-    console.error('Download error:', error);
+    logger.error('Download error:', { error: error });
     res.status(500).json({ message: 'Download failed' });
   }
 });
@@ -816,7 +882,7 @@ router.get('/download/:filename', [auth, requirePermission('view_suppliers')], (
 // @route   GET /api/suppliers/template/excel
 // @desc    Download Excel template
 // @access  Private
-router.get('/template/excel', [auth, requirePermission('create_suppliers')], (req, res) => {
+router.get('/template/excel', [auth, tenantMiddleware, requirePermission('create_suppliers')], (req, res) => {
   try {
     const templateData = [
       {
@@ -871,13 +937,13 @@ router.get('/template/excel', [auth, requirePermission('create_suppliers')], (re
     
     res.download(filepath, filename, (err) => {
       if (err) {
-        console.error('Download error:', err);
+        logger.error('Download error:', { error: err });
         res.status(500).json({ message: 'Failed to download template' });
       }
     });
     
   } catch (error) {
-    console.error('Template error:', error);
+    logger.error('Template error:', { error: error });
     res.status(500).json({ message: 'Failed to generate template' });
   }
 });

@@ -1,5 +1,6 @@
 const Supplier = require('../models/Supplier');
 const PurchaseOrder = require('../models/PurchaseOrder');
+const logger = require('../utils/logger');
 
 class SupplierBalanceService {
   /**
@@ -39,7 +40,7 @@ class SupplierBalanceService {
         { new: true }
       );
 
-      console.log(`Supplier ${supplierId} balance updated:`, {
+      logger.info(`Supplier ${supplierId} balance updated:`, {
         pendingBalance: updatedSupplier.pendingBalance,
         advanceBalance: updatedSupplier.advanceBalance,
         paymentAmount
@@ -47,7 +48,7 @@ class SupplierBalanceService {
 
       return updatedSupplier;
     } catch (error) {
-      console.error('Error recording supplier payment:', error);
+      logger.error('Error recording supplier payment:', error);
       throw error;
     }
   }
@@ -73,7 +74,7 @@ class SupplierBalanceService {
         { new: true }
       );
 
-      console.log(`Supplier ${supplierId} purchase recorded:`, {
+      logger.info(`Supplier ${supplierId} purchase recorded:`, {
         purchaseAmount,
         newPendingBalance: updatedSupplier.pendingBalance,
         purchaseOrderId
@@ -81,7 +82,7 @@ class SupplierBalanceService {
 
       return updatedSupplier;
     } catch (error) {
-      console.error('Error recording supplier purchase:', error);
+      logger.error('Error recording supplier purchase:', error);
       throw error;
     }
   }
@@ -123,7 +124,7 @@ class SupplierBalanceService {
         { new: true }
       );
 
-      console.log(`Supplier ${supplierId} refund recorded:`, {
+      logger.info(`Supplier ${supplierId} refund recorded:`, {
         refundAmount,
         newPendingBalance: updatedSupplier.pendingBalance,
         newAdvanceBalance: updatedSupplier.advanceBalance,
@@ -132,7 +133,7 @@ class SupplierBalanceService {
 
       return updatedSupplier;
     } catch (error) {
-      console.error('Error recording supplier refund:', error);
+      logger.error('Error recording supplier refund:', error);
       throw error;
     }
   }
@@ -177,7 +178,7 @@ class SupplierBalanceService {
         }))
       };
     } catch (error) {
-      console.error('Error getting supplier balance summary:', error);
+      logger.error('Error getting supplier balance summary:', error);
       throw error;
     }
   }
@@ -221,7 +222,7 @@ class SupplierBalanceService {
         { new: true }
       );
 
-      console.log(`Supplier ${supplierId} balance recalculated:`, {
+      logger.info(`Supplier ${supplierId} balance recalculated:`, {
         totalPurchased,
         totalPaid,
         calculatedPendingBalance,
@@ -230,7 +231,7 @@ class SupplierBalanceService {
 
       return updatedSupplier;
     } catch (error) {
-      console.error('Error recalculating supplier balance:', error);
+      logger.error('Error recalculating supplier balance:', error);
       throw error;
     }
   }
@@ -260,7 +261,7 @@ class SupplierBalanceService {
         advanceBalance: supplier.advanceBalance
       };
     } catch (error) {
-      console.error('Error checking purchase eligibility:', error);
+      logger.error('Error checking purchase eligibility:', error);
       throw error;
     }
   }

@@ -205,6 +205,12 @@ export const componentRegistry = {
     allowMultiple: true,
     component: () => import('../pages/AccountLedger').then(m => m.default || m.AccountLedger)
   },
+  '/account-ledger-summary': {
+    title: 'Account Ledger Summary',
+    icon: 'BarChart3',
+    allowMultiple: true,
+    component: () => import('../pages/AccountLedgerSummary').then(m => m.default || m.AccountLedgerSummary)
+  },
   '/journal-vouchers': {
     title: 'Journal Vouchers',
     icon: 'FileText',

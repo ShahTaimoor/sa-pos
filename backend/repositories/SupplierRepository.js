@@ -10,22 +10,32 @@ class SupplierRepository extends BaseRepository {
    * Find supplier by email
    * @param {string} email - Supplier email
    * @param {object} options - Query options
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Supplier|null>}
    */
-  async findByEmail(email, options = {}) {
+  async findByEmail(email, options = {}, tenantId = null) {
     if (!email) return null;
-    return await this.findOne({ email: email.toLowerCase().trim() }, options);
+    const query = { email: email.toLowerCase().trim() };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    return await this.findOne(query, options);
   }
 
   /**
    * Find supplier by company name
    * @param {string} companyName - Company name
    * @param {object} options - Query options
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Supplier|null>}
    */
-  async findByCompanyName(companyName, options = {}) {
+  async findByCompanyName(companyName, options = {}, tenantId = null) {
     if (!companyName) return null;
-    return await this.findOne({ companyName: { $regex: `^${companyName}$`, $options: 'i' } }, options);
+    const query = { companyName: { $regex: `^${companyName}$`, $options: 'i' } };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    return await this.findOne(query, options);
   }
 
   /**
@@ -105,9 +115,10 @@ class SupplierRepository extends BaseRepository {
    * Search suppliers by multiple fields
    * @param {string} searchTerm - Search term
    * @param {object} options - Query options
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Array>}
    */
-  async search(searchTerm, options = {}) {
+  async search(searchTerm, options = {}, tenantId = null) {
     const filter = {
       $or: [
         { companyName: { $regex: searchTerm, $options: 'i' } },
@@ -116,6 +127,9 @@ class SupplierRepository extends BaseRepository {
         { phone: { $regex: searchTerm, $options: 'i' } }
       ]
     };
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
     return await this.findAll(filter, options);
   }
 
@@ -123,11 +137,15 @@ class SupplierRepository extends BaseRepository {
    * Check if email exists
    * @param {string} email - Email to check
    * @param {string} excludeId - Supplier ID to exclude from check
+   * @param {string} tenantId - Tenant ID to scope the check
    * @returns {Promise<boolean>}
    */
-  async emailExists(email, excludeId = null) {
+  async emailExists(email, excludeId = null, tenantId = null) {
     if (!email) return false;
     const query = { email: email.toLowerCase().trim() };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     if (excludeId) {
       query._id = { $ne: excludeId };
     }
@@ -139,11 +157,15 @@ class SupplierRepository extends BaseRepository {
    * Check if company name exists
    * @param {string} companyName - Company name to check
    * @param {string} excludeId - Supplier ID to exclude from check
+   * @param {string} tenantId - Tenant ID to scope the check
    * @returns {Promise<boolean>}
    */
-  async companyNameExists(companyName, excludeId = null) {
+  async companyNameExists(companyName, excludeId = null, tenantId = null) {
     if (!companyName) return false;
     const query = { companyName: { $regex: `^${companyName}$`, $options: 'i' } };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     if (excludeId) {
       query._id = { $ne: excludeId };
     }

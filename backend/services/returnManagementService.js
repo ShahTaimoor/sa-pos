@@ -10,6 +10,7 @@ const Customer = require('../models/Customer');
 const CustomerBalanceService = require('../services/customerBalanceService');
 const ReturnRepository = require('../repositories/ReturnRepository');
 const SalesRepository = require('../repositories/SalesRepository');
+const logger = require('../utils/logger');
 
 class ReturnManagementService {
   constructor() {
@@ -88,7 +89,7 @@ class ReturnManagementService {
       // Calculate refund amounts
       await this.calculateRefundAmounts(returnRequest);
       
-      console.log('Return amounts after calculation:', {
+      logger.info('Return amounts after calculation:', {
         totalRefundAmount: returnRequest.totalRefundAmount,
         totalRestockingFee: returnRequest.totalRestockingFee,
         netRefundAmount: returnRequest.netRefundAmount
@@ -97,7 +98,7 @@ class ReturnManagementService {
       // Save return request
       await returnRequest.save();
       
-      console.log('Return amounts after save:', {
+      logger.info('Return amounts after save:', {
         totalRefundAmount: returnRequest.totalRefundAmount,
         totalRestockingFee: returnRequest.totalRestockingFee,
         netRefundAmount: returnRequest.netRefundAmount
@@ -108,7 +109,7 @@ class ReturnManagementService {
 
       return returnRequest;
     } catch (error) {
-      console.error('Error creating return:', error);
+      logger.error('Error creating return:', error);
       throw error;
     }
   }
@@ -191,21 +192,21 @@ class ReturnManagementService {
 
       // Always set original price from order (override any frontend value)
       returnItem.originalPrice = Number(orderItem.price) || 0;
-      console.log(`Set originalPrice for item ${returnItem.product}: ${returnItem.originalPrice}`);
+      logger.info(`Set originalPrice for item ${returnItem.product}: ${returnItem.originalPrice}`);
       
       // Always set default values for optional fields (override any frontend value)
       // Handle string "undefined" or actual undefined values
       returnItem.refundAmount = Number(returnItem.refundAmount) || 0;
       returnItem.restockingFee = Number(returnItem.restockingFee) || 0;
-      console.log(`Set refundAmount: ${returnItem.refundAmount}, restockingFee: ${returnItem.restockingFee} for item ${returnItem.product}`);
+      logger.info(`Set refundAmount: ${returnItem.refundAmount}, restockingFee: ${returnItem.restockingFee} for item ${returnItem.product}`);
     }
   }
 
   // Calculate refund amounts for return items
   async calculateRefundAmounts(returnRequest) {
-    console.log('Calculating refund amounts for return items...');
+    logger.info('Calculating refund amounts for return items...');
     for (const item of returnRequest.items) {
-      console.log(`Processing item: ${item.product}, originalPrice: ${item.originalPrice}, quantity: ${item.quantity}`);
+      logger.info(`Processing item: ${item.product}, originalPrice: ${item.originalPrice}, quantity: ${item.quantity}`);
       
       // Calculate restocking fee based on condition and policy
       const baseFee = Number(returnRequest.policy?.restockingFeePercent) || 0;
@@ -215,17 +216,17 @@ class ReturnManagementService {
         baseFee
       );
       
-      console.log(`Restocking fee percent: ${restockingFeePercent}%`);
+      logger.info(`Restocking fee percent: ${restockingFeePercent}%`);
       
       item.restockingFee = (item.originalPrice * item.quantity * restockingFeePercent) / 100;
       
       // Calculate refund amount
       item.refundAmount = (item.originalPrice * item.quantity) - item.restockingFee;
       
-      console.log(`Calculated amounts - refundAmount: ${item.refundAmount}, restockingFee: ${item.restockingFee}`);
+      logger.info(`Calculated amounts - refundAmount: ${item.refundAmount}, restockingFee: ${item.restockingFee}`);
     }
     
-    console.log('All item amounts calculated. Return totals will be calculated in pre-save middleware.');
+    logger.info('All item amounts calculated. Return totals will be calculated in pre-save middleware.');
   }
 
   // Calculate restocking fee based on various factors
@@ -304,7 +305,7 @@ class ReturnManagementService {
 
       return returnRequest;
     } catch (error) {
-      console.error('Error approving return:', error);
+      logger.error('Error approving return:', error);
       throw error;
     }
   }
@@ -329,7 +330,7 @@ class ReturnManagementService {
 
       return returnRequest;
     } catch (error) {
-      console.error('Error rejecting return:', error);
+      logger.error('Error rejecting return:', error);
       throw error;
     }
   }
@@ -381,7 +382,7 @@ class ReturnManagementService {
 
       return returnRequest;
     } catch (error) {
-      console.error('Error processing return:', error);
+      logger.error('Error processing return:', error);
       throw error;
     }
   }
@@ -418,7 +419,7 @@ class ReturnManagementService {
   // Log inventory movement
   async logInventoryMovement(item, type, quantity) {
     // This would integrate with your existing inventory movement logging
-    console.log(`Inventory movement: ${type} - ${item.product.name} - ${quantity} units`);
+    logger.info(`Inventory movement: ${type} - ${item.product.name} - ${quantity} units`);
   }
 
   // Process refund
@@ -460,12 +461,12 @@ class ReturnManagementService {
         );
       } catch (balanceErr) {
         // Log but do not fail the whole return completion
-        console.error('Error updating customer balance for return refund:', balanceErr);
+        logger.error('Error updating customer balance for return refund:', balanceErr);
       }
 
       return refundTransaction;
     } catch (error) {
-      console.error('Error processing refund:', error);
+      logger.error('Error processing refund:', error);
       throw error;
     }
   }
@@ -494,7 +495,7 @@ class ReturnManagementService {
 
       return exchangeOrder;
     } catch (error) {
-      console.error('Error processing exchange:', error);
+      logger.error('Error processing exchange:', error);
       throw error;
     }
   }
@@ -522,7 +523,7 @@ class ReturnManagementService {
         );
       }
     } catch (error) {
-      console.error('Error notifying customer:', error);
+      logger.error('Error notifying customer:', error);
     }
   }
 
@@ -581,7 +582,7 @@ class ReturnManagementService {
         typeBreakdown
       };
     } catch (error) {
-      console.error('Error getting return stats:', error);
+      logger.error('Error getting return stats:', error);
       throw error;
     }
   }
@@ -652,7 +653,7 @@ class ReturnManagementService {
         averageRefundAmount: trend.averageRefundAmount || 0
       }));
     } catch (error) {
-      console.error('Error getting return trends:', error);
+      logger.error('Error getting return trends:', error);
       throw error;
     }
   }

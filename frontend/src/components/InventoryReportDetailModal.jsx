@@ -14,7 +14,6 @@ import {
   BarChart3,
   PieChart,
   Activity,
-  DollarSign,
   Calendar,
   User,
   Tag,
@@ -251,7 +250,7 @@ const InventoryReportDetailModal = ({ report, onClose, onExport, onDelete, onTog
 
                 <div className="bg-white border border-gray-200 rounded-lg p-4">
                   <div className="flex items-center">
-                    <DollarSign className="h-8 w-8 text-green-600" />
+                    <TrendingUp className="h-8 w-8 text-green-600" />
                     <div className="ml-3">
                       <p className="text-sm font-medium text-gray-500">Total Stock Value</p>
                       <p className="text-2xl font-semibold text-gray-900">

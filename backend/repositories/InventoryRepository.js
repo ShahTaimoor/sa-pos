@@ -60,22 +60,19 @@ class InventoryRepository extends BaseRepository {
 
   /**
    * Update stock level
+   * @deprecated DO NOT USE - Use Inventory.updateStock() static method instead
+   * This method bypasses proper validation and audit trail
    * @param {string} productId - Product ID
    * @param {number} quantity - Quantity change (positive for increase, negative for decrease)
    * @returns {Promise<Inventory>}
    */
   async updateStock(productId, quantity) {
-    const inventory = await this.findByProduct(productId);
-    if (!inventory) {
-      throw new Error('Inventory record not found');
-    }
-    inventory.currentStock += quantity;
-    if (inventory.currentStock < 0) {
-      inventory.currentStock = 0;
-    }
-    inventory.availableStock = inventory.currentStock - inventory.reservedStock;
-    inventory.lastUpdated = new Date();
-    return await inventory.save();
+    throw new Error(
+      'DIRECT_INVENTORY_UPDATE_BLOCKED: Cannot update inventory stock directly via repository. ' +
+      'Use Inventory.updateStock(productId, movement) static method instead. ' +
+      'This ensures proper validation, negative stock prevention, and audit trail. ' +
+      'Example: await Inventory.updateStock(productId, { type: "in", quantity: 10, reason: "...", ... })'
+    );
   }
 }
 

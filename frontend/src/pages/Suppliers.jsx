@@ -10,7 +10,7 @@ import {
   MapPin,
   Star,
   Clock,
-  DollarSign,
+  TrendingUp,
   User,
   X,
   MessageSquare

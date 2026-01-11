@@ -3,7 +3,6 @@ import {
   X, 
   TrendingUp, 
   TrendingDown, 
-  DollarSign, 
   FileText, 
   Download,
   CheckCircle,

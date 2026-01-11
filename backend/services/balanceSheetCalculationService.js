@@ -110,15 +110,15 @@ class BalanceSheetCalculationService {
       
       try {
         await balanceSheet.save();
-        console.log(`✅ Balance sheet ${statementNumber} created successfully`);
+        logger.info(`✅ Balance sheet ${statementNumber} created successfully`);
         return balanceSheet;
       } catch (saveError) {
-        console.error('❌ Error saving balance sheet:', saveError);
-        console.error('Balance sheet data:', JSON.stringify(balanceSheetData, null, 2));
+        logger.error('❌ Error saving balance sheet:', saveError);
+        logger.error('Balance sheet data:', JSON.stringify(balanceSheetData, null, 2));
         throw new Error(`Failed to save balance sheet: ${saveError.message}`);
       }
     } catch (error) {
-      console.error('Error generating balance sheet:', error);
+      logger.error('Error generating balance sheet:', error);
       throw error;
     }
   }
@@ -256,7 +256,7 @@ class BalanceSheetCalculationService {
 
       return assets;
     } catch (error) {
-      console.error('Error calculating assets:', error);
+      logger.error('Error calculating assets:', error);
       throw error;
     }
   }
@@ -312,7 +312,7 @@ class BalanceSheetCalculationService {
         total: cashOnHand + Math.max(0, bankBalance) + pettyCash
       };
     } catch (error) {
-      console.error('Error calculating cash and cash equivalents:', error);
+      logger.error('Error calculating cash and cash equivalents:', error);
       return { cashOnHand: 0, bankAccounts: 0, pettyCash: 0, total: 0 };
     }
   }
@@ -338,7 +338,7 @@ class BalanceSheetCalculationService {
         netReceivables: Math.max(0, arBalance) - allowanceForDoubtfulAccounts
       };
     } catch (error) {
-      console.error('Error calculating accounts receivable:', error);
+      logger.error('Error calculating accounts receivable:', error);
       return {
         tradeReceivables: 0,
         otherReceivables: 0,
@@ -393,7 +393,7 @@ class BalanceSheetCalculationService {
         total: Math.max(0, inventoryBalance)
       };
     } catch (error) {
-      console.error('Error calculating inventory:', error);
+      logger.error('Error calculating inventory:', error);
       return {
         rawMaterials: 0,
         workInProgress: 0,
@@ -435,7 +435,7 @@ class BalanceSheetCalculationService {
 
       return Math.max(0, totalPrepaid);
     } catch (error) {
-      console.error('Error calculating prepaid expenses:', error);
+      logger.error('Error calculating prepaid expenses:', error);
       return 0;
     }
   }
@@ -492,7 +492,7 @@ class BalanceSheetCalculationService {
         total: Math.max(0, total)
       };
     } catch (error) {
-      console.error('Error calculating property, plant, and equipment:', error);
+      logger.error('Error calculating property, plant, and equipment:', error);
       return {
         land: 0,
         buildings: 0,
@@ -536,7 +536,7 @@ class BalanceSheetCalculationService {
 
       return Math.max(0, totalDepreciation);
     } catch (error) {
-      console.error('Error calculating accumulated depreciation:', error);
+      logger.error('Error calculating accumulated depreciation:', error);
       return 0;
     }
   }
@@ -588,7 +588,7 @@ class BalanceSheetCalculationService {
         total: Math.max(0, total)
       };
     } catch (error) {
-      console.error('Error calculating intangible assets:', error);
+      logger.error('Error calculating intangible assets:', error);
       return {
         goodwill: 0,
         patents: 0,
@@ -618,7 +618,7 @@ class BalanceSheetCalculationService {
 
       return Math.max(0, totalInvestments);
     } catch (error) {
-      console.error('Error calculating long-term investments:', error);
+      logger.error('Error calculating long-term investments:', error);
       return 0;
     }
   }
@@ -645,7 +645,7 @@ class BalanceSheetCalculationService {
 
       return Math.max(0, totalOtherAssets);
     } catch (error) {
-      console.error('Error calculating other assets:', error);
+      logger.error('Error calculating other assets:', error);
       return 0;
     }
   }
@@ -711,7 +711,7 @@ class BalanceSheetCalculationService {
 
       return liabilities;
     } catch (error) {
-      console.error('Error calculating liabilities:', error);
+      logger.error('Error calculating liabilities:', error);
       throw error;
     }
   }
@@ -732,7 +732,7 @@ class BalanceSheetCalculationService {
         total: Math.max(0, apBalance)
       };
     } catch (error) {
-      console.error('Error calculating accounts payable:', error);
+      logger.error('Error calculating accounts payable:', error);
       return {
         tradePayables: 0,
         otherPayables: 0,
@@ -803,7 +803,7 @@ class BalanceSheetCalculationService {
         total: Math.max(0, total)
       };
     } catch (error) {
-      console.error('Error calculating accrued expenses:', error);
+      logger.error('Error calculating accrued expenses:', error);
       return {
         salariesPayable: 0,
         utilitiesPayable: 0,
@@ -862,7 +862,7 @@ class BalanceSheetCalculationService {
         total: Math.max(0, total)
       };
     } catch (error) {
-      console.error('Error calculating short-term debt:', error);
+      logger.error('Error calculating short-term debt:', error);
       return {
         creditLines: 0,
         shortTermLoans: 0,
@@ -889,7 +889,7 @@ class BalanceSheetCalculationService {
 
       return deferredRevenue;
     } catch (error) {
-      console.error('Error calculating deferred revenue:', error);
+      logger.error('Error calculating deferred revenue:', error);
       return 0;
     }
   }
@@ -934,7 +934,7 @@ class BalanceSheetCalculationService {
         total: Math.max(0, total)
       };
     } catch (error) {
-      console.error('Error calculating long-term debt:', error);
+      logger.error('Error calculating long-term debt:', error);
       return {
         mortgages: 0,
         longTermLoans: 0,
@@ -966,7 +966,7 @@ class BalanceSheetCalculationService {
 
       return Math.max(0, totalDeferredTax);
     } catch (error) {
-      console.error('Error calculating deferred tax liabilities:', error);
+      logger.error('Error calculating deferred tax liabilities:', error);
       return 0;
     }
   }
@@ -990,7 +990,7 @@ class BalanceSheetCalculationService {
 
       return Math.max(0, totalPension);
     } catch (error) {
-      console.error('Error calculating pension liabilities:', error);
+      logger.error('Error calculating pension liabilities:', error);
       return 0;
     }
   }
@@ -1017,7 +1017,7 @@ class BalanceSheetCalculationService {
 
       return Math.max(0, totalOtherLiabilities);
     } catch (error) {
-      console.error('Error calculating other long-term liabilities:', error);
+      logger.error('Error calculating other long-term liabilities:', error);
       return 0;
     }
   }
@@ -1066,7 +1066,7 @@ class BalanceSheetCalculationService {
 
       return equity;
     } catch (error) {
-      console.error('Error calculating equity:', error);
+      logger.error('Error calculating equity:', error);
       // Return default equity structure instead of throwing to prevent balance sheet generation failure
       return {
         contributedCapital: {
@@ -1103,7 +1103,7 @@ class BalanceSheetCalculationService {
       // Ensure statementDate is a Date object
       const date = statementDate instanceof Date ? statementDate : new Date(statementDate);
       if (isNaN(date.getTime())) {
-        console.error(`Invalid statement date: ${statementDate}`);
+        logger.error(`Invalid statement date: ${statementDate}`);
         return 0;
       }
       
@@ -1148,7 +1148,7 @@ class BalanceSheetCalculationService {
 
       return balance;
     } catch (error) {
-      console.error(`Error calculating balance for account ${accountCode}:`, error);
+      logger.error(`Error calculating balance for account ${accountCode}:`, error);
       return 0;
     }
   }
@@ -1214,7 +1214,7 @@ class BalanceSheetCalculationService {
         total
       };
     } catch (error) {
-      console.error('Error calculating contributed capital:', error);
+      logger.error('Error calculating contributed capital:', error);
       // Return zeros instead of hardcoded default
       return {
         commonStock: 0,
@@ -1255,7 +1255,7 @@ class BalanceSheetCalculationService {
         endingRetainedEarnings: beginningRetainedEarnings + currentPeriodEarnings - dividendsPaid
       };
     } catch (error) {
-      console.error('Error calculating retained earnings:', error);
+      logger.error('Error calculating retained earnings:', error);
       return {
         beginningRetainedEarnings: 0,
         currentPeriodEarnings: 0,
@@ -1313,7 +1313,7 @@ class BalanceSheetCalculationService {
         total
       };
     } catch (error) {
-      console.error('Error calculating other equity:', error);
+      logger.error('Error calculating other equity:', error);
       return {
         treasuryStock: 0,
         accumulatedOtherComprehensiveIncome: 0,
@@ -1360,36 +1360,42 @@ class BalanceSheetCalculationService {
         return plStatement.netIncome.amount;
       }
 
-      // Fallback: Calculate from orders if P&L not available
-      const orders = await Sales.find({
-        createdAt: { $gte: startDate, $lte: statementDate },
-        orderType: 'sale',
-        status: 'completed'
-      });
-
-      let totalRevenue = 0;
-      let totalCosts = 0;
-
-      for (const order of orders) {
-        totalRevenue += order.pricing?.total || order.total || 0;
+      // Fallback: Calculate from journal entries (event-based) if P&L not available
+      // This ensures we use the single source of truth (journal entries) instead of direct queries
+      // NOTE: This requires tenantId to be passed to the service or method
+      // If tenantId is not available, we return 0 to prevent incorrect calculations
+      try {
+        // Try to get tenantId from context if available
+        // This method may be called from routes that have req.tenantId
+        const tenantId = this.tenantId || null;
         
-        // Calculate cost of goods sold
-        for (const item of order.items) {
-          const product = await Product.findById(item.product);
-          if (product) {
-            totalCosts += item.quantity * (item.unitCost || product.pricing?.cost || 0);
+        if (tenantId) {
+          const financialReportingService = require('./financialReportingService');
+const logger = require('../utils/logger');
+          const plData = await financialReportingService.generateProfitAndLoss({
+            tenantId: tenantId,
+            startDate: startDate,
+            endDate: statementDate
+          });
+
+          if (plData && plData.netIncome !== undefined) {
+            return plData.netIncome;
           }
+        } else {
+          logger.warn('Cannot calculate P&L from journal entries: tenantId not available. Returning 0 to prevent incorrect data.');
         }
+      } catch (plError) {
+        logger.warn('Error calculating P&L from journal entries for balance sheet:', plError);
+        // If journal entry calculation fails, return 0 instead of using direct queries
+        // This prevents showing incorrect data from deleted/edited transactions
       }
 
-      // Simple calculation: Revenue - COGS - Operating Expenses (estimated)
-      const grossProfit = totalRevenue - totalCosts;
-      const operatingExpenses = totalRevenue * 0.2; // Estimate 20% of revenue as operating expenses
-      const netIncome = grossProfit - operatingExpenses;
-
-      return netIncome;
+      // Return 0 if P&L calculation fails or tenantId unavailable (safer than using direct queries)
+      // Direct queries can show incorrect data if transactions were deleted/edited
+      // This maintains data integrity even if it means showing 0 instead of potentially wrong data
+      return 0;
     } catch (error) {
-      console.error('Error calculating current period earnings:', error);
+      logger.error('Error calculating current period earnings:', error);
       return 0;
     }
   }
@@ -1424,7 +1430,7 @@ class BalanceSheetCalculationService {
 
       return Math.max(0, totalDividends);
     } catch (error) {
-      console.error('Error calculating dividends paid:', error);
+      logger.error('Error calculating dividends paid:', error);
       return 0;
     }
   }
@@ -1470,7 +1476,7 @@ class BalanceSheetCalculationService {
         changes: this.calculateChanges(currentBalanceSheet, comparisonBalanceSheet)
       };
     } catch (error) {
-      console.error('Error getting comparison data:', error);
+      logger.error('Error getting comparison data:', error);
       throw error;
     }
   }

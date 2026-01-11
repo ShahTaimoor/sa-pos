@@ -1,10 +1,14 @@
 /**
- * Script to create an admin user
+ * Script to create the first admin user
  * Run with: node backend/scripts/create-admin.js
  * 
  * Usage:
  *   node backend/scripts/create-admin.js
  *   node backend/scripts/create-admin.js --email admin@example.com --password password123 --firstName Admin --lastName User
+ *   node backend/scripts/create-admin.js --email admin@example.com --password password123 --tenantId <tenantId>
+ * 
+ * Note: If tenantId is not provided, a new tenantId will be automatically created.
+ *       To create a second admin for testing tenant isolation, use: create-test-admin.js
  */
 
 require('dotenv').config();
@@ -150,10 +154,26 @@ async function createAdmin() {
     phone = args.phone || await prompt('Enter phone (optional): ');
     department = args.department || await prompt('Enter department (optional): ');
 
+    // Handle tenantId - create new tenantId for first admin
+    let tenantId;
+    if (args.tenantId) {
+      // Validate tenantId format
+      if (!mongoose.Types.ObjectId.isValid(args.tenantId)) {
+        console.error('❌ Invalid tenantId format. Must be a valid MongoDB ObjectId');
+        process.exit(1);
+      }
+      tenantId = new mongoose.Types.ObjectId(args.tenantId);
+    } else {
+      // Create new tenantId for the first admin
+      tenantId = new mongoose.Types.ObjectId();
+      console.log(`\n✅ Creating new tenant with ID: ${tenantId}`);
+    }
+
     // Create admin user
     console.log('\n📝 Creating admin user...');
     
     const adminUser = new User({
+      tenantId: tenantId,
       firstName: firstName.trim(),
       lastName: lastName.trim(),
       email: email.toLowerCase().trim(),
@@ -171,8 +191,11 @@ async function createAdmin() {
     console.log(`   Email: ${adminUser.email}`);
     console.log(`   Name: ${adminUser.firstName} ${adminUser.lastName}`);
     console.log(`   Role: ${adminUser.role}`);
-    console.log(`   ID: ${adminUser._id}`);
+    console.log(`   Tenant ID: ${adminUser.tenantId}`);
+    console.log(`   User ID: ${adminUser._id}`);
     console.log('\n💡 You can now login with this account.');
+    console.log(`💡 To create a second admin for testing tenant isolation, run:`);
+    console.log(`   node backend/scripts/create-test-admin.js`);
 
     process.exit(0);
   } catch (error) {

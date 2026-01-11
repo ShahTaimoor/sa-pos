@@ -2,6 +2,13 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const userSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
+  
   // Basic Information
   firstName: {
     type: String,
@@ -18,7 +25,6 @@ const userSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
-    unique: true,
     lowercase: true,
     trim: true
   },
@@ -239,6 +245,8 @@ const userSchema = new mongoose.Schema({
 
 // Indexes
 userSchema.index({ role: 1, status: 1 });
+userSchema.index({ tenantId: 1, email: 1 }, { unique: true }); // Email unique per tenant
+userSchema.index({ tenantId: 1, isDeleted: 1 });
 
 // Virtual for full name
 userSchema.virtual('fullName').get(function() {

@@ -33,6 +33,30 @@ export const accountLedgerApi = api.injectEndpoints({
         responseType: 'blob',
       }),
     }),
+    getLedgerSummary: builder.query({
+      query: (params) => ({
+        url: 'account-ledger/summary',
+        method: 'get',
+        params,
+      }),
+      providesTags: [{ type: 'Accounting', id: 'LEDGER_SUMMARY' }],
+    }),
+    getCustomerDetailedTransactions: builder.query({
+      query: (params) => ({
+        url: 'account-ledger/customer-transactions',
+        method: 'get',
+        params,
+      }),
+      providesTags: [{ type: 'Accounting', id: 'CUSTOMER_TRANSACTIONS' }],
+    }),
+    getSupplierDetailedTransactions: builder.query({
+      query: ({ supplierId, ...params }) => ({
+        url: `account-ledger/supplier-transactions/${supplierId}`,
+        method: 'get',
+        params,
+      }),
+      providesTags: (result, error, { supplierId }) => [{ type: 'Accounting', id: `SUPPLIER_TRANSACTIONS-${supplierId}` }],
+    }),
   }),
   overrideExisting: false,
 });
@@ -42,5 +66,8 @@ export const {
   useGetAccountsListQuery,
   useGetAllEntriesQuery,
   useExportLedgerMutation,
+  useGetLedgerSummaryQuery,
+  useGetCustomerDetailedTransactionsQuery,
+  useGetSupplierDetailedTransactionsQuery,
 } = accountLedgerApi;
 

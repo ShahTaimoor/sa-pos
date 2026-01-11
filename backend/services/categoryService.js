@@ -52,10 +52,11 @@ class CategoryService {
 
   /**
    * Get category tree
+   * @param {string} tenantId - Tenant ID
    * @returns {Promise<Array>}
    */
-  async getCategoryTree() {
-    return await categoryRepository.getCategoryTree();
+  async getCategoryTree(tenantId = null) {
+    return await categoryRepository.getCategoryTree(tenantId);
   }
 
   /**
@@ -83,17 +84,24 @@ class CategoryService {
    * Create new category
    * @param {object} categoryData - Category data
    * @param {string} userId - User ID creating the category
+   * @param {object} options - Options including tenantId
    * @returns {Promise<{category: Category, message: string}>}
    */
-  async createCategory(categoryData, userId) {
-    // Check if name already exists
-    const nameExists = await categoryRepository.nameExists(categoryData.name);
+  async createCategory(categoryData, userId, options = {}) {
+    const tenantId = options.tenantId || categoryData.tenantId;
+    if (!tenantId) {
+      throw new Error('tenantId is required for category creation');
+    }
+
+    // Check if name already exists (within tenant)
+    const nameExists = await categoryRepository.nameExists(categoryData.name, tenantId);
     if (nameExists) {
       throw new Error('Category name already exists');
     }
 
     const dataWithUser = {
       ...categoryData,
+      tenantId: tenantId,
       createdBy: userId
     };
 

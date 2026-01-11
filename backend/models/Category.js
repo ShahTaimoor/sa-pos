@@ -1,12 +1,19 @@
 const mongoose = require('mongoose');
 
 const categorySchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
   name: {
     type: String,
     required: true,
     trim: true,
-    unique: true,
     maxlength: 100
+    // Note: unique constraint is enforced via compound index { tenantId: 1, name: 1 }
+    // DO NOT add unique: true here - it creates a global index
   },
   description: {
     type: String,
@@ -52,9 +59,10 @@ const categorySchema = new mongoose.Schema({
 });
 
 // Indexes
-// name index removed - already has unique: true in field definition
-categorySchema.index({ parentCategory: 1 });
-categorySchema.index({ isActive: 1 });
+// Compound unique index for tenant-scoped category names
+categorySchema.index({ tenantId: 1, name: 1 }, { unique: true });
+categorySchema.index({ tenantId: 1, parentCategory: 1 });
+categorySchema.index({ tenantId: 1, isActive: 1 });
 
 // Virtual for subcategories
 categorySchema.virtual('subcategories', {
@@ -88,8 +96,10 @@ categorySchema.pre('save', async function(next) {
 });
 
 // Static method to get category tree
-categorySchema.statics.getCategoryTree = async function() {
-  const categories = await this.find({ isActive: true })
+categorySchema.statics.getCategoryTree = async function(tenantId) {
+  const query = { isActive: true };
+  if (tenantId) query.tenantId = tenantId;
+  const categories = await this.find(query)
     .populate('subcategories')
     .sort({ sortOrder: 1, name: 1 });
   

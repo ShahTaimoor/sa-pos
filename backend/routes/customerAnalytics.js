@@ -1,7 +1,9 @@
 const express = require('express');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const CustomerAnalyticsService = require('../services/customerAnalyticsService');
 const { query, validationResult } = require('express-validator');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -10,6 +12,7 @@ const router = express.Router();
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_customer_analytics'),
   query('includeInactive').optional().isIn(['true', 'false']),
   query('minOrders').optional().isInt({ min: 0 }),
@@ -53,7 +56,7 @@ router.get('/', [
       }
     });
   } catch (error) {
-    console.error('Customer analytics error:', error);
+    logger.error('Customer analytics error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Error generating customer analytics',
@@ -98,7 +101,7 @@ router.get('/summary', [
       }
     });
   } catch (error) {
-    console.error('Customer analytics summary error:', error);
+    logger.error('Customer analytics summary error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Error generating analytics summary',
@@ -112,6 +115,7 @@ router.get('/summary', [
 // @access  Private
 router.get('/:customerId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_customer_analytics')
 ], async (req, res) => {
   try {
@@ -122,7 +126,7 @@ router.get('/:customerId', [
       data: analytics
     });
   } catch (error) {
-    console.error('Customer analytics error:', error);
+    logger.error('Customer analytics error:', { error: error });
     res.status(500).json({
       success: false,
       message: error.message || 'Error getting customer analytics',
@@ -136,6 +140,7 @@ router.get('/:customerId', [
 // @access  Private
 router.get('/segments/:segment', [
   auth,
+  tenantMiddleware,
   requirePermission('view_customer_analytics'),
   query('minOrders').optional().isInt({ min: 0 })
 ], async (req, res) => {
@@ -162,7 +167,7 @@ router.get('/segments/:segment', [
       }
     });
   } catch (error) {
-    console.error('Segment analytics error:', error);
+    logger.error('Segment analytics error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Error getting segment analytics',
@@ -198,7 +203,7 @@ router.get('/churn-risk/:level', [
       }
     });
   } catch (error) {
-    console.error('Churn risk analytics error:', error);
+    logger.error('Churn risk analytics error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Error getting churn risk analytics',

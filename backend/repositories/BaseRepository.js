@@ -35,7 +35,7 @@ class BaseRepository {
       queryBuilder = queryBuilder.select(select);
     }
     
-    if (sort) {
+    if (sort && (typeof sort === 'object' || typeof sort === 'string') && !Array.isArray(sort)) {
       queryBuilder = queryBuilder.sort(sort);
     }
     

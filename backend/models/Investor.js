@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const investorSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
   // Basic Information
   name: {
     type: String,
@@ -11,9 +17,10 @@ const investorSchema = new mongoose.Schema({
   email: {
     type: String,
     required: true,
-    unique: true,
     lowercase: true,
     trim: true
+    // Note: unique constraint is enforced via compound index { tenantId: 1, email: 1 }
+    // DO NOT add unique: true here - it creates a global index
   },
   phone: {
     type: String,
@@ -90,9 +97,10 @@ const investorSchema = new mongoose.Schema({
 });
 
 // Indexes
-// email index removed - already has unique: true in field definition
-investorSchema.index({ status: 1 });
-investorSchema.index({ createdAt: -1 });
+// Compound unique index for tenant-scoped investor emails
+investorSchema.index({ tenantId: 1, email: 1 }, { unique: true, sparse: true });
+investorSchema.index({ tenantId: 1, status: 1 });
+investorSchema.index({ tenantId: 1, createdAt: -1 });
 
 // Virtual to calculate outstanding balance
 investorSchema.virtual('outstandingBalance').get(function() {

@@ -99,20 +99,22 @@ class EmployeeService {
   /**
    * Check if employee ID exists
    * @param {string} employeeId - Employee ID to check
+   * @param {string} tenantId - Tenant ID
    * @param {string} excludeId - Employee ID to exclude
    * @returns {Promise<boolean>}
    */
-  async checkEmployeeIdExists(employeeId, excludeId = null) {
-    return await employeeRepository.employeeIdExists(employeeId, excludeId);
+  async checkEmployeeIdExists(employeeId, tenantId = null, excludeId = null) {
+    return await employeeRepository.employeeIdExists(employeeId, tenantId, excludeId);
   }
 
   /**
    * Check if email exists
    * @param {string} email - Email to check
+   * @param {string} tenantId - Tenant ID
    * @param {string} excludeId - Employee ID to exclude
    * @returns {Promise<boolean>}
    */
-  async checkEmailExists(email, excludeId = null) {
+  async checkEmailExists(email, tenantId = null, excludeId = null) {
     return await employeeRepository.emailExists(email, excludeId);
   }
 }

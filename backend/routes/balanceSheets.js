@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const balanceSheetService = require('../services/balanceSheetService');
 
@@ -11,6 +12,7 @@ const router = express.Router();
 // @access  Private (requires 'view_reports' permission)
 router.post('/generate', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   body('statementDate').isISO8601().toDate().withMessage('Valid statement date is required'),
@@ -31,7 +33,7 @@ router.post('/generate', [
       balanceSheet
     });
   } catch (error) {
-    console.error('Error generating balance sheet:', error);
+    logger.error('Error generating balance sheet:', error);
     res.status(400).json({ message: error.message });
   }
 });
@@ -41,6 +43,7 @@ router.post('/generate', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('page').optional().isInt({ min: 1 }),
@@ -78,7 +81,7 @@ router.get('/', [
       pagination: result.pagination
     });
   } catch (error) {
-    console.error('Error fetching balance sheets:', error);
+    logger.error('Error fetching balance sheets:', error);
     res.status(500).json({ message: 'Server error fetching balance sheets', error: error.message });
   }
 });
@@ -88,6 +91,7 @@ router.get('/', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/:balanceSheetId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('balanceSheetId').isMongoId().withMessage('Valid Balance Sheet ID is required'),
@@ -103,7 +107,7 @@ router.get('/:balanceSheetId', [
     if (error.message === 'Balance sheet not found') {
       return res.status(404).json({ message: 'Balance sheet not found' });
     }
-    console.error('Error fetching balance sheet:', error);
+    logger.error('Error fetching balance sheet:', error);
     res.status(500).json({ message: 'Server error fetching balance sheet', error: error.message });
   }
 });
@@ -113,6 +117,7 @@ router.get('/:balanceSheetId', [
 // @access  Private (requires 'view_reports' permission)
 router.put('/:balanceSheetId/status', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('balanceSheetId').isMongoId().withMessage('Valid Balance Sheet ID is required'),
@@ -139,7 +144,7 @@ router.put('/:balanceSheetId/status', [
     if (error.message === 'Balance sheet not found') {
       return res.status(404).json({ message: 'Balance sheet not found' });
     }
-    console.error('Error updating balance sheet status:', error);
+    logger.error('Error updating balance sheet status:', error);
     res.status(500).json({ message: 'Server error updating balance sheet status', error: error.message });
   }
 });
@@ -149,6 +154,7 @@ router.put('/:balanceSheetId/status', [
 // @access  Private (requires 'view_reports' permission)
 router.put('/:balanceSheetId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('balanceSheetId').isMongoId().withMessage('Valid Balance Sheet ID is required'),
@@ -170,7 +176,7 @@ router.put('/:balanceSheetId', [
     if (error.message === 'Only draft balance sheets can be updated') {
       return res.status(400).json({ message: error.message });
     }
-    console.error('Error updating balance sheet:', error);
+    logger.error('Error updating balance sheet:', error);
     res.status(500).json({ message: 'Server error updating balance sheet', error: error.message });
   }
 });
@@ -180,6 +186,7 @@ router.put('/:balanceSheetId', [
 // @access  Private (requires 'view_reports' permission)
 router.delete('/:balanceSheetId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('balanceSheetId').isMongoId().withMessage('Valid Balance Sheet ID is required'),
@@ -198,7 +205,7 @@ router.delete('/:balanceSheetId', [
     if (error.message === 'Only draft balance sheets can be deleted') {
       return res.status(400).json({ message: error.message });
     }
-    console.error('Error deleting balance sheet:', error);
+    logger.error('Error deleting balance sheet:', error);
     res.status(500).json({ message: 'Server error deleting balance sheet', error: error.message });
   }
 });
@@ -231,7 +238,7 @@ router.get('/:balanceSheetId/comparison', [
 
     res.json(comparisonData);
   } catch (error) {
-    console.error('Error fetching comparison data:', error);
+    logger.error('Error fetching comparison data:', error);
     res.status(500).json({ message: 'Server error fetching comparison data', error: error.message });
   }
 });
@@ -241,6 +248,7 @@ router.get('/:balanceSheetId/comparison', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/stats', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('startDate').optional().isISO8601().toDate(),
@@ -255,7 +263,7 @@ router.get('/stats', [
 
     res.json(stats);
   } catch (error) {
-    console.error('Error fetching balance sheet stats:', error);
+    logger.error('Error fetching balance sheet stats:', error);
     res.status(500).json({ message: 'Server error fetching balance sheet stats', error: error.message });
   }
 });
@@ -281,7 +289,7 @@ router.get('/latest', [
 
     res.json(balanceSheet);
   } catch (error) {
-    console.error('Error fetching latest balance sheet:', error);
+    logger.error('Error fetching latest balance sheet:', error);
     res.status(500).json({ message: 'Server error fetching latest balance sheet', error: error.message });
   }
 });
@@ -291,6 +299,7 @@ router.get('/latest', [
 // @access  Private (requires 'view_reports' permission)
 router.post('/:balanceSheetId/audit', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('balanceSheetId').isMongoId().withMessage('Valid Balance Sheet ID is required'),
@@ -313,8 +322,174 @@ router.post('/:balanceSheetId/audit', [
       balanceSheet
     });
   } catch (error) {
-    console.error('Error adding audit entry:', error);
+    logger.error('Error adding audit entry:', error);
     res.status(500).json({ message: 'Server error adding audit entry', error: error.message });
+  }
+});
+
+// @route   POST /api/balance-sheets/:balanceSheetId/export
+// @desc    Export balance sheet with audit trail
+// @access  Private (requires 'view_reports' permission)
+router.post('/:balanceSheetId/export', [
+  auth,
+  requirePermission('view_reports'),
+  sanitizeRequest,
+  param('balanceSheetId').isMongoId().withMessage('Valid Balance Sheet ID is required'),
+  body('format').optional().isIn(['pdf', 'excel', 'csv']).withMessage('Valid format required'),
+  body('purpose').optional().trim().isLength({ max: 500 }).withMessage('Purpose too long'),
+  body('recipient').optional().trim().isLength({ max: 200 }).withMessage('Recipient too long'),
+  handleValidationErrors,
+], async (req, res) => {
+  try {
+    const { balanceSheetId } = req.params;
+    const { format = 'pdf', purpose, recipient } = req.body;
+    
+    const balanceSheet = await balanceSheetService.getBalanceSheetById(balanceSheetId);
+    if (!balanceSheet) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Balance sheet not found' 
+      });
+    }
+
+    // CRITICAL: Create export audit trail record
+    const FinancialStatementExport = require('../models/FinancialStatementExport');
+    const exportRecord = new FinancialStatementExport({
+      statementId: balanceSheet._id,
+      statementType: 'balance_sheet',
+      exportedBy: req.user._id,
+      format: format.toLowerCase(),
+      ipAddress: req.ip || req.connection.remoteAddress,
+      userAgent: req.get('user-agent'),
+      purpose: purpose || 'Internal review',
+      recipient: recipient || null
+    });
+    await exportRecord.save();
+
+    // TODO: Implement actual export generation (similar to P&L export)
+    // For now, return export record
+    exportRecord.downloadUrl = `/api/balance-sheets/${balanceSheetId}/download?format=${format}&exportId=${exportRecord._id}`;
+    await exportRecord.save();
+
+    // Log to audit trail
+    const auditLogService = require('../services/auditLogService');
+    await auditLogService.logActivity(
+      req.user._id,
+      'BalanceSheet',
+      balanceSheetId,
+      'export',
+      `Exported balance sheet as ${format.toUpperCase()}`,
+      null,
+      { exportId: exportRecord._id, format: format.toLowerCase(), purpose, recipient },
+      req
+    );
+
+    res.json({
+      success: true,
+      message: 'Balance sheet export initiated',
+      export: {
+        exportId: exportRecord._id,
+        format: format.toLowerCase(),
+        downloadUrl: exportRecord.downloadUrl,
+        exportedAt: exportRecord.exportedAt
+      }
+    });
+  } catch (error) {
+    logger.error('Error exporting balance sheet:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error exporting balance sheet',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @route   GET /api/balance-sheets/:balanceSheetId/exports
+// @desc    Get all exports for a balance sheet
+// @access  Private (requires 'view_reports' permission)
+router.get('/:balanceSheetId/exports', [
+  auth,
+  tenantMiddleware,
+  requirePermission('view_reports'),
+  sanitizeRequest,
+  param('balanceSheetId').isMongoId().withMessage('Valid Balance Sheet ID is required'),
+  query('page').optional().isInt({ min: 1 }),
+  query('limit').optional().isInt({ min: 1, max: 100 })
+], async (req, res) => {
+  try {
+    const FinancialStatementExport = require('../models/FinancialStatementExport');
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
+
+    const exports = await FinancialStatementExport.find({ statementId: req.params.balanceSheetId })
+      .populate('exportedBy', 'firstName lastName email')
+      .populate('approvedBy', 'firstName lastName email')
+      .sort({ exportedAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    const total = await FinancialStatementExport.countDocuments({ statementId: req.params.balanceSheetId });
+
+    res.json({
+      success: true,
+      data: exports,
+      pagination: {
+        page,
+        limit,
+        total,
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    logger.error('Error getting exports:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error getting exports',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @route   GET /api/balance-sheets/:balanceSheetId/versions
+// @desc    Get version history for a balance sheet
+// @access  Private (requires 'view_reports' permission)
+router.get('/:balanceSheetId/versions', [
+  auth,
+  tenantMiddleware,
+  requirePermission('view_reports'),
+  sanitizeRequest,
+  param('balanceSheetId').isMongoId().withMessage('Valid Balance Sheet ID is required')
+], async (req, res) => {
+  try {
+    const BalanceSheet = require('../models/BalanceSheet');
+const logger = require('../utils/logger');
+    const balanceSheet = await BalanceSheet.findById(req.params.balanceSheetId)
+      .populate('auditTrail.performedBy', 'firstName lastName email');
+
+    if (!balanceSheet) {
+      return res.status(404).json({
+        success: false,
+        message: 'Balance sheet not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        balanceSheetId: balanceSheet._id,
+        statementNumber: balanceSheet.statementNumber,
+        auditTrail: balanceSheet.auditTrail || [],
+        version: balanceSheet.version || 1
+      }
+    });
+  } catch (error) {
+    logger.error('Error getting version history:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error getting version history',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 

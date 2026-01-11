@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Filter, X, Plus, Save, Calendar, DollarSign, Package, Tag, CheckSquare } from 'lucide-react';
+import { Filter, X, Plus, Save, Calendar, TrendingUp, Package, Tag, CheckSquare } from 'lucide-react';
 
 const FILTER_TYPES = {
   dateRange: {
@@ -14,7 +14,7 @@ const FILTER_TYPES = {
   },
   priceRange: {
     label: 'Price Range',
-    icon: DollarSign,
+    icon: TrendingUp,
     fields: ['pricing.retail', 'pricing.wholesale', 'pricing.cost', 'total']
   },
   stockLevel: {

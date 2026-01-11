@@ -9,6 +9,10 @@ const cashReceiptRepository = require('../repositories/CashReceiptRepository');
 const cashPaymentRepository = require('../repositories/CashPaymentRepository');
 const bankReceiptRepository = require('../repositories/BankReceiptRepository');
 const bankPaymentRepository = require('../repositories/BankPaymentRepository');
+const customerRepository = require('../repositories/CustomerRepository');
+const supplierRepository = require('../repositories/SupplierRepository');
+const salesRepository = require('../repositories/SalesRepository');
+const Sales = require('../models/Sales');
 const path = require('path');
 const fs = require('fs');
 
@@ -56,7 +60,7 @@ router.get('/', [
       summary,
       limit,
       page
-    });
+    }, tenantId);
 
     // If export requested, handle it
     if (exportFormat) {
@@ -197,7 +201,7 @@ router.get('/', [
           return;
         }
       } catch (error) {
-        console.error('Export error:', error);
+        logger.error('Export error:', { error: error });
         return res.status(500).json({
           success: false,
           message: 'Export failed',
@@ -210,7 +214,7 @@ router.get('/', [
     res.json(result);
 
   } catch (error) {
-    console.error('Error fetching account ledger:', error);
+    logger.error('Error fetching account ledger:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -236,7 +240,7 @@ router.get('/accounts', [
     // Build date filter for transactions
     const dateFilter = {};
     if (startDate || endDate) {
-      const { start, end } = clampDateRange(startDate, endDate);
+      const { start, end } = accountLedgerService.clampDateRange(startDate, endDate);
       if (start || end) {
         dateFilter.createdAt = {};
         if (start) dateFilter.createdAt.$gte = start;
@@ -245,13 +249,26 @@ router.get('/accounts', [
     }
 
     // Get all accounts
-    const accounts = await chartOfAccountsRepository.findAll({ isActive: true }, {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    
+    const accounts = await chartOfAccountsRepository.findAll({ 
+      tenantId: tenantId,
+      isActive: true,
+      isDeleted: false 
+    }, {
       sort: { accountCode: 1 },
       lean: true
     });
 
     // Use aggregation to get transaction summary for all accounts at once (fixes N+1 problem)
     const transactionFilter = Object.keys(dateFilter).length > 0 ? dateFilter : {};
+    transactionFilter.tenantId = tenantId; // Add tenantId filter
     const transactionSummary = await transactionRepository.getSummary(transactionFilter, '$accountCode');
 
     // Create a map for quick lookup
@@ -292,8 +309,91 @@ router.get('/accounts', [
       };
     });
 
+    // Get all customers and create customer accounts
+    const customers = await customerRepository.findAll({ status: 'active' }, { lean: true });
+    const customerAccounts = customers.map(customer => {
+      const displayName = customer.businessName || 
+                         `${customer.firstName || ''} ${customer.lastName || ''}`.trim() ||
+                         customer.displayName ||
+                         customer.name ||
+                         'Unknown Customer';
+      
+      // Calculate customer balance from transactions
+      // For customers, we need to get their receivables balance
+      const customerSummary = summaryMap[`CUSTOMER-${customer._id}`] || {
+        totalDebits: 0,
+        totalCredits: 0,
+        transactionCount: 0,
+        lastActivity: null
+      };
+
+      // Customer receivables: debit increases receivable (amount owed to us), credit decreases it
+      let customerBalance = customer.openingBalance || customer.advanceBalance || 0;
+      customerBalance = customerBalance + customerSummary.totalDebits - customerSummary.totalCredits;
+
+      return {
+        _id: `customer-${customer._id}`,
+        accountCode: customer.ledgerAccountCode || `CUST-${customer._id.toString()}`,
+        accountName: `Customer - ${displayName}`,
+        accountType: 'asset',
+        accountCategory: 'current_assets',
+        normalBalance: 'debit',
+        openingBalance: customer.openingBalance || customer.advanceBalance || 0,
+        currentBalance: customerBalance,
+        totalDebits: customerSummary.totalDebits,
+        totalCredits: customerSummary.totalCredits,
+        transactionCount: customerSummary.transactionCount,
+        lastActivity: customerSummary.lastActivity,
+        isCustomerAccount: true,
+        customerId: customer._id,
+        description: `Customer account for ${displayName}`
+      };
+    });
+
+    // Get all suppliers and create supplier accounts
+    const suppliers = await supplierRepository.findAll({ status: 'active' }, { lean: true });
+    const supplierAccounts = suppliers.map(supplier => {
+      const displayName = supplier.companyName || 
+                         supplier.contactPerson?.name ||
+                         supplier.name ||
+                         'Unknown Supplier';
+      
+      // Calculate supplier balance from transactions
+      const supplierSummary = summaryMap[`SUPPLIER-${supplier._id}`] || {
+        totalDebits: 0,
+        totalCredits: 0,
+        transactionCount: 0,
+        lastActivity: null
+      };
+
+      // Supplier payables: credit increases payable (amount we owe), debit decreases it
+      let supplierBalance = supplier.openingBalance || 0;
+      supplierBalance = supplierBalance + supplierSummary.totalCredits - supplierSummary.totalDebits;
+
+      return {
+        _id: `supplier-${supplier._id}`,
+        accountCode: supplier.ledgerAccountCode || `SUP-${supplier._id.toString()}`,
+        accountName: `Supplier - ${displayName}`,
+        accountType: 'liability',
+        accountCategory: 'current_liabilities',
+        normalBalance: 'credit',
+        openingBalance: supplier.openingBalance || 0,
+        currentBalance: supplierBalance,
+        totalDebits: supplierSummary.totalDebits,
+        totalCredits: supplierSummary.totalCredits,
+        transactionCount: supplierSummary.transactionCount,
+        lastActivity: supplierSummary.lastActivity,
+        isSupplierAccount: true,
+        supplierId: supplier._id,
+        description: `Supplier account for ${displayName}`
+      };
+    });
+
+    // Combine all accounts
+    const allAccounts = [...accountsWithBalances, ...customerAccounts, ...supplierAccounts];
+
     // Group by account type
-    const groupedAccounts = accountsWithBalances.reduce((acc, account) => {
+    const groupedAccounts = allAccounts.reduce((acc, account) => {
       if (!acc[account.accountType]) {
         acc[account.accountType] = [];
       }
@@ -304,21 +404,21 @@ router.get('/accounts', [
     res.json({
       success: true,
       data: {
-        accounts: accountsWithBalances,
+        accounts: allAccounts,
         groupedAccounts,
         summary: {
-          totalAccounts: accountsWithBalances.length,
-          assetAccounts: accountsWithBalances.filter(a => a.accountType === 'asset').length,
-          liabilityAccounts: accountsWithBalances.filter(a => a.accountType === 'liability').length,
-          equityAccounts: accountsWithBalances.filter(a => a.accountType === 'equity').length,
-          revenueAccounts: accountsWithBalances.filter(a => a.accountType === 'revenue').length,
-          expenseAccounts: accountsWithBalances.filter(a => a.accountType === 'expense').length
+          totalAccounts: allAccounts.length,
+          assetAccounts: allAccounts.filter(a => a.accountType === 'asset').length,
+          liabilityAccounts: allAccounts.filter(a => a.accountType === 'liability').length,
+          equityAccounts: allAccounts.filter(a => a.accountType === 'equity').length,
+          revenueAccounts: allAccounts.filter(a => a.accountType === 'revenue').length,
+          expenseAccounts: allAccounts.filter(a => a.accountType === 'expense').length
         }
       }
     });
 
   } catch (error) {
-    console.error('Error fetching accounts:', error);
+    logger.error('Error fetching accounts:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -342,43 +442,126 @@ router.get('/all-entries', [
   query('export').optional().isIn(['csv', 'excel', 'xlsx', 'pdf', 'json']).withMessage('Export format must be csv, excel, pdf, or json')
 ], async (req, res) => {
   try {
-    const { startDate, endDate, accountCode, accountName, export: exportFormat } = req.query;
+    const { startDate, endDate, accountCode, accountName, customerId: queryCustomerId, supplierId: querySupplierId, export: exportFormat } = req.query;
     
 
-    const { start, end } = clampDateRange(startDate, endDate);
+    const { start, end } = accountLedgerService.clampDateRange(startDate, endDate);
     const dateFilter = {};
     if (start) dateFilter.$gte = start;
     if (end) dateFilter.$lte = end;
 
+    // Check if accountCode is for a customer or supplier account
+    // Also check if customerId/supplierId is passed directly in query (from frontend)
+    let customerId = queryCustomerId ? (typeof queryCustomerId === 'string' ? queryCustomerId : queryCustomerId.toString()) : null;
+    let supplierId = querySupplierId ? (typeof querySupplierId === 'string' ? querySupplierId : querySupplierId.toString()) : null;
+    
+    if (accountCode && !customerId && !supplierId) {
+      // Check if it's a customer account (starts with CUST- or customer-)
+      if (accountCode.startsWith('CUST-') || accountCode.startsWith('customer-')) {
+        // Try to find customer by account code or by ID
+        const customerCode = accountCode.replace(/^(CUST-|customer-)/i, '');
+        let customer = null;
+        
+        // First try to find by MongoDB ObjectId if customerCode looks like an ObjectId
+        if (customerCode.length === 24 && /^[0-9a-fA-F]{24}$/.test(customerCode)) {
+          try {
+            customer = await customerRepository.findById(customerCode, { lean: true });
+          } catch (e) {
+            // Not a valid ObjectId, continue with other methods
+          }
+        }
+        
+        // If not found, try other methods
+        if (!customer) {
+          customer = await customerRepository.findOne({
+            $or: [
+              { customerCode: customerCode },
+              { ledgerAccountCode: accountCode },
+              { _id: customerCode }
+            ]
+          }, { lean: true });
+        }
+        
+        // If still not found, try to find by matching account name pattern
+        if (!customer && accountName) {
+          const nameMatch = accountName.replace(/^Customer - /i, '').trim();
+          customer = await customerRepository.findOne({
+            $or: [
+              { businessName: { $regex: new RegExp(`^${nameMatch}$`, 'i') } },
+              { displayName: { $regex: new RegExp(`^${nameMatch}$`, 'i') } },
+              { firstName: { $regex: new RegExp(`^${nameMatch}$`, 'i') } },
+              { lastName: { $regex: new RegExp(`^${nameMatch}$`, 'i') } }
+            ]
+          }, { lean: true });
+        }
+        
+        if (customer) {
+          customerId = customer._id;
+        }
+      }
+      
+      // Check if it's a supplier account (starts with SUP- or supplier-)
+      if (accountCode.startsWith('SUP-') || accountCode.startsWith('supplier-')) {
+        const supplierCode = accountCode.replace(/^(SUP-|supplier-)/i, '');
+        const supplier = await supplierRepository.findOne({
+          $or: [
+            { supplierCode: supplierCode },
+            { ledgerAccountCode: accountCode },
+            { _id: supplierCode }
+          ]
+        }, { lean: true });
+        if (supplier) {
+          supplierId = supplier._id;
+        }
+      }
+    }
+
     // Resolve cash/bank codes dynamically
-    const { cashCode, bankCode } = await resolveCashBankCodes();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const { cashCode, bankCode } = await chartOfAccountsRepository.resolveCashBankCodes(tenantId);
 
     // Get all entries from different sources
     const allEntries = [];
 
     // 1. Get Cash Receipts
     const cashReceiptFilter = Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {};
+    // Add customer filter if customer account is selected
+    if (customerId) {
+      cashReceiptFilter.customer = customerId;
+    }
     const cashReceipts = await cashReceiptRepository.findAll(cashReceiptFilter, {
       populate: [
-        { path: 'customer', select: 'firstName lastName' },
+        { path: 'customer', select: 'firstName lastName businessName displayName' },
         { path: 'createdBy', select: 'firstName lastName' }
       ],
       lean: true
     });
 
     cashReceipts.forEach(receipt => {
-      if (!accountCode || accountCode === cashCode) {
+      // For customer accounts, show all receipts. For regular accounts, filter by accountCode
+      if (customerId || !accountCode || accountCode === cashCode) {
+        const customerName = receipt.customer?.businessName || 
+                           receipt.customer?.displayName ||
+                           `${receipt.customer?.firstName || ''} ${receipt.customer?.lastName || ''}`.trim() ||
+                           '';
+        
         allEntries.push({
           date: receipt.createdAt,
           accountCode: cashCode,
           accountName: 'Cash',
-          description: `Cash Receipt: ${receipt.particular}`,
-          reference: receipt.voucherCode,
-          debitAmount: receipt.amount,
-          creditAmount: 0,
+          description: `Cash Receipt: ${receipt.particular || ''}`,
+          reference: receipt.voucherCode || receipt.transactionReference || '',
+          debitAmount: 0, // Receipts reduce receivables (credit to AR)
+          creditAmount: receipt.amount || 0, // Credit to reduce customer balance
           source: 'Cash Receipt',
           sourceId: receipt._id,
-          customer: receipt.customer ? `${receipt.customer.firstName} ${receipt.customer.lastName}` : '',
+          customer: customerName,
           createdBy: receipt.createdBy ? `${receipt.createdBy.firstName} ${receipt.createdBy.lastName}` : ''
         });
       }
@@ -412,27 +595,38 @@ router.get('/all-entries', [
     });
 
     // 3. Get Bank Receipts
-    const bankReceipts = await bankReceiptRepository.findAll(cashReceiptFilter, {
+    const bankReceiptFilter = Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {};
+    // Add customer filter if customer account is selected
+    if (customerId) {
+      bankReceiptFilter.customer = customerId;
+    }
+    const bankReceipts = await bankReceiptRepository.findAll(bankReceiptFilter, {
       populate: [
-        { path: 'customer', select: 'firstName lastName' },
+        { path: 'customer', select: 'firstName lastName businessName displayName' },
         { path: 'createdBy', select: 'firstName lastName' }
       ],
       lean: true
     });
 
     bankReceipts.forEach(receipt => {
-      if (!accountCode || accountCode === bankCode) {
+      // For customer accounts, show all receipts. For regular accounts, filter by accountCode
+      if (customerId || !accountCode || accountCode === bankCode) {
+        const customerName = receipt.customer?.businessName || 
+                           receipt.customer?.displayName ||
+                           `${receipt.customer?.firstName || ''} ${receipt.customer?.lastName || ''}`.trim() ||
+                           '';
+        
         allEntries.push({
           date: receipt.createdAt,
           accountCode: bankCode,
           accountName: 'Bank',
-          description: `Bank Receipt: ${receipt.particular}`,
-          reference: receipt.transactionReference,
-          debitAmount: receipt.amount,
-          creditAmount: 0,
+          description: `Bank Receipt: ${receipt.particular || ''}`,
+          reference: receipt.transactionReference || receipt.voucherCode || '',
+          debitAmount: 0, // Receipts reduce receivables (credit to AR)
+          creditAmount: receipt.amount || 0, // Credit to reduce customer balance
           source: 'Bank Receipt',
           sourceId: receipt._id,
-          customer: receipt.customer ? `${receipt.customer.firstName} ${receipt.customer.lastName}` : '',
+          customer: customerName,
           createdBy: receipt.createdBy ? `${receipt.createdBy.firstName} ${receipt.createdBy.lastName}` : ''
         });
       }
@@ -448,6 +642,11 @@ router.get('/all-entries', [
     });
 
     bankPayments.forEach(payment => {
+      // Filter by supplier if supplier account is selected
+      if (supplierId && payment.supplier?.toString() !== supplierId.toString()) {
+        return;
+      }
+      
       if (!accountCode || accountCode === bankCode) {
         allEntries.push({
           date: payment.createdAt,
@@ -465,12 +664,79 @@ router.get('/all-entries', [
       }
     });
 
+    // 4.5. Get Sales entries for customer (if customer account is selected)
+    if (customerId) {
+      try {
+        // Convert customerId to ObjectId if it's a string
+        const mongoose = require('mongoose');
+const logger = require('../utils/logger');
+        const customerObjectId = mongoose.Types.ObjectId.isValid(customerId) 
+          ? new mongoose.Types.ObjectId(customerId) 
+          : customerId;
+        
+        const salesFilter = {
+          customer: customerObjectId,
+          isDeleted: { $ne: true }
+        };
+        if (Object.keys(dateFilter).length > 0) {
+          salesFilter.createdAt = dateFilter;
+        }
+        
+        const sales = await Sales.find(salesFilter)
+          .populate('customer', 'firstName lastName businessName displayName')
+          .sort({ createdAt: 1 })
+          .lean();
+        
+        // Get Accounts Receivable account code
+        const arAccount = await chartOfAccountsRepository.findOne({
+          tenantId: tenantId,
+          $or: [
+            { accountCode: '1130' },
+            { accountName: /^Accounts Receivable$/i }
+          ],
+          isActive: true,
+          isDeleted: false
+        }, { lean: true });
+        
+        const arAccountCode = arAccount?.accountCode || '1130';
+        
+        sales.forEach(sale => {
+          const customerName = sale.customer?.businessName || 
+                             sale.customer?.displayName ||
+                             `${sale.customer?.firstName || ''} ${sale.customer?.lastName || ''}`.trim() ||
+                             'Unknown Customer';
+          
+          const totalAmount = sale.pricing?.total || sale.total || 0;
+          
+          // Sales create receivables (debit to AR, credit to Revenue)
+          // For customer ledger, we show the receivable side (debit)
+          allEntries.push({
+            date: sale.createdAt || sale.date,
+            accountCode: arAccountCode,
+            accountName: arAccount?.accountName || 'Accounts Receivable',
+            description: `Sale: ${sale.orderNumber || sale.voucherCode || sale._id}`,
+            reference: sale.orderNumber || sale.voucherCode || sale._id.toString(),
+            debitAmount: totalAmount,
+            creditAmount: 0,
+            source: 'Sales',
+            sourceId: sale._id,
+            customer: customerName,
+            createdBy: ''
+          });
+        });
+      } catch (error) {
+        logger.error('Error fetching sales for customer:', error);
+        // Continue without sales entries if there's an error
+      }
+    }
+
     // 5. Get Transaction model entries (main accounting entries)
     const transactionFilter = {};
     if (Object.keys(dateFilter).length > 0) {
       transactionFilter.createdAt = dateFilter;
     }
-    if (accountCode) {
+    // Only filter by accountCode if it's NOT a customer/supplier account
+    if (accountCode && !customerId && !supplierId) {
       transactionFilter.accountCode = accountCode;
     }
     
@@ -487,8 +753,19 @@ router.get('/all-entries', [
     const transactionAccountCodes = [...new Set(transactions.map(t => t.accountCode).filter(Boolean))];
     const accountMap = {};
     if (transactionAccountCodes.length > 0) {
+      const tenantId = req.tenantId || req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Tenant ID is required'
+        });
+      }
+      
       const accounts = await chartOfAccountsRepository.findAll({
-        accountCode: { $in: transactionAccountCodes }
+        tenantId: tenantId,
+        accountCode: { $in: transactionAccountCodes },
+        isActive: true,
+        isDeleted: false
       }, {
         select: 'accountCode accountName',
         lean: true
@@ -500,6 +777,22 @@ router.get('/all-entries', [
 
     transactions.forEach(transaction => {
       if (transaction.accountCode && transaction.debitAmount >= 0 && transaction.creditAmount >= 0) {
+        // Filter by customer if customer account is selected
+        if (customerId) {
+          const transactionCustomerId = transaction.customer?.id?._id || transaction.customer?.id || transaction.customer;
+          if (transactionCustomerId?.toString() !== customerId.toString()) {
+            return;
+          }
+        }
+        
+        // Filter by supplier if supplier account is selected
+        if (supplierId) {
+          const transactionSupplierId = transaction.supplier?._id || transaction.supplier;
+          if (transactionSupplierId?.toString() !== supplierId.toString()) {
+            return;
+          }
+        }
+        
         const customerName = transaction.customer?.id
           ? (transaction.customer.id.businessName || `${transaction.customer.id.firstName || ''} ${transaction.customer.id.lastName || ''}`.trim())
           : '';
@@ -550,14 +843,83 @@ router.get('/all-entries', [
     let accountInfo = null;
     let openingBalance = 0;
     
-    if (accountCode) {
-      accountInfo = await chartOfAccountsRepository.findByAccountCode(accountCode);
+    if (customerId) {
+      // For customer accounts, use customer's opening balance
+      const customer = await customerRepository.findById(customerId, { lean: true });
+      if (customer) {
+        openingBalance = customer.openingBalance || customer.advanceBalance || 0;
+        accountInfo = {
+          accountCode: customer.ledgerAccountCode || `CUST-${customer.customerCode || customer._id}`,
+          accountName: `Customer - ${customer.businessName || customer.displayName || `${customer.firstName || ''} ${customer.lastName || ''}`.trim()}`,
+          accountType: 'asset',
+          normalBalance: 'debit'
+        };
+        
+        // Calculate opening balance up to start date if date range is provided
+        if (start) {
+          // Get sales before start date
+          const openingSales = await Sales.find({
+            customer: customerId,
+            createdAt: { $lt: start },
+            isDeleted: { $ne: true }
+          }).lean();
+          
+          const openingSalesTotal = openingSales.reduce((sum, sale) => {
+            return sum + (sale.pricing?.total || sale.total || 0);
+          }, 0);
+          
+          // Get receipts before start date
+          const openingReceipts = await cashReceiptRepository.findAll({
+            customer: customerId,
+            createdAt: { $lt: start }
+          }, { lean: true });
+          
+          const openingReceiptsTotal = openingReceipts.reduce((sum, receipt) => {
+            return sum + (receipt.amount || 0);
+          }, 0);
+          
+          // Get bank receipts before start date
+          const openingBankReceipts = await bankReceiptRepository.findAll({
+            customer: customerId,
+            createdAt: { $lt: start }
+          }, { lean: true });
+          
+          const openingBankReceiptsTotal = openingBankReceipts.reduce((sum, receipt) => {
+            return sum + (receipt.amount || 0);
+          }, 0);
+          
+          // Opening balance = initial balance + sales (debits) - receipts (credits)
+          openingBalance = openingBalance + openingSalesTotal - openingReceiptsTotal - openingBankReceiptsTotal;
+        }
+      }
+    } else if (supplierId) {
+      // For supplier accounts, use supplier's opening balance
+      const supplier = await supplierRepository.findById(supplierId, { lean: true });
+      if (supplier) {
+        openingBalance = supplier.openingBalance || 0;
+        accountInfo = {
+          accountCode: supplier.ledgerAccountCode || `SUP-${supplier.supplierCode || supplier._id}`,
+          accountName: `Supplier - ${supplier.companyName || supplier.contactPerson?.name || supplier.name}`,
+          accountType: 'liability',
+          normalBalance: 'credit'
+        };
+      }
+    } else if (accountCode) {
+      const tenantId = req.tenantId || req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Tenant ID is required'
+        });
+      }
+      accountInfo = await chartOfAccountsRepository.findByAccountCode(accountCode, tenantId);
       if (accountInfo) {
         openingBalance = accountInfo.openingBalance || 0;
         
         // Calculate opening balance up to start date if date range is provided
         if (start) {
           const openingTransactions = await transactionRepository.getSummary({
+            tenantId: tenantId,
             accountCode: accountCode,
             createdAt: { $lt: start }
           }, null);
@@ -731,7 +1093,7 @@ router.get('/all-entries', [
           return;
         }
       } catch (error) {
-        console.error('Export error:', error);
+        logger.error('Export error:', { error: error });
         return res.status(500).json({
           success: false,
           message: 'Export failed',
@@ -756,7 +1118,120 @@ router.get('/all-entries', [
     });
 
   } catch (error) {
-    console.error('Error fetching all ledger entries:', error);
+    logger.error('Error fetching all ledger entries:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * @route   GET /api/account-ledger/summary
+ * @desc    Get Account Ledger Summary for Customers and Suppliers separately
+ * @access  Private
+ */
+router.get('/summary', [
+  auth,
+  requirePermission('view_reports'),
+  query('startDate').optional().isISO8601().withMessage('Invalid start date'),
+  query('endDate').optional().isISO8601().withMessage('Invalid end date'),
+  query('search').optional().isString().withMessage('Invalid search text'),
+  query('customerId').optional().isString().withMessage('Invalid customer ID')
+], async (req, res) => {
+  try {
+    const { startDate, endDate, search, customerId, supplierId } = req.query;
+
+    const result = await accountLedgerService.getLedgerSummary({
+      startDate,
+      endDate,
+      search,
+      customerId,
+      supplierId
+    });
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Error fetching ledger summary:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * @route   GET /api/account-ledger/customer-transactions
+ * @desc    Get detailed transaction entries for a customer (ledger view)
+ * @access  Private
+ */
+router.get('/customer-transactions', [
+  auth,
+  requirePermission('view_reports'),
+  query('startDate').optional().isISO8601().withMessage('Invalid start date'),
+  query('endDate').optional().isISO8601().withMessage('Invalid end date'),
+  query('customerId').optional().isString().withMessage('Invalid customer ID')
+], async (req, res) => {
+  try {
+    const { startDate, endDate, customerId } = req.query;
+
+    if (!customerId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Customer ID is required'
+      });
+    }
+
+    const result = await accountLedgerService.getCustomerDetailedTransactions({
+      customerId,
+      startDate,
+      endDate
+    });
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Error fetching customer detailed transactions:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * @route   GET /api/account-ledger/supplier-transactions/:supplierId
+ * @desc    Get detailed transaction entries for a supplier (ledger view)
+ * @access  Private
+ */
+router.get('/supplier-transactions/:supplierId', [
+  auth,
+  requirePermission('view_reports'),
+  query('startDate').optional().isISO8601().withMessage('Invalid start date'),
+  query('endDate').optional().isISO8601().withMessage('Invalid end date')
+], async (req, res) => {
+  try {
+    const { supplierId } = req.params;
+    const { startDate, endDate } = req.query;
+
+    if (!supplierId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Supplier ID is required'
+      });
+    }
+
+    const result = await accountLedgerService.getSupplierDetailedTransactions({
+      supplierId,
+      startDate,
+      endDate
+    });
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Error fetching supplier detailed transactions:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',

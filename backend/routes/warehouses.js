@@ -1,8 +1,10 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { sanitizeRequest } = require('../middleware/validation');
 const warehouseService = require('../services/warehouseService');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -143,7 +145,7 @@ router.get(
         },
       });
     } catch (error) {
-      console.error('Error fetching warehouses:', error);
+      logger.error('Error fetching warehouses:', error);
       res.status(500).json({
         success: false,
         message: 'Server error fetching warehouses',
@@ -157,6 +159,7 @@ router.get(
   '/:id',
   [
     auth,
+    tenantMiddleware,
     requirePermission('view_inventory'),
     sanitizeRequest,
     ...validateWarehouseId,
@@ -177,7 +180,7 @@ router.get(
           message: 'Warehouse not found',
         });
       }
-      console.error('Error fetching warehouse:', error);
+      logger.error('Error fetching warehouse:', error);
       res.status(500).json({
         success: false,
         message: 'Server error fetching warehouse',
@@ -191,6 +194,7 @@ router.post(
   '/',
   [
     auth,
+    tenantMiddleware,
     requirePermission('update_inventory'),
     sanitizeRequest,
     ...createWarehouseValidators(),
@@ -198,6 +202,7 @@ router.post(
   ],
   async (req, res) => {
     try {
+      const tenantId = req.tenantId || req.user?.tenantId;
       const payload = {
         ...req.body,
         code: req.body.code.toUpperCase(),
@@ -205,7 +210,7 @@ router.post(
 
       let warehouse;
       try {
-        warehouse = await warehouseService.createWarehouse(payload, req.user._id);
+        warehouse = await warehouseService.createWarehouse(payload, req.user._id, { tenantId });
       } catch (err) {
         if (err.message === 'Warehouse code already exists') {
           return res.status(400).json({
@@ -221,7 +226,7 @@ router.post(
         data: warehouse,
       });
     } catch (error) {
-      console.error('Error creating warehouse:', error);
+      logger.error('Error creating warehouse:', error);
       if (error.code === 11000) {
         return res.status(409).json({
           success: false,
@@ -241,6 +246,7 @@ router.put(
   '/:id',
   [
     auth,
+    tenantMiddleware,
     requirePermission('update_inventory'),
     sanitizeRequest,
     ...validateWarehouseId,
@@ -255,7 +261,8 @@ router.put(
         updates.code = updates.code.toUpperCase();
       }
 
-      const warehouse = await warehouseService.updateWarehouse(req.params.id, updates, req.user._id);
+      const tenantId = req.tenantId || req.user?.tenantId;
+      const warehouse = await warehouseService.updateWarehouse(req.params.id, updates, req.user._id, { tenantId });
 
       res.json({
         success: true,
@@ -275,7 +282,7 @@ router.put(
           message: 'Warehouse code must be unique',
         });
       }
-      console.error('Error updating warehouse:', error);
+      logger.error('Error updating warehouse:', error);
       res.status(500).json({
         success: false,
         message: 'Server error updating warehouse',
@@ -289,6 +296,7 @@ router.delete(
   '/:id',
   [
     auth,
+    tenantMiddleware,
     requirePermission('update_inventory'),
     sanitizeRequest,
     ...validateWarehouseId,
@@ -324,7 +332,7 @@ router.delete(
           message: error.message,
         });
       }
-      console.error('Error deleting warehouse:', error);
+      logger.error('Error deleting warehouse:', error);
       res.status(500).json({
         success: false,
         message: 'Server error deleting warehouse',

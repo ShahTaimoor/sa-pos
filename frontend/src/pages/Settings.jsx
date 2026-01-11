@@ -2224,109 +2224,311 @@ export const Settings2 = () => {
                     )}
                   </p>
                   <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg p-8">
-                    <div className="max-w-md mx-auto bg-white p-6 rounded-lg shadow-sm">
-                      {/* Header */}
-                      {printSettings.headerText && (
-                        <div className="text-center text-sm text-gray-600 mb-4 border-b pb-2">
-                          {printSettings.headerText}
-        </div>
-      )}
+                    {/* Standard Layout */}
+                    {printSettings.invoiceLayout === 'standard' && (
+                      <div className="max-w-md mx-auto bg-white p-6 rounded-lg shadow-sm">
+                        {/* Header */}
+                        {printSettings.headerText && (
+                          <div className="text-center text-sm text-gray-600 mb-4 border-b pb-2">
+                            {printSettings.headerText}
+                          </div>
+                        )}
 
-                      {/* Company Info */}
-                      <div className="text-center mb-4">
-                        {printSettings.showLogo && (
-                          <div className="h-12 w-12 bg-gray-200 rounded mx-auto mb-2 flex items-center justify-center">
-                            <Building className="h-6 w-6 text-gray-400" />
-                          </div>
-                        )}
-                        <div className="text-lg font-bold text-gray-900">
-                          {companyData.companyName || 'Your Company Name'}
-                        </div>
-                        {!companyData.companyName && (
-                          <div className="text-xs text-orange-600 mt-1">
-                            (Company name not set)
-                          </div>
-                        )}
-                        {companyData.address && (
-                          <div className="text-sm text-gray-700">
-                            {companyData.address}
-                          </div>
-                        )}
-                        {companyData.contactNumber && (
-                          <div className="text-sm text-gray-700">
-                            Phone: {companyData.contactNumber}
-                          </div>
-                        )}
-                        {companyData.email && (
-                          <div className="text-sm text-gray-700">
-                            Email: {companyData.email}
-                          </div>
-                        )}
-                        {companyData.taxRegistrationNumber && (
-                          <div className="text-sm text-gray-700">
-                            Tax ID: {companyData.taxRegistrationNumber}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Sample Receipt Content */}
-                      <div className="border-t pt-4">
-                        <div className="text-center text-sm font-medium text-gray-900 mb-2">
-                          SAMPLE RECEIPT
-                        </div>
-                        <div className="space-y-1 text-sm">
-                          <div className="flex justify-between">
-                            <span>Item 1</span>
-                            <span>$10.00</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Item 2</span>
-                            <span>$15.00</span>
-                          </div>
-                          {printSettings.showDiscount && (
-                            <div className="flex justify-between text-red-600">
-                              <span>Discount</span>
-                              <span>-$2.50</span>
-                </div>
-              )}
-                          {printSettings.showTax && (
-                            <div className="flex justify-between">
-                              <span>Tax</span>
-                              <span>$2.25</span>
-            </div>
+                        {/* Company Info */}
+                        <div className="text-center mb-4">
+                          {printSettings.showLogo && (
+                            <div className="h-12 w-12 bg-gray-200 rounded mx-auto mb-2 flex items-center justify-center">
+                              <Building className="h-6 w-6 text-gray-400" />
+                            </div>
                           )}
-                          <div className="border-t pt-1 flex justify-between font-bold">
-                            <span>Total</span>
-                            <span>$24.75</span>
-          </div>
-        </div>
-                      </div>
-
-                      {/* Footer */}
-                      <div className="border-t pt-3 mt-4">
-                        {printSettings.footerText && (
-                          <div className="text-center text-xs text-gray-600 mb-2">
-                            {printSettings.footerText}
+                          <div className="text-lg font-bold text-gray-900">
+                            {companyData.companyName || 'Company Name'}
                           </div>
-                        )}
-                        
-                        {/* Additional Company Info in Footer */}
-                        <div className="text-center text-xs text-gray-500 space-y-1">
+                          {!companyData.companyName && (
+                            <div className="text-xs text-orange-600 mt-1">
+                              (Company name not set)
+                            </div>
+                          )}
+                          {companyData.address && (
+                            <div className="text-sm text-gray-700">
+                              {companyData.address}
+                            </div>
+                          )}
+                          {companyData.contactNumber && (
+                            <div className="text-sm text-gray-700">
+                              Phone: {companyData.contactNumber}
+                            </div>
+                          )}
                           {companyData.email && (
-                            <div>Email: {companyData.email}</div>
+                            <div className="text-sm text-gray-700">
+                              Email: {companyData.email}
+                            </div>
                           )}
                           {companyData.taxRegistrationNumber && (
-                            <div>Tax ID: {companyData.taxRegistrationNumber}</div>
+                            <div className="text-sm text-gray-700">
+                              Tax ID: {companyData.taxRegistrationNumber}
+                            </div>
                           )}
                         </div>
-                        
-                        {printSettings.showDate && (
-                          <div className="text-center text-xs text-gray-500 mt-2">
-                            Date: {new Date().toLocaleDateString()}
+
+                        {/* Sample Receipt Content */}
+                        <div className="border-t pt-4">
+                          <div className="text-center text-sm font-medium text-gray-900 mb-2">
+                            SAMPLE RECEIPT
+                          </div>
+                          <div className="space-y-1 text-sm">
+                            <div className="flex justify-between">
+                              <span>Item 1</span>
+                              <span>10.00</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Item 2</span>
+                              <span>15.00</span>
+                            </div>
+                            {printSettings.showDiscount && (
+                              <div className="flex justify-between text-red-600">
+                                <span>Discount</span>
+                                <span>-2.50</span>
+                              </div>
+                            )}
+                            {printSettings.showTax && (
+                              <div className="flex justify-between">
+                                <span>Tax</span>
+                                <span>2.25</span>
+                              </div>
+                            )}
+                            <div className="border-t pt-1 flex justify-between font-bold">
+                              <span>Total</span>
+                              <span>24.75</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Footer */}
+                        <div className="border-t pt-3 mt-4">
+                          {printSettings.footerText && (
+                            <div className="text-center text-xs text-gray-600 mb-2">
+                              {printSettings.footerText}
+                            </div>
+                          )}
+                          
+                          {/* Additional Company Info in Footer */}
+                          <div className="text-center text-xs text-gray-500 space-y-1">
+                            {companyData.email && (
+                              <div>Email: {companyData.email}</div>
+                            )}
+                            {companyData.taxRegistrationNumber && (
+                              <div>Tax ID: {companyData.taxRegistrationNumber}</div>
+                            )}
+                          </div>
+                          
+                          {printSettings.showDate && (
+                            <div className="text-center text-xs text-gray-500 mt-2">
+                              Date: {new Date().toLocaleDateString()}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Compact Layout */}
+                    {printSettings.invoiceLayout === 'compact' && (
+                      <div className="max-w-xs mx-auto bg-white p-4 rounded-lg shadow-sm">
+                        {/* Header */}
+                        {printSettings.headerText && (
+                          <div className="text-center text-xs text-gray-600 mb-2 border-b pb-1">
+                            {printSettings.headerText}
                           </div>
                         )}
+
+                        {/* Company Info - Compact */}
+                        <div className="text-center mb-3">
+                          {printSettings.showLogo && (
+                            <div className="h-8 w-8 bg-gray-200 rounded mx-auto mb-1 flex items-center justify-center">
+                              <Building className="h-4 w-4 text-gray-400" />
+                            </div>
+                          )}
+                          <div className="text-sm font-bold text-gray-900">
+                            {companyData.companyName || 'Your Company Name'}
+                          </div>
+                          {companyData.address && (
+                            <div className="text-xs text-gray-600">
+                              {companyData.address}
+                            </div>
+                          )}
+                          {companyData.contactNumber && (
+                            <div className="text-xs text-gray-600">
+                              {companyData.contactNumber}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Sample Receipt Content - Compact */}
+                        <div className="border-t pt-2">
+                          <div className="text-center text-xs font-medium text-gray-900 mb-1">
+                            SAMPLE RECEIPT
+                          </div>
+                          <div className="space-y-0.5 text-xs">
+                            <div className="flex justify-between">
+                              <span>Item 1</span>
+                              <span>10.00</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Item 2</span>
+                              <span>15.00</span>
+                            </div>
+                            {printSettings.showDiscount && (
+                              <div className="flex justify-between text-red-600">
+                                <span>Discount</span>
+                                <span>-2.50</span>
+                              </div>
+                            )}
+                            {printSettings.showTax && (
+                              <div className="flex justify-between">
+                                <span>Tax</span>
+                                <span>2.25</span>
+                              </div>
+                            )}
+                            <div className="border-t pt-0.5 flex justify-between font-bold text-sm">
+                              <span>Total</span>
+                              <span>24.75</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Footer - Compact */}
+                        <div className="border-t pt-2 mt-2">
+                          {printSettings.footerText && (
+                            <div className="text-center text-xs text-gray-600 mb-1">
+                              {printSettings.footerText}
+                            </div>
+                          )}
+                          
+                          {printSettings.showDate && (
+                            <div className="text-center text-xs text-gray-500">
+                              Date: {new Date().toLocaleDateString()}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {/* Detailed Layout */}
+                    {printSettings.invoiceLayout === 'detailed' && (
+                      <div className="max-w-lg mx-auto bg-white p-8 rounded-lg shadow-sm">
+                        {/* Header */}
+                        {printSettings.headerText && (
+                          <div className="text-center text-base text-gray-700 mb-4 border-b-2 pb-3">
+                            {printSettings.headerText}
+                          </div>
+                        )}
+
+                        {/* Company Info - Detailed */}
+                        <div className="text-center mb-6">
+                          {printSettings.showLogo && (
+                            <div className="h-16 w-16 bg-gray-200 rounded-lg mx-auto mb-3 flex items-center justify-center">
+                              <Building className="h-8 w-8 text-gray-400" />
+                            </div>
+                          )}
+                          <div className="text-xl font-bold text-gray-900 mb-2">
+                            {companyData.companyName || 'Company Name'}
+                          </div>
+                          {!companyData.companyName && (
+                            <div className="text-xs text-orange-600 mb-2">
+                              (Company name not set)
+                            </div>
+                          )}
+                          <div className="space-y-1 text-sm text-gray-700">
+                            {companyData.address && (
+                              <div className="flex items-center justify-center">
+                                <MapPin className="h-4 w-4 mr-1" />
+                                {companyData.address}
+                              </div>
+                            )}
+                            {companyData.contactNumber && (
+                              <div className="flex items-center justify-center">
+                                <Phone className="h-4 w-4 mr-1" />
+                                {companyData.contactNumber}
+                              </div>
+                            )}
+                            {companyData.email && (
+                              <div className="flex items-center justify-center">
+                                <Mail className="h-4 w-4 mr-1" />
+                                {companyData.email}
+                              </div>
+                            )}
+                            {companyData.taxRegistrationNumber && (
+                              <div className="flex items-center justify-center">
+                                <FileText className="h-4 w-4 mr-1" />
+                                Tax ID: {companyData.taxRegistrationNumber}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Sample Receipt Content - Detailed */}
+                        <div className="border-t-2 pt-4">
+                          <div className="text-center text-base font-semibold text-gray-900 mb-4">
+                            SAMPLE RECEIPT
+                          </div>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between py-1 border-b border-gray-100">
+                              <span className="font-medium">Item 1</span>
+                              <span className="font-medium">10.00</span>
+                            </div>
+                            <div className="flex justify-between py-1 border-b border-gray-100">
+                              <span className="font-medium">Item 2</span>
+                              <span className="font-medium">15.00</span>
+                            </div>
+                            {printSettings.showDiscount && (
+                              <div className="flex justify-between py-1 text-red-600 border-b border-gray-100">
+                                <span className="font-medium">Discount</span>
+                                <span className="font-medium">-2.50</span>
+                              </div>
+                            )}
+                            {printSettings.showTax && (
+                              <div className="flex justify-between py-1 border-b border-gray-100">
+                                <span className="font-medium">Tax</span>
+                                <span className="font-medium">2.25</span>
+                              </div>
+                            )}
+                            <div className="border-t-2 pt-2 flex justify-between font-bold text-base mt-2">
+                              <span>Total</span>
+                              <span>24.75</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Footer - Detailed */}
+                        <div className="border-t-2 pt-4 mt-6">
+                          {printSettings.footerText && (
+                            <div className="text-center text-sm text-gray-700 mb-3 border-b pb-2">
+                              {printSettings.footerText}
+                            </div>
+                          )}
+                          
+                          {/* Additional Company Info in Footer - Detailed */}
+                          <div className="text-center text-xs text-gray-500 space-y-1 mb-2">
+                            {companyData.email && (
+                              <div>Email: {companyData.email}</div>
+                            )}
+                            {companyData.taxRegistrationNumber && (
+                              <div>Tax ID: {companyData.taxRegistrationNumber}</div>
+                            )}
+                          </div>
+                          
+                          {printSettings.showDate && (
+                            <div className="text-center text-sm text-gray-600 mt-3 font-medium">
+                              Date: {new Date().toLocaleDateString('en-US', { 
+                                year: 'numeric', 
+                                month: 'long', 
+                                day: 'numeric' 
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 

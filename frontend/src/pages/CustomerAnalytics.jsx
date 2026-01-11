@@ -4,7 +4,6 @@ import {
   TrendingUp, 
   TrendingDown,
   AlertTriangle,
-  DollarSign,
   Target,
   PieChart,
   BarChart3,
@@ -137,7 +136,7 @@ const CustomerAnalytics = () => {
                 {formatCurrency(summary.summary?.totalCLV || 0)}
               </p>
             </div>
-            <DollarSign className="h-8 w-8 text-green-400" />
+            <TrendingUp className="h-8 w-8 text-green-400" />
           </div>
         </div>
         <div className="bg-white rounded-lg shadow p-4 border-l-4 border-orange-500">

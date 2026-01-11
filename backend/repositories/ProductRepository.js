@@ -100,7 +100,9 @@ class ProductRepository extends BaseRepository {
    * @returns {Promise<Array>}
    */
   async findLowStock(options = {}) {
+    const { filter: additionalFilter = {} } = options;
     const filter = {
+      ...additionalFilter,
       $expr: { $lte: ['$inventory.currentStock', '$inventory.reorderPoint'] }
     };
     return await this.findAll(filter, options);
@@ -154,18 +156,19 @@ class ProductRepository extends BaseRepository {
 
   /**
    * Update product stock
+   * @deprecated DO NOT USE - Stock updates must go through Inventory model (single source of truth)
+   * Use inventoryService.updateStock() instead with proper movement tracking
    * @param {string} id - Product ID
    * @param {number} quantity - Quantity to add/subtract (negative for subtraction)
    * @returns {Promise<Product>}
    */
   async updateStock(id, quantity) {
-    const product = await this.findById(id);
-    if (!product) {
-      throw new Error('Product not found');
-    }
-    
-    product.inventory.currentStock = Math.max(0, (product.inventory.currentStock || 0) + quantity);
-    return await product.save();
+    throw new Error(
+      'DIRECT_STOCK_UPDATE_BLOCKED: Cannot update product stock directly. ' +
+      'Stock is managed through Inventory model (single source of truth). ' +
+      'Use inventoryService.updateStock() with proper movement type, reason, and reference. ' +
+      'This ensures audit trail and prevents negative stock.'
+    );
   }
 
   /**
@@ -197,12 +200,16 @@ class ProductRepository extends BaseRepository {
    * Check if product name exists
    * @param {string} name - Product name
    * @param {string} excludeId - Product ID to exclude from check
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<boolean>}
    */
-  async nameExists(name, excludeId = null) {
+  async nameExists(name, excludeId = null, tenantId = null) {
     const query = { name: { $regex: `^${name}$`, $options: 'i' } };
     if (excludeId) {
       query._id = { $ne: excludeId };
+    }
+    if (tenantId) {
+      query.tenantId = tenantId;
     }
     return await this.exists(query);
   }
@@ -211,12 +218,16 @@ class ProductRepository extends BaseRepository {
    * Check if SKU exists
    * @param {string} sku - Product SKU
    * @param {string} excludeId - Product ID to exclude from check
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<boolean>}
    */
-  async skuExists(sku, excludeId = null) {
+  async skuExists(sku, excludeId = null, tenantId = null) {
     const query = { sku };
     if (excludeId) {
       query._id = { $ne: excludeId };
+    }
+    if (tenantId) {
+      query.tenantId = tenantId;
     }
     return await this.exists(query);
   }
@@ -225,12 +236,16 @@ class ProductRepository extends BaseRepository {
    * Check if barcode exists
    * @param {string} barcode - Product barcode
    * @param {string} excludeId - Product ID to exclude from check
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<boolean>}
    */
-  async barcodeExists(barcode, excludeId = null) {
+  async barcodeExists(barcode, excludeId = null, tenantId = null) {
     const query = { barcode };
     if (excludeId) {
       query._id = { $ne: excludeId };
+    }
+    if (tenantId) {
+      query.tenantId = tenantId;
     }
     return await this.exists(query);
   }

@@ -5,7 +5,6 @@ import {
   Trash2, 
   Search,
   FolderTree,
-  DollarSign,
   TrendingUp,
   TrendingDown,
   Building,
@@ -31,7 +30,7 @@ const AccountTypeBadge = ({ type }) => {
     asset: { bg: 'bg-green-100', text: 'text-green-800', label: 'Asset', icon: TrendingUp },
     liability: { bg: 'bg-red-100', text: 'text-red-800', label: 'Liability', icon: TrendingDown },
     equity: { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Equity', icon: Building },
-    revenue: { bg: 'bg-purple-100', text: 'text-purple-800', label: 'Revenue', icon: DollarSign },
+    revenue: { bg: 'bg-purple-100', text: 'text-purple-800', label: 'Revenue', icon: TrendingUp },
     expense: { bg: 'bg-orange-100', text: 'text-orange-800', label: 'Expense', icon: CreditCard }
   };
 
@@ -850,6 +849,7 @@ export const ChartOfAccounts = () => {
   // Extract accounts array from response
   const accounts = React.useMemo(() => {
     if (Array.isArray(accountsResponse)) return accountsResponse;
+    if (Array.isArray(accountsResponse?.data)) return accountsResponse.data; // Backend returns { success: true, data: accounts[] }
     if (Array.isArray(accountsResponse?.data?.accounts)) return accountsResponse.data.accounts;
     if (Array.isArray(accountsResponse?.accounts)) return accountsResponse.accounts;
     return [];
@@ -1019,7 +1019,7 @@ export const ChartOfAccounts = () => {
             className="flex flex-col items-center p-4 border-2 border-purple-200 rounded-lg hover:border-purple-300 hover:bg-purple-50 transition-colors group"
           >
             <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mb-3 group-hover:bg-purple-200">
-              <DollarSign className="h-6 w-6 text-purple-600" />
+              <TrendingUp className="h-6 w-6 text-purple-600" />
             </div>
             <h4 className="font-medium text-gray-900 mb-1">Revenue</h4>
             <p className="text-xs text-gray-600 text-center">Sales Revenue</p>
@@ -1114,7 +1114,7 @@ export const ChartOfAccounts = () => {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {!accounts?.data || accounts.data.length === 0 ? (
+              {!accounts || accounts.length === 0 ? (
                 <tr>
                   <td colSpan="7" className="px-6 py-12 text-center text-gray-500">
                     <FolderTree className="mx-auto h-12 w-12 text-gray-400 mb-2" />

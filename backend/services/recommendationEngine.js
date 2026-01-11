@@ -3,6 +3,7 @@ const SalesRepository = require('../repositories/SalesRepository');
 const UserBehavior = require('../models/UserBehavior');
 const Recommendation = require('../models/Recommendation');
 const Category = require('../models/Category');
+const logger = require('../utils/logger');
 
 class RecommendationEngine {
   constructor() {
@@ -60,7 +61,7 @@ class RecommendationEngine {
       
       return recommendation;
     } catch (error) {
-      console.error('Error generating recommendations:', error);
+      logger.error('Error generating recommendations:', error);
       throw error;
     }
   }

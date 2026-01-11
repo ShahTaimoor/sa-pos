@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { auth, requirePermission } = require('../middleware/auth');
 const { optimizeImage } = require('../services/imageOptimization');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -100,7 +101,7 @@ router.post('/upload', [
       basePath: filename
     });
   } catch (error) {
-    console.error('Image upload error:', error);
+    logger.error('Image upload error:', { error: error });
     
     // Clean up temp file on error
     if (req.file && fs.existsSync(req.file.path)) {
@@ -143,13 +144,13 @@ router.get('/:filename', (req, res) => {
     fileStream.pipe(res);
 
     fileStream.on('error', (err) => {
-      console.error('Image stream error:', err);
+      logger.error('Image stream error:', { error: err });
       if (!res.headersSent) {
         res.status(500).json({ message: 'Failed to serve image' });
       }
     });
   } catch (error) {
-    console.error('Serve image error:', error);
+    logger.error('Serve image error:', { error: error });
     res.status(500).json({ message: 'Failed to serve image' });
   }
 });

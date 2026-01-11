@@ -1,14 +1,20 @@
 const mongoose = require('mongoose');
 
 const employeeSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
   // Employee Identification
   employeeId: {
     type: String,
     required: true,
-    unique: true,
     trim: true,
-    uppercase: true,
-    index: true
+    uppercase: true
+    // Note: unique constraint is enforced via compound index { tenantId: 1, employeeId: 1 }
+    // DO NOT add unique: true here - it creates a global index
   },
   
   // Personal Information
@@ -171,11 +177,12 @@ const employeeSchema = new mongoose.Schema({
 });
 
 // Indexes
-// employeeId index removed - already has unique: true and index: true in field definition
-employeeSchema.index({ status: 1 });
-employeeSchema.index({ department: 1 });
-employeeSchema.index({ position: 1 });
-employeeSchema.index({ userAccount: 1 });
+// Compound unique index for tenant-scoped employee IDs
+employeeSchema.index({ tenantId: 1, employeeId: 1 }, { unique: true });
+employeeSchema.index({ tenantId: 1, status: 1 });
+employeeSchema.index({ tenantId: 1, department: 1 });
+employeeSchema.index({ tenantId: 1, position: 1 });
+employeeSchema.index({ tenantId: 1, userAccount: 1 });
 
 // Virtual for full name
 employeeSchema.virtual('fullName').get(function() {

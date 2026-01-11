@@ -9,12 +9,15 @@ class CategoryRepository extends BaseRepository {
   /**
    * Find category by name
    * @param {string} name - Category name
+   * @param {string} tenantId - Tenant ID
    * @param {object} options - Query options
    * @returns {Promise<Category|null>}
    */
-  async findByName(name, options = {}) {
+  async findByName(name, tenantId = null, options = {}) {
     if (!name) return null;
-    return await this.findOne({ name: { $regex: `^${name}$`, $options: 'i' } }, options);
+    const query = { name: { $regex: `^${name}$`, $options: 'i' } };
+    if (tenantId) query.tenantId = tenantId;
+    return await this.findOne(query, options);
   }
 
   /**
@@ -97,10 +100,11 @@ class CategoryRepository extends BaseRepository {
 
   /**
    * Get category tree
+   * @param {string} tenantId - Tenant ID
    * @returns {Promise<Array>}
    */
-  async getCategoryTree() {
-    return await this.Model.getCategoryTree();
+  async getCategoryTree(tenantId = null) {
+    return await this.Model.getCategoryTree(tenantId);
   }
 
   /**

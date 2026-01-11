@@ -2,10 +2,12 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const inventoryService = require('../services/inventoryService');
 const inventoryRepository = require('../repositories/InventoryRepository');
 const productRepository = require('../repositories/ProductRepository');
 const stockAdjustmentRepository = require('../repositories/StockAdjustmentRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -190,7 +192,7 @@ router.get('/', [
     });
     return;
   } catch (error) {
-    console.error('Error fetching inventory:', error);
+    logger.error('Error fetching inventory:', error);
     if (error.name === 'ValidationError') {
       return res.status(400).json({ message: 'Validation error', error: error.message });
     }
@@ -203,16 +205,38 @@ router.get('/', [
 // @access  Private (requires 'view_inventory' permission)
 router.get('/summary', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   sanitizeRequest,
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const summary = await inventoryService.getInventorySummary();
-    res.json(summary);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ 
+        message: 'Tenant ID is required',
+        summary: {
+          totalProducts: 0,
+          outOfStock: 0,
+          lowStock: 0,
+          totalValue: 0
+        }
+      });
+    }
+    const summary = await inventoryService.getInventorySummary(tenantId);
+    res.json({ data: { summary } });
   } catch (error) {
-    console.error('Error fetching inventory summary:', error);
-    res.status(500).json({ message: 'Server error fetching inventory summary', error: error.message });
+    logger.error('Error fetching inventory summary:', error);
+    res.status(500).json({ 
+      message: 'Server error fetching inventory summary', 
+      error: error.message,
+      summary: {
+        totalProducts: 0,
+        outOfStock: 0,
+        lowStock: 0,
+        totalValue: 0
+      }
+    });
   }
 });
 
@@ -229,7 +253,7 @@ router.get('/low-stock', [
     const lowStockItems = await inventoryService.getLowStockItems();
     res.json({ items: lowStockItems });
   } catch (error) {
-    console.error('Error fetching low stock items:', error);
+    logger.error('Error fetching low stock items:', error);
     res.status(500).json({ message: 'Server error fetching low stock items', error: error.message });
   }
 });
@@ -249,7 +273,7 @@ router.get('/:productId', [
     const inventory = await inventoryService.getInventoryStatus(productId);
     res.json(inventory);
   } catch (error) {
-    console.error('Error fetching inventory details:', error);
+    logger.error('Error fetching inventory details:', error);
     res.status(500).json({ message: 'Server error fetching inventory details', error: error.message });
   }
 });
@@ -284,7 +308,7 @@ router.get('/:productId/history', [
     
     res.json(history);
   } catch (error) {
-    console.error('Error fetching inventory history:', error);
+    logger.error('Error fetching inventory history:', error);
     res.status(500).json({ message: 'Server error fetching inventory history', error: error.message });
   }
 });
@@ -338,7 +362,7 @@ router.post('/update-stock', [
       inventory: updatedInventory,
     });
   } catch (error) {
-    console.error('Error updating stock:', error);
+    logger.error('Error updating stock:', error);
     res.status(500).json({ message: 'Server error updating stock', error: error.message });
   }
 });
@@ -373,7 +397,7 @@ router.post('/bulk-update', [
       results,
     });
   } catch (error) {
-    console.error('Error in bulk stock update:', error);
+    logger.error('Error in bulk stock update:', error);
     res.status(500).json({ message: 'Server error in bulk stock update', error: error.message });
   }
 });
@@ -399,7 +423,7 @@ router.post('/reserve-stock', [
       inventory,
     });
   } catch (error) {
-    console.error('Error reserving stock:', error);
+    logger.error('Error reserving stock:', error);
     res.status(500).json({ message: 'Server error reserving stock', error: error.message });
   }
 });
@@ -425,7 +449,7 @@ router.post('/release-stock', [
       inventory,
     });
   } catch (error) {
-    console.error('Error releasing stock:', error);
+    logger.error('Error releasing stock:', error);
     res.status(500).json({ message: 'Server error releasing stock', error: error.message });
   }
 });
@@ -470,7 +494,7 @@ router.post('/adjustments', [
       adjustment,
     });
   } catch (error) {
-    console.error('Error creating stock adjustment:', error);
+    logger.error('Error creating stock adjustment:', error);
     res.status(500).json({ message: 'Server error creating stock adjustment', error: error.message });
   }
 });
@@ -512,7 +536,7 @@ router.get('/adjustments', [
       pagination
     });
   } catch (error) {
-    console.error('Error fetching stock adjustments:', error);
+    logger.error('Error fetching stock adjustments:', error);
     res.status(500).json({ message: 'Server error fetching stock adjustments', error: error.message });
   }
 });
@@ -537,7 +561,7 @@ router.put('/adjustments/:adjustmentId/approve', [
       adjustment,
     });
   } catch (error) {
-    console.error('Error approving stock adjustment:', error);
+    logger.error('Error approving stock adjustment:', error);
     res.status(500).json({ message: 'Server error approving stock adjustment', error: error.message });
   }
 });
@@ -562,7 +586,7 @@ router.put('/adjustments/:adjustmentId/complete', [
       adjustment,
     });
   } catch (error) {
-    console.error('Error completing stock adjustment:', error);
+    logger.error('Error completing stock adjustment:', error);
     res.status(500).json({ message: 'Server error completing stock adjustment', error: error.message });
   }
 });

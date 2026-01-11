@@ -2,11 +2,14 @@ const express = require('express');
 const { body, query, param, validationResult } = require('express-validator');
 const mongoose = require('mongoose');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
+const { checkSegregationOfDuties } = require('../middleware/segregationOfDuties');
 const JournalVoucher = require('../models/JournalVoucher'); // Still needed for new JournalVoucher() and static methods
 const ChartOfAccounts = require('../models/ChartOfAccounts'); // Still needed for model reference
 const { runWithTransactionRetry } = require('../services/transactionUtils');
 const journalVoucherRepository = require('../repositories/JournalVoucherRepository');
 const chartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -23,6 +26,7 @@ const withValidation = (req, res, next) => {
 
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
@@ -99,7 +103,7 @@ router.get('/', [
       }
     });
   } catch (error) {
-    console.error('Error fetching journal vouchers:', error);
+    logger.error('Error fetching journal vouchers:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -110,6 +114,7 @@ router.get('/', [
 
 router.get('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   param('id').isMongoId().withMessage('Invalid voucher ID')
 ], withValidation, async (req, res) => {
@@ -134,7 +139,7 @@ router.get('/:id', [
       data: voucher
     });
   } catch (error) {
-    console.error('Error fetching journal voucher:', error);
+    logger.error('Error fetching journal voucher:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -145,7 +150,9 @@ router.get('/:id', [
 
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_reports'),
+  checkSegregationOfDuties('manage_reports', 'approve_journal_vouchers'),
   body('voucherDate').optional().isISO8601().withMessage('Voucher date must be a valid date'),
   body('reference').optional().isString().trim().isLength({ max: 100 }).withMessage('Reference is too long'),
   body('description').optional().isString().trim().isLength({ max: 1000 }).withMessage('Description is too long'),
@@ -153,14 +160,26 @@ router.post('/', [
   body('entries.*.accountId').isMongoId().withMessage('Account ID is required for each entry'),
   body('entries.*.debit').optional().isFloat({ min: 0 }).withMessage('Debit must be a non-negative number'),
   body('entries.*.credit').optional().isFloat({ min: 0 }).withMessage('Credit must be a non-negative number'),
-  body('entries.*.particulars').optional().isString().trim().isLength({ max: 500 }).withMessage('Particulars are too long')
+  body('entries.*.particulars').optional().isString().trim().isLength({ max: 500 }).withMessage('Particulars are too long'),
+  body('approvalThreshold').optional().isFloat({ min: 0 }).withMessage('Approval threshold must be a non-negative number')
 ], withValidation, async (req, res) => {
   try {
     const { voucherDate, reference, description, entries, notes } = req.body;
     const createdBy = req.user?._id;
+    const tenantId = req.tenantId || req.user?.tenantId;
+
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
 
     const accountIds = entries.map(entry => entry.accountId);
-    const accounts = await chartOfAccountsRepository.findAll({ _id: { $in: accountIds } });
+    const accounts = await chartOfAccountsRepository.findAll({ 
+      _id: { $in: accountIds },
+      tenantId: tenantId 
+    });
 
     if (accounts.length !== entries.length) {
       throw new Error('One or more selected accounts were not found.');
@@ -205,14 +224,26 @@ router.post('/', [
     }
 
     const populatedVoucher = await runWithTransactionRetry(async (session) => {
+      // Check if approval is required
+      const approvalThreshold = req.body.approvalThreshold || 10000; // Default $10,000
+      const requiresApproval = totalDebit >= approvalThreshold;
+      
       const journalVoucher = new JournalVoucher({
+        tenantId: tenantId,
         voucherDate: voucherDate ? new Date(voucherDate) : new Date(),
         reference,
         description,
         entries: entriesWithAccount,
         notes,
         createdBy,
-        status: 'posted'
+        status: requiresApproval ? 'pending_approval' : 'draft',
+        requiresApproval: requiresApproval,
+        approvalThreshold: approvalThreshold,
+        approvalWorkflow: requiresApproval ? {
+          status: 'pending',
+          approvers: [], // Will be assigned by approval service
+          currentApproverIndex: 0
+        } : undefined
       });
 
       await journalVoucher.save({ session });
@@ -247,14 +278,214 @@ router.post('/', [
 
     res.status(201).json({
       success: true,
-      message: 'Journal voucher created successfully',
-      data: populatedVoucher
+      message: populatedVoucher.requiresApproval 
+        ? 'Journal voucher created and requires approval' 
+        : 'Journal voucher created successfully',
+      data: populatedVoucher,
+      requiresApproval: populatedVoucher.requiresApproval
     });
   } catch (error) {
-    console.error('Error creating journal voucher:', error);
+    logger.error('Error creating journal voucher:', error);
     res.status(400).json({
       success: false,
       message: error.message || 'Failed to create journal voucher'
+    });
+  }
+});
+
+// @route   POST /api/journal-vouchers/:id/approve
+// @desc    Approve a journal voucher
+// @access  Private (requires 'approve_journal_vouchers' permission)
+router.post('/:id/approve', [
+  auth,
+  requirePermission('approve_journal_vouchers'),
+  checkSegregationOfDuties('manage_reports', 'approve_journal_vouchers'),
+  param('id').isMongoId().withMessage('Valid voucher ID is required'),
+  body('notes').optional().isString().trim().isLength({ max: 500 }).withMessage('Notes too long')
+], withValidation, async (req, res) => {
+  try {
+    const voucher = await journalVoucherRepository.findById(req.params.id);
+    
+    if (!voucher) {
+      return res.status(404).json({
+        success: false,
+        message: 'Journal voucher not found'
+      });
+    }
+
+    // Check if user can approve
+    const canApprove = voucher.canBeApprovedBy(req.user._id);
+    if (!canApprove.allowed) {
+      return res.status(403).json({
+        success: false,
+        message: canApprove.reason
+      });
+    }
+
+    // Update approval workflow
+    voucher.approvalWorkflow.status = 'approved';
+    voucher.approvalWorkflow.approvedBy = req.user._id;
+    voucher.approvalWorkflow.approvedAt = new Date();
+    voucher.status = 'approved';
+    voucher.approvedBy = req.user._id;
+    
+    if (req.body.notes) {
+      if (!voucher.approvalWorkflow.approvers || voucher.approvalWorkflow.approvers.length === 0) {
+        voucher.approvalWorkflow.approvers = [{
+          user: req.user._id,
+          role: 'accountant',
+          status: 'approved',
+          approvedAt: new Date(),
+          notes: req.body.notes
+        }];
+      } else {
+        const currentApprover = voucher.approvalWorkflow.approvers[voucher.approvalWorkflow.currentApproverIndex];
+        if (currentApprover) {
+          currentApprover.status = 'approved';
+          currentApprover.approvedAt = new Date();
+          currentApprover.notes = req.body.notes;
+        }
+      }
+    }
+
+    await voucher.save();
+
+    // If approved, post the voucher
+    if (voucher.status === 'approved') {
+      voucher.status = 'posted';
+      await voucher.save();
+    }
+
+    res.json({
+      success: true,
+      message: 'Journal voucher approved successfully',
+      data: await journalVoucherRepository.findById(req.params.id, {
+        populate: [
+          { path: 'createdBy', select: 'firstName lastName email' },
+          { path: 'approvedBy', select: 'firstName lastName email' },
+          { path: 'approvalWorkflow.approvedBy', select: 'firstName lastName email' }
+        ]
+      })
+    });
+  } catch (error) {
+    logger.error('Error approving journal voucher:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error approving journal voucher',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @route   POST /api/journal-vouchers/:id/reject
+// @desc    Reject a journal voucher
+// @access  Private (requires 'approve_journal_vouchers' permission)
+router.post('/:id/reject', [
+  auth,
+  tenantMiddleware,
+  requirePermission('approve_journal_vouchers'),
+  checkSegregationOfDuties('manage_reports', 'approve_journal_vouchers'),
+  param('id').isMongoId().withMessage('Valid voucher ID is required'),
+  body('reason').trim().isLength({ min: 1, max: 500 }).withMessage('Rejection reason is required (max 500 characters)')
+], withValidation, async (req, res) => {
+  try {
+    const voucher = await journalVoucherRepository.findById(req.params.id);
+    
+    if (!voucher) {
+      return res.status(404).json({
+        success: false,
+        message: 'Journal voucher not found'
+      });
+    }
+
+    // Check if user can approve/reject
+    const canApprove = voucher.canBeApprovedBy(req.user._id);
+    if (!canApprove.allowed && !canApprove.reason.includes('already')) {
+      return res.status(403).json({
+        success: false,
+        message: canApprove.reason
+      });
+    }
+
+    // Update approval workflow
+    voucher.approvalWorkflow.status = 'rejected';
+    voucher.approvalWorkflow.rejectionReason = req.body.reason;
+    voucher.status = 'rejected';
+
+    if (voucher.approvalWorkflow.approvers && voucher.approvalWorkflow.approvers.length > 0) {
+      const currentApprover = voucher.approvalWorkflow.approvers[voucher.approvalWorkflow.currentApproverIndex];
+      if (currentApprover) {
+        currentApprover.status = 'rejected';
+        currentApprover.notes = req.body.reason;
+      }
+    }
+
+    await voucher.save();
+
+    res.json({
+      success: true,
+      message: 'Journal voucher rejected',
+      data: await journalVoucherRepository.findById(req.params.id, {
+        populate: [
+          { path: 'createdBy', select: 'firstName lastName email' },
+          { path: 'approvalWorkflow.approvedBy', select: 'firstName lastName email' }
+        ]
+      })
+    });
+  } catch (error) {
+    logger.error('Error rejecting journal voucher:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error rejecting journal voucher',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @route   GET /api/journal-vouchers/:id/approval-status
+// @desc    Get approval status of a journal voucher
+// @access  Private (requires 'view_reports' permission)
+router.get('/:id/approval-status', [
+  auth,
+  tenantMiddleware,
+  requirePermission('view_reports'),
+  param('id').isMongoId().withMessage('Valid voucher ID is required')
+], withValidation, async (req, res) => {
+  try {
+    const voucher = await journalVoucherRepository.findById(req.params.id, {
+      populate: [
+        { path: 'createdBy', select: 'firstName lastName email' },
+        { path: 'approvedBy', select: 'firstName lastName email' },
+        { path: 'approvalWorkflow.approvers.user', select: 'firstName lastName email role' },
+        { path: 'approvalWorkflow.approvedBy', select: 'firstName lastName email' }
+      ]
+    });
+    
+    if (!voucher) {
+      return res.status(404).json({
+        success: false,
+        message: 'Journal voucher not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        voucherId: voucher._id,
+        voucherNumber: voucher.voucherNumber,
+        requiresApproval: voucher.requiresApproval,
+        approvalThreshold: voucher.approvalThreshold,
+        approvalWorkflow: voucher.approvalWorkflow,
+        status: voucher.status,
+        canBeApprovedBy: voucher.canBeApprovedBy ? voucher.canBeApprovedBy(req.user._id) : null
+      }
+    });
+  } catch (error) {
+    logger.error('Error getting approval status:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error getting approval status',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });

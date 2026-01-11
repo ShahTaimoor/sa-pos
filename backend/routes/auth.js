@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { auth } = require('../middleware/auth');
 const authService = require('../services/authService');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -40,11 +41,11 @@ router.post('/register', [
       return res.status(400).json({ message: 'User already exists' });
     }
     
-    console.error('❌ Registration error:', {
+    logger.error('❌ Registration error:', { error: {
       message: error.message,
       stack: error.stack,
       name: error.name
-    });
+    } });
     res.status(500).json({ 
       message: 'Server error',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -105,12 +106,12 @@ router.post('/login', [
       });
     }
     
-    console.error('❌ Login error:', {
+    logger.error('❌ Login error:', { error: {
       message: error.message,
       stack: error.stack,
       name: error.name,
       code: error.code
-    });
+    } });
     res.status(500).json({ 
       message: 'Server error',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined
@@ -129,7 +130,7 @@ router.get('/me', auth, async (req, res) => {
     if (error.message === 'User not found') {
       return res.status(404).json({ message: 'User not found' });
     }
-    console.error('Get user error:', error);
+    logger.error('Get user error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -160,7 +161,7 @@ router.put('/profile', [
     if (error.message === 'User not found') {
       return res.status(404).json({ message: 'User not found' });
     }
-    console.error('Profile update error:', error);
+    logger.error('Profile update error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -192,7 +193,7 @@ router.post('/change-password', [
     if (error.message === 'Current password is incorrect') {
       return res.status(400).json({ message: 'Current password is incorrect' });
     }
-    console.error('Password change error:', error);
+    logger.error('Password change error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -212,7 +213,7 @@ router.post('/logout', auth, async (req, res) => {
     
     res.json({ message: 'Logout successful' });
   } catch (error) {
-    console.error('Logout error:', error);
+    logger.error('Logout error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });

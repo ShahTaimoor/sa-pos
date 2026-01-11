@@ -2,9 +2,11 @@ const express = require('express');
 const router = express.Router();
 const AccountCategory = require('../models/AccountCategory'); // Still needed for static methods
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { validateAccountCategory } = require('../middleware/validation');
 const accountCategoryRepository = require('../repositories/AccountCategoryRepository');
 const chartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
+const logger = require('../utils/logger');
 
 // Get all account categories
 router.get('/', auth, async (req, res) => {
@@ -25,7 +27,7 @@ router.get('/', auth, async (req, res) => {
       data: categories
     });
   } catch (error) {
-    console.error('Error fetching account categories:', error);
+    logger.error('Error fetching account categories:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch account categories',
@@ -51,7 +53,7 @@ router.get('/:id', auth, async (req, res) => {
       data: category
     });
   } catch (error) {
-    console.error('Error fetching account category:', error);
+    logger.error('Error fetching account category:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch account category',
@@ -88,7 +90,7 @@ router.post('/', auth, validateAccountCategory, async (req, res) => {
       data: category
     });
   } catch (error) {
-    console.error('Error creating account category:', error);
+    logger.error('Error creating account category:', error);
     
     if (error.code === 11000) {
       return res.status(400).json({
@@ -141,7 +143,7 @@ router.put('/:id', auth, validateAccountCategory, async (req, res) => {
       data: updatedCategory
     });
   } catch (error) {
-    console.error('Error updating account category:', error);
+    logger.error('Error updating account category:', error);
     
     if (error.code === 11000) {
       return res.status(400).json({
@@ -159,8 +161,16 @@ router.put('/:id', auth, validateAccountCategory, async (req, res) => {
 });
 
 // Delete account category
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', auth, tenantMiddleware, async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    
     const category = await accountCategoryRepository.findById(req.params.id);
     
     if (!category) {
@@ -177,9 +187,11 @@ router.delete('/:id', auth, async (req, res) => {
       });
     }
     
-    // Check if any accounts are using this category
+    // Check if any accounts are using this category (only non-deleted accounts)
     const accountsUsingCategory = await chartOfAccountsRepository.count({
-      accountCategory: category._id
+      tenantId: tenantId,
+      accountCategory: category._id,
+      isDeleted: false
     });
     
     if (accountsUsingCategory > 0) {
@@ -196,7 +208,7 @@ router.delete('/:id', auth, async (req, res) => {
       message: 'Account category deleted successfully'
     });
   } catch (error) {
-    console.error('Error deleting account category:', error);
+    logger.error('Error deleting account category:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to delete account category',

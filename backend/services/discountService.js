@@ -3,7 +3,8 @@ const SalesRepository = require('../repositories/SalesRepository');
 const CustomerRepository = require('../repositories/CustomerRepository');
 const ProductRepository = require('../repositories/ProductRepository');
 const Discount = require('../models/Discount'); // Still needed for model methods
-const Sales = require('../models/Sales'); // Still needed for model methods
+const Sales = require('../models/Sales');
+const logger = require('../utils/logger'); // Still needed for model methods
 
 class DiscountService {
   constructor() {
@@ -43,7 +44,7 @@ class DiscountService {
       const discount = await DiscountRepository.create(discountDataWithAudit);
       return discount;
     } catch (error) {
-      console.error('Error creating discount:', error);
+      logger.error('Error creating discount:', error);
       throw error;
     }
   }
@@ -97,7 +98,7 @@ class DiscountService {
 
       return updatedDiscountDoc;
     } catch (error) {
-      console.error('Error updating discount:', error);
+      logger.error('Error updating discount:', error);
       throw error;
     }
   }
@@ -174,7 +175,7 @@ class DiscountService {
         }
       };
     } catch (error) {
-      console.error('Error fetching discounts:', error);
+      logger.error('Error fetching discounts:', error);
       throw error;
     }
   }
@@ -200,7 +201,7 @@ class DiscountService {
 
       return discount;
     } catch (error) {
-      console.error('Error fetching discount:', error);
+      logger.error('Error fetching discount:', error);
       throw error;
     }
   }
@@ -218,7 +219,7 @@ class DiscountService {
 
       return discount;
     } catch (error) {
-      console.error('Error fetching discount by code:', error);
+      logger.error('Error fetching discount by code:', error);
       throw error;
     }
   }
@@ -282,7 +283,7 @@ class DiscountService {
         newTotal: order.total
       };
     } catch (error) {
-      console.error('Error applying discount:', error);
+      logger.error('Error applying discount:', error);
       throw error;
     }
   }
@@ -320,7 +321,7 @@ class DiscountService {
         newTotal: order.total
       };
     } catch (error) {
-      console.error('Error removing discount:', error);
+      logger.error('Error removing discount:', error);
       throw error;
     }
   }
@@ -343,7 +344,7 @@ class DiscountService {
         return bAmount - aAmount;
       });
     } catch (error) {
-      console.error('Error getting applicable discounts:', error);
+      logger.error('Error getting applicable discounts:', error);
       throw error;
     }
   }
@@ -454,7 +455,7 @@ class DiscountService {
         sort: { priority: -1, createdAt: -1 }
       });
     } catch (error) {
-      console.error('Error fetching active discounts:', error);
+      logger.error('Error fetching active discounts:', error);
       throw error;
     }
   }
@@ -489,7 +490,7 @@ class DiscountService {
       await discountDoc.save();
       return discountDoc;
     } catch (error) {
-      console.error('Error toggling discount status:', error);
+      logger.error('Error toggling discount status:', error);
       throw error;
     }
   }
@@ -510,7 +511,7 @@ class DiscountService {
       await DiscountRepository.softDelete(discountId);
       return { message: 'Discount deleted successfully' };
     } catch (error) {
-      console.error('Error deleting discount:', error);
+      logger.error('Error deleting discount:', error);
       throw error;
     }
   }
@@ -521,7 +522,7 @@ class DiscountService {
       const stats = await Discount.getDiscountStats(period);
       return stats;
     } catch (error) {
-      console.error('Error getting discount stats:', error);
+      logger.error('Error getting discount stats:', error);
       throw error;
     }
   }
@@ -546,7 +547,7 @@ class DiscountService {
       const existingDiscount = await DiscountRepository.findByCode(code.toUpperCase());
       return !existingDiscount;
     } catch (error) {
-      console.error('Error checking discount code availability:', error);
+      logger.error('Error checking discount code availability:', error);
       throw error;
     }
   }

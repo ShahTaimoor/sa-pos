@@ -5,6 +5,8 @@ const PurchaseOrder = require('../models/PurchaseOrder'); // Still needed for mo
 const SupplierBalanceService = require('../services/supplierBalanceService');
 const supplierRepository = require('../repositories/SupplierRepository');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -23,7 +25,7 @@ router.get('/:supplierId', [
       data: summary
     });
   } catch (error) {
-    console.error('Error getting supplier balance summary:', error);
+    logger.error('Error getting supplier balance summary:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -34,7 +36,8 @@ router.get('/:supplierId', [
 
 // Record payment to supplier
 router.post('/:supplierId/payment', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('manage_payments'),
   param('supplierId').isMongoId().withMessage('Invalid supplier ID'),
   body('amount').isFloat({ min: 0.01 }).withMessage('Payment amount must be greater than 0'),
@@ -56,7 +59,7 @@ router.post('/:supplierId/payment', [
       }
     });
   } catch (error) {
-    console.error('Error recording supplier payment:', error);
+    logger.error('Error recording supplier payment:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Server error',
@@ -67,7 +70,8 @@ router.post('/:supplierId/payment', [
 
 // Record refund from supplier
 router.post('/:supplierId/refund', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('manage_payments'),
   param('supplierId').isMongoId().withMessage('Invalid supplier ID'),
   body('amount').isFloat({ min: 0.01 }).withMessage('Refund amount must be greater than 0'),
@@ -89,7 +93,7 @@ router.post('/:supplierId/refund', [
       }
     });
   } catch (error) {
-    console.error('Error recording supplier refund:', error);
+    logger.error('Error recording supplier refund:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Server error',
@@ -114,7 +118,7 @@ router.post('/:supplierId/recalculate', [
       data: updatedSupplier
     });
   } catch (error) {
-    console.error('Error recalculating supplier balance:', error);
+    logger.error('Error recalculating supplier balance:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Server error',
@@ -125,7 +129,8 @@ router.post('/:supplierId/recalculate', [
 
 // Check if supplier can accept purchase
 router.get('/:supplierId/can-accept-purchase', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('view_suppliers'),
   param('supplierId').isMongoId().withMessage('Invalid supplier ID'),
   query('amount').isFloat({ min: 0.01 }).withMessage('Amount must be greater than 0')
@@ -141,7 +146,7 @@ router.get('/:supplierId/can-accept-purchase', [
       data: eligibility
     });
   } catch (error) {
-    console.error('Error checking purchase eligibility:', error);
+    logger.error('Error checking purchase eligibility:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Server error',
@@ -152,7 +157,8 @@ router.get('/:supplierId/can-accept-purchase', [
 
 // Get all suppliers with balance issues
 router.get('/reports/balance-issues', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
@@ -193,7 +199,7 @@ router.get('/reports/balance-issues', [
       }
     });
   } catch (error) {
-    console.error('Error getting supplier balance issues report:', error);
+    logger.error('Error getting supplier balance issues report:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -247,7 +253,7 @@ router.post('/fix-all-balances', [
       }
     });
   } catch (error) {
-    console.error('Error fixing all supplier balances:', error);
+    logger.error('Error fixing all supplier balances:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',

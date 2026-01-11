@@ -26,7 +26,19 @@ const auth = async (req, res, next) => {
       return res.status(401).json({ message: 'User account is not active' });
     }
     
+    // Extract tenantId from JWT (never trust frontend)
+    const tenantId = decoded.tenantId || user.tenantId;
+    if (!tenantId) {
+      return res.status(401).json({ message: 'Tenant ID missing from token' });
+    }
+    
+    // Verify tenantId matches user's tenantId
+    if (user.tenantId && user.tenantId.toString() !== tenantId.toString()) {
+      return res.status(403).json({ message: 'Tenant ID mismatch' });
+    }
+    
     req.user = user;
+    req.tenantId = tenantId; // Add tenantId to request
     next();
   } catch (error) {
     res.status(401).json({ message: 'Token is not valid' });

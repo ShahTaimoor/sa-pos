@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Tag, Percent, DollarSign, CheckCircle, AlertCircle, X } from 'lucide-react';
+import { Tag, Percent, TrendingUp, CheckCircle, AlertCircle, X } from 'lucide-react';
 import { useCheckApplicableDiscountsMutation } from '../store/services/discountsApi';
 import { showSuccessToast, showErrorToast } from '../utils/errorHandler';
 
@@ -62,14 +62,14 @@ const DiscountSelector = ({
   const getDiscountIcon = (type) => {
     return type === 'percentage' ? 
       <Percent className="h-4 w-4 text-blue-500" /> : 
-      <DollarSign className="h-4 w-4 text-green-500" />;
+      <TrendingUp className="h-4 w-4 text-green-500" />;
   };
 
   const formatDiscountValue = (discount) => {
     if (discount.type === 'percentage') {
       return `${discount.value}%`;
     } else {
-      return `$${discount.value.toFixed(2)}`;
+      return `${discount.value.toFixed(2)}`;
     }
   };
 
@@ -95,9 +95,8 @@ const DiscountSelector = ({
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
     }).format(amount);
   };
 

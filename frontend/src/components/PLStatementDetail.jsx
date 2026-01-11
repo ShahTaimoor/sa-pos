@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   TrendingUp,
   TrendingDown,
-  DollarSign,
+  TrendingUp,
   Percent,
   Calculator,
   Download,
@@ -20,7 +20,7 @@ const PLStatementDetail = ({ statement, onExport, onShare }) => {
   const [showNotes, setShowNotes] = useState(false);
 
   const formatCurrency = (amount) => 
-    `$${amount?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`;
+    `${amount?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`;
 
   const formatPercent = (value) => 
     `${value?.toFixed(1) || '0.0'}%`;
@@ -114,7 +114,7 @@ const PLStatementDetail = ({ statement, onExport, onShare }) => {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
           <div className="text-center">
             <div className="flex items-center justify-center mb-2">
-              <DollarSign className="h-5 w-5 text-blue-500 mr-1" />
+              <TrendingUp className="h-5 w-5 text-blue-500 mr-1" />
               <span className="text-sm font-medium text-gray-600">Total Revenue</span>
             </div>
             <p className="text-2xl font-bold text-gray-900">
@@ -169,7 +169,7 @@ const PLStatementDetail = ({ statement, onExport, onShare }) => {
           {/* Revenue Section */}
           <div>
             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-              <DollarSign className="h-5 w-5 text-green-500 mr-2" />
+              <TrendingUp className="h-5 w-5 text-green-500 mr-2" />
               Revenue
             </h2>
             <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">

@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const FinancialStatementSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
   statementId: {
     type: String,
     required: false,
@@ -230,6 +236,44 @@ const FinancialStatementSchema = new mongoose.Schema({
     type: Number,
     default: 1,
   },
+  // Version History (CRITICAL: Audit trail for statement changes)
+  previousVersion: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'FinancialStatement'
+  },
+  versionHistory: [{
+    version: {
+      type: Number,
+      required: true
+    },
+    changedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    changedAt: {
+      type: Date,
+      default: Date.now
+    },
+    changes: [{
+      field: {
+        type: String,
+        required: true
+      },
+      oldValue: mongoose.Schema.Types.Mixed,
+      newValue: mongoose.Schema.Types.Mixed,
+      reason: String
+    }],
+    status: {
+      type: String,
+      enum: ['draft', 'review', 'approved', 'published']
+    },
+    notes: String
+  }],
+  isCurrentVersion: {
+    type: Boolean,
+    default: true
+  },
   metadata: {
     calculationMethod: String,
     currency: { type: String, default: 'USD' },
@@ -246,10 +290,42 @@ const FinancialStatementSchema = new mongoose.Schema({
 
 // Indexes for performance
 // statementId index removed - already has unique: true in field definition
-FinancialStatementSchema.index({ type: 1 });
-FinancialStatementSchema.index({ 'period.startDate': 1, 'period.endDate': 1 });
-FinancialStatementSchema.index({ status: 1 });
-FinancialStatementSchema.index({ createdAt: -1 });
+FinancialStatementSchema.index({ tenantId: 1, type: 1 });
+FinancialStatementSchema.index({ tenantId: 1, 'period.startDate': 1, 'period.endDate': 1 });
+FinancialStatementSchema.index({ tenantId: 1, status: 1 });
+FinancialStatementSchema.index({ tenantId: 1, createdAt: -1 });
+FinancialStatementSchema.index({ tenantId: 1, isCurrentVersion: 1, type: 1 });
+FinancialStatementSchema.index({ tenantId: 1, previousVersion: 1 });
+
+// Instance method to detect changes between versions
+FinancialStatementSchema.methods.detectChanges = function(oldVersion) {
+  const changes = [];
+  const fieldsToTrack = [
+    'revenue', 'costOfGoodsSold', 'grossProfit', 'operatingExpenses',
+    'operatingIncome', 'otherIncome', 'otherExpenses', 'netIncome',
+    'status', 'notes'
+  ];
+  
+  fieldsToTrack.forEach(field => {
+    const oldValue = this.getNestedValue(oldVersion, field);
+    const newValue = this.getNestedValue(this.toObject(), field);
+    
+    if (JSON.stringify(oldValue) !== JSON.stringify(newValue)) {
+      changes.push({
+        field,
+        oldValue,
+        newValue
+      });
+    }
+  });
+  
+  return changes;
+};
+
+// Helper method to get nested value
+FinancialStatementSchema.methods.getNestedValue = function(obj, path) {
+  return path.split('.').reduce((current, prop) => current && current[prop], obj);
+};
 
 // Virtual for period duration
 FinancialStatementSchema.virtual('periodDuration').get(function() {

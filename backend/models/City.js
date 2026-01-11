@@ -1,12 +1,19 @@
 const mongoose = require('mongoose');
 
 const citySchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
   name: {
     type: String,
     required: true,
-    unique: true,
     trim: true,
     maxlength: 100
+    // Note: unique constraint is enforced via compound index { tenantId: 1, name: 1 }
+    // DO NOT add unique: true here - it creates a global index
   },
   state: {
     type: String,
@@ -43,9 +50,10 @@ const citySchema = new mongoose.Schema({
 });
 
 // Index for better query performance
-// name index removed - already has unique: true in field definition
-citySchema.index({ isActive: 1 });
-citySchema.index({ state: 1 });
+// Compound unique index for tenant-scoped city names
+citySchema.index({ tenantId: 1, name: 1 }, { unique: true });
+citySchema.index({ tenantId: 1, isActive: 1 });
+citySchema.index({ tenantId: 1, state: 1 });
 
 module.exports = mongoose.model('City', citySchema);
 

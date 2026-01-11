@@ -1,11 +1,17 @@
 const mongoose = require('mongoose');
 
 const PaymentSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
+  
   // Payment identification
   paymentId: {
     type: String,
-    required: true,
-    unique: true
+    required: true
   },
   
   // Order reference
@@ -158,13 +164,13 @@ const PaymentSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes for performance
-// paymentId index removed - already has unique: true in field definition
-PaymentSchema.index({ orderId: 1 });
-PaymentSchema.index({ status: 1 });
-PaymentSchema.index({ paymentMethod: 1 });
-PaymentSchema.index({ createdAt: -1 });
-PaymentSchema.index({ 'gateway.transactionId': 1 });
+// Compound indexes for multi-tenant performance
+PaymentSchema.index({ tenantId: 1, paymentId: 1 }, { unique: true });
+PaymentSchema.index({ tenantId: 1, orderId: 1 });
+PaymentSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
+PaymentSchema.index({ tenantId: 1, paymentMethod: 1, createdAt: -1 });
+PaymentSchema.index({ tenantId: 1, createdAt: -1 });
+PaymentSchema.index({ tenantId: 1, 'gateway.transactionId': 1 });
 
 // Virtual for total refunded amount
 PaymentSchema.virtual('totalRefunded').get(function() {

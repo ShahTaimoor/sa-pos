@@ -32,19 +32,29 @@ class BankRepository extends BaseRepository {
    * Find bank by account number
    * @param {string} accountNumber - Account number
    * @param {object} options - Query options
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Bank|null>}
    */
-  async findByAccountNumber(accountNumber, options = {}) {
-    return await this.findOne({ accountNumber }, options);
+  async findByAccountNumber(accountNumber, options = {}, tenantId = null) {
+    const query = { accountNumber };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    return await this.findOne(query, options);
   }
 
   /**
    * Find active banks
    * @param {object} options - Query options
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Array>}
    */
-  async findActive(options = {}) {
-    return await this.findWithFilters({ isActive: true }, options);
+  async findActive(options = {}, tenantId = null) {
+    const filter = { isActive: true };
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
+    return await this.findWithFilters(filter, options);
   }
 }
 

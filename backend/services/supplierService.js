@@ -49,10 +49,14 @@ class SupplierService {
   /**
    * Build filter query from request parameters
    * @param {object} queryParams - Request query parameters
+   * @param {string} tenantId - Tenant ID to scope the filter (optional but recommended)
    * @returns {object} - MongoDB filter object
    */
-  buildFilter(queryParams) {
+  buildFilter(queryParams, tenantId = null) {
     const filter = {};
+    if (tenantId) {
+      filter.tenantId = tenantId; // Always include tenantId for isolation
+    }
 
     // Search filter
     if (queryParams.search) {
@@ -125,16 +129,17 @@ class SupplierService {
   /**
    * Get suppliers with filtering and pagination
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID to scope the query (optional but recommended)
    * @returns {Promise<object>}
    */
-  async getSuppliers(queryParams) {
+  async getSuppliers(queryParams, tenantId = null) {
     const getAllSuppliers = queryParams.all === 'true' || queryParams.all === true ||
                            (queryParams.limit && parseInt(queryParams.limit) >= 999999);
 
     const page = getAllSuppliers ? 1 : (parseInt(queryParams.page) || 1);
     const limit = getAllSuppliers ? 999999 : (parseInt(queryParams.limit) || 20);
 
-    const filter = this.buildFilter(queryParams);
+    const filter = this.buildFilter(queryParams, tenantId);
 
     const result = await supplierRepository.findWithPagination(filter, {
       page,
@@ -173,15 +178,16 @@ class SupplierService {
    * Search suppliers
    * @param {string} searchTerm - Search term
    * @param {number} limit - Maximum results
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Array>}
    */
-  async searchSuppliers(searchTerm, limit = 10) {
+  async searchSuppliers(searchTerm, limit = 10, tenantId = null) {
     const suppliers = await supplierRepository.search(searchTerm, {
       select: 'companyName contactPerson email phone businessType paymentTerms currentBalance pendingBalance creditLimit',
       limit,
       sort: { companyName: 1 },
       lean: true
-    });
+    }, tenantId);
 
     return suppliers.map(supplier => this.transformSupplierToUppercase(supplier));
   }
@@ -190,29 +196,32 @@ class SupplierService {
    * Check if email exists
    * @param {string} email - Email to check
    * @param {string} excludeId - Supplier ID to exclude
+   * @param {string} tenantId - Tenant ID to scope the check
    * @returns {Promise<boolean>}
    */
-  async checkEmailExists(email, excludeId = null) {
-    return await supplierRepository.emailExists(email, excludeId);
+  async checkEmailExists(email, excludeId = null, tenantId = null) {
+    return await supplierRepository.emailExists(email, excludeId, tenantId);
   }
 
   /**
    * Check if company name exists
    * @param {string} companyName - Company name to check
    * @param {string} excludeId - Supplier ID to exclude
+   * @param {string} tenantId - Tenant ID to scope the check
    * @returns {Promise<boolean>}
    */
-  async checkCompanyNameExists(companyName, excludeId = null) {
-    return await supplierRepository.companyNameExists(companyName, excludeId);
+  async checkCompanyNameExists(companyName, excludeId = null, tenantId = null) {
+    return await supplierRepository.companyNameExists(companyName, excludeId, tenantId);
   }
 
   /**
    * Get suppliers for export
    * @param {object} filters - Filter criteria
+   * @param {string} tenantId - Tenant ID to scope the query (optional but recommended)
    * @returns {Promise<Array>}
    */
-  async getSuppliersForExport(filters = {}) {
-    const filter = this.buildFilter(filters);
+  async getSuppliersForExport(filters = {}, tenantId = null) {
+    const filter = this.buildFilter(filters, tenantId);
     return await supplierRepository.findAll(filter, {
       lean: true
     });
@@ -247,13 +256,14 @@ class SupplierService {
 
   /**
    * Get all suppliers (for dropdowns/lists)
-   * @param {object} filter - Filter query
+   * @param {object} filter - Filter query (should include tenantId)
    * @param {object} options - Query options
    * @returns {Promise<Array>}
    */
   async getAllSuppliers(filter = {}, options = {}) {
     const { select = 'companyName contactPerson email phone businessType paymentTerms rating pendingBalance advanceBalance', sort = { companyName: 1 } } = options;
     
+    // Ensure tenantId is in filter if provided
     return await supplierRepository.findAll(filter, { select, sort });
   }
 }

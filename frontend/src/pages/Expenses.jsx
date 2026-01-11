@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   Plus,
   Wallet,
-  DollarSign,
+  TrendingUp,
   Calendar,
   ClipboardList,
   RefreshCw,
@@ -466,7 +466,7 @@ const Expenses = () => {
                 <div>
                   <label className="form-label">Amount</label>
                   <div className="relative">
-                    <DollarSign className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <TrendingUp className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                     <input
                       type="number"
                       min="0"

@@ -9,6 +9,7 @@ const CashPayment = require('../models/CashPayment'); // Still needed for model 
 const BankReceipt = require('../models/BankReceipt'); // Still needed for model reference
 const BankPayment = require('../models/BankPayment'); // Still needed for model reference
 const { auth } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const salesOrderRepository = require('../repositories/SalesOrderRepository');
 const purchaseOrderRepository = require('../repositories/PurchaseOrderRepository');
 const cashReceiptRepository = require('../repositories/CashReceiptRepository');
@@ -17,9 +18,10 @@ const bankReceiptRepository = require('../repositories/BankReceiptRepository');
 const bankPaymentRepository = require('../repositories/BankPaymentRepository');
 const salesRepository = require('../repositories/SalesRepository');
 const purchaseInvoiceRepository = require('../repositories/PurchaseInvoiceRepository');
+const logger = require('../utils/logger');
 
 // Get backdate/future date report
-router.get('/', auth, async (req, res) => {
+router.get('/', [auth, tenantMiddleware], async (req, res) => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Start of today
@@ -313,7 +315,7 @@ router.get('/', auth, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error generating backdate report:', error);
+    logger.error('Error generating backdate report:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to generate backdate report',

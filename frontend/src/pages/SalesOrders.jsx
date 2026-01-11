@@ -17,7 +17,7 @@ import {
   ShoppingCart,
   Package,
   User,
-  DollarSign,
+  TrendingUp,
   FileText,
   CheckCircle,
   Clock,
@@ -642,7 +642,7 @@ const totalProfit = useMemo(() => {
         <div className="font-medium">{product.name}</div>
         <div className="flex items-center space-x-4">
           <div className="text-sm text-gray-600">Stock: {product.inventory?.currentStock || 0}</div>
-          <div className="text-sm text-gray-600">Price: ${Math.round(unitPrice)}</div>
+          <div className="text-sm text-gray-600">Price: {Math.round(unitPrice)}</div>
         </div>
       </div>
     );
@@ -679,9 +679,9 @@ const totalProfit = useMemo(() => {
         const loss = lastPurchasePrice - unitPrice;
         const lossPercent = ((loss / lastPurchasePrice) * 100).toFixed(1);
         const shouldProceed = window.confirm(
-          `⚠️ WARNING: Sale price ($${unitPrice}) is below cost price ($${Math.round(lastPurchasePrice)}).\n\n` +
-          `Loss per unit: $${Math.round(loss)} (${lossPercent}%)\n` +
-          `Total loss: $${Math.round(loss * quantity)}\n\n` +
+          `⚠️ WARNING: Sale price (${unitPrice}) is below cost price (${Math.round(lastPurchasePrice)}).\n\n` +
+          `Loss per unit: ${Math.round(loss)} (${lossPercent}%)\n` +
+          `Total loss: ${Math.round(loss * quantity)}\n\n` +
           `Do you want to proceed?`
         );
         if (!shouldProceed) {
@@ -1881,7 +1881,7 @@ const totalProfit = useMemo(() => {
                       const advance = customer.advanceBalance || 0;
                       const netBalance = receivables - advance;
                       const isPayable = netBalance < 0;
-                      return isPayable ? `Payables: $${Math.abs(netBalance).toFixed(2)}` : `Receivables: $${netBalance.toFixed(2)}`;
+                      return isPayable ? `Payables: ${Math.abs(netBalance).toFixed(2)}` : `Receivables: ${netBalance.toFixed(2)}`;
                     })()}
                   </div>
                       </div>
@@ -1919,7 +1919,7 @@ const totalProfit = useMemo(() => {
                           <span className={`text-sm font-medium ${
                             isPayable ? 'text-red-600' : isReceivable ? 'text-green-600' : 'text-gray-600'
                           }`}>
-                            ${Math.abs(netBalance).toFixed(2)}
+                            {Math.abs(netBalance).toFixed(2)}
                           </span>
                         </div>
                       ) : null;
@@ -1935,7 +1935,7 @@ const totalProfit = useMemo(() => {
                             : 'text-blue-600'
                         ) : 'text-gray-600'
                       }`}>
-                        ${(selectedCustomer.creditLimit || 0).toFixed(2)}
+                        {(selectedCustomer.creditLimit || 0).toFixed(2)}
                       </span>
                       {selectedCustomer.creditLimit > 0 && 
                        ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0)) >= selectedCustomer.creditLimit * 0.9 && (
@@ -1953,7 +1953,7 @@ const totalProfit = useMemo(() => {
                             : 'text-green-600'
                         ) : 'text-gray-600'
                       }`}>
-                        ${(selectedCustomer.creditLimit - ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0))).toFixed(2)}
+                        {(selectedCustomer.creditLimit - ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0))).toFixed(2)}
                       </span>
                     </div>
                   </div>
@@ -2106,7 +2106,7 @@ const totalProfit = useMemo(() => {
                         Cost
                       </label>
                       <span className="text-sm font-semibold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 block text-center h-10 flex items-center justify-center" title="Last Purchase Price">
-                        {lastPurchasePrice !== null ? `$${Math.round(lastPurchasePrice)}` : selectedProduct ? 'N/A' : '$0'}
+                        {lastPurchasePrice !== null ? `${Math.round(lastPurchasePrice)}` : selectedProduct ? 'N/A' : '0'}
                       </span>
                     </div>
                   )}
@@ -2218,7 +2218,7 @@ const totalProfit = useMemo(() => {
                           {isLowStock && <span className="text-yellow-600 text-xs ml-2">⚠️ Low Stock</span>}
                           {lastPurchasePrices[item.product?.toString()] !== undefined && 
                            item.unitPrice < lastPurchasePrices[item.product?.toString()] && (
-                            <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold" title={`Sale price below cost! Loss: $${Math.round(lastPurchasePrices[item.product?.toString()] - item.unitPrice)} per unit`}>
+                            <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold" title={`Sale price below cost! Loss: ${Math.round(lastPurchasePrices[item.product?.toString()] - item.unitPrice)} per unit`}>
                               ⚠️ Below Cost
                             </span>
                           )}
@@ -2275,7 +2275,7 @@ const totalProfit = useMemo(() => {
                         <div className="col-span-1">
                           <span className="text-sm font-semibold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 block text-center h-8 flex items-center justify-center" title="Last Purchase Price">
                             {lastPurchasePrices[item.product?.toString()] !== undefined 
-                              ? `$${Math.round(lastPurchasePrices[item.product?.toString()])}` 
+                              ? `${Math.round(lastPurchasePrices[item.product?.toString()])}` 
                               : 'N/A'}
                           </span>
                         </div>
@@ -2296,9 +2296,9 @@ const totalProfit = useMemo(() => {
                               const loss = costPrice - newPrice;
                               const lossPercent = ((loss / costPrice) * 100).toFixed(1);
                               const shouldProceed = window.confirm(
-                                `⚠️ WARNING: Sale price ($${newPrice}) is below cost price ($${Math.round(costPrice)}).\n\n` +
-                                `Loss per unit: $${Math.round(loss)} (${lossPercent}%)\n` +
-                                `Total loss: $${Math.round(loss * item.quantity)}\n\n` +
+                                `⚠️ WARNING: Sale price (${newPrice}) is below cost price (${Math.round(costPrice)}).\n\n` +
+                                `Loss per unit: ${Math.round(loss)} (${lossPercent}%)\n` +
+                                `Total loss: ${Math.round(loss * item.quantity)}\n\n` +
                                 `Do you want to proceed?`
                               );
                               if (!shouldProceed) {
@@ -2322,7 +2322,7 @@ const totalProfit = useMemo(() => {
                           title={
                             lastPurchasePrices[item.product?.toString()] !== undefined && 
                             item.unitPrice < lastPurchasePrices[item.product?.toString()] 
-                              ? `⚠️ WARNING: Sale price ($${Math.round(item.unitPrice)}) is below cost price ($${Math.round(lastPurchasePrices[item.product?.toString()])})`
+                              ? `⚠️ WARNING: Sale price (${Math.round(item.unitPrice)}) is below cost price (${Math.round(lastPurchasePrices[item.product?.toString()])})`
                               : ''
                           }
                           min="0"

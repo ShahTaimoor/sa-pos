@@ -1,6 +1,7 @@
 const ProductRepository = require('../repositories/ProductRepository');
 const InventoryRepository = require('../repositories/InventoryRepository');
 const SalesRepository = require('../repositories/SalesRepository');
+const logger = require('../utils/logger');
 
 class InventoryAlertService {
   /**
@@ -99,7 +100,7 @@ class InventoryAlertService {
 
       return alerts;
     } catch (error) {
-      console.error('Error getting low stock alerts:', error);
+      logger.error('Error getting low stock alerts:', error);
       throw error;
     }
   }
@@ -155,7 +156,7 @@ class InventoryAlertService {
       const daysUntilOut = Math.floor(currentStock / averageDailySales);
       return Math.max(0, daysUntilOut);
     } catch (error) {
-      console.error('Error calculating days until out of stock:', error);
+      logger.error('Error calculating days until out of stock:', error);
       return 30; // Default to 30 days if calculation fails
     }
   }
@@ -216,7 +217,7 @@ class InventoryAlertService {
         lowStock: alerts.filter(a => a.stockStatus === 'low_stock').length
       };
     } catch (error) {
-      console.error('Error getting alert summary:', error);
+      logger.error('Error getting alert summary:', error);
       throw error;
     }
   }

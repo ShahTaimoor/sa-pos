@@ -52,17 +52,24 @@ class InvestorService {
    * Create investor
    * @param {object} investorData - Investor data
    * @param {string} userId - User ID
+   * @param {object} options - Options including tenantId
    * @returns {Promise<object>}
    */
-  async createInvestor(investorData, userId) {
-    // Check if email already exists
-    const existingInvestor = await InvestorRepository.findByEmail(investorData.email);
+  async createInvestor(investorData, userId, options = {}) {
+    const tenantId = options.tenantId || investorData.tenantId;
+    if (!tenantId) {
+      throw new Error('tenantId is required for investor creation');
+    }
+
+    // Check if email already exists (within tenant)
+    const existingInvestor = await InvestorRepository.findByEmail(investorData.email, tenantId);
     if (existingInvestor) {
       throw new Error('Investor with this email already exists');
     }
 
     const newInvestor = await InvestorRepository.create({
       ...investorData,
+      tenantId: tenantId,
       createdBy: userId
     });
 
@@ -74,17 +81,20 @@ class InvestorService {
    * @param {string} id - Investor ID
    * @param {object} updateData - Update data
    * @param {string} userId - User ID
+   * @param {object} options - Options including tenantId
    * @returns {Promise<object>}
    */
-  async updateInvestor(id, updateData, userId) {
+  async updateInvestor(id, updateData, userId, options = {}) {
     const investor = await InvestorRepository.findById(id);
     if (!investor) {
       throw new Error('Investor not found');
     }
 
-    // Check if email is being updated and if it already exists
-    if (updateData.email && updateData.email !== investor.email) {
-      const emailExists = await InvestorRepository.emailExists(updateData.email, id);
+    const tenantId = options.tenantId || investor.tenantId;
+
+    // Check if email is being updated and if it already exists (within tenant)
+    if (updateData.email && updateData.email !== investor.email && tenantId) {
+      const emailExists = await InvestorRepository.emailExists(updateData.email, tenantId, id);
       if (emailExists) {
         throw new Error('Investor with this email already exists');
       }

@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, param, query, validationResult } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const RecurringExpense = require('../models/RecurringExpense'); // Still needed for new RecurringExpense(), static methods, and session
 const Supplier = require('../models/Supplier'); // Still needed for model reference
 const Customer = require('../models/Customer'); // Still needed for model reference
@@ -58,6 +59,7 @@ router.get(
   '/',
   [
     auth,
+    tenantMiddleware,
     requirePermission('view_reports'),
     query('status').optional().isIn(['active', 'inactive', 'all']),
     query('search').optional().isString().trim(),
@@ -121,7 +123,7 @@ router.get(
         data: recurringExpenses
       });
     } catch (error) {
-      console.error('Error fetching recurring expenses:', error);
+      logger.error('Error fetching recurring expenses:', error);
       res.status(500).json({
         success: false,
         message: 'Server error'
@@ -134,6 +136,7 @@ router.get(
   '/upcoming',
   [
     auth,
+    tenantMiddleware,
     requirePermission('view_reports'),
     query('days').optional().isInt({ min: 1, max: 90 })
   ],
@@ -175,7 +178,7 @@ router.get(
         data: filtered
       });
     } catch (error) {
-      console.error('Error fetching upcoming recurring expenses:', error);
+      logger.error('Error fetching upcoming recurring expenses:', error);
       res.status(500).json({
         success: false,
         message: 'Server error'
@@ -270,7 +273,7 @@ router.post(
         data: recurringExpense
       });
     } catch (error) {
-      console.error('Error creating recurring expense:', error);
+      logger.error('Error creating recurring expense:', error);
       res.status(500).json({
         success: false,
         message: error.message || 'Server error'
@@ -283,6 +286,7 @@ router.put(
   '/:id',
   [
     auth,
+    tenantMiddleware,
     requirePermission('create_orders'),
     param('id').isMongoId(),
     body('name').optional().trim().notEmpty(),
@@ -396,7 +400,7 @@ router.put(
         data: recurringExpense
       });
     } catch (error) {
-      console.error('Error updating recurring expense:', error);
+      logger.error('Error updating recurring expense:', error);
       res.status(500).json({
         success: false,
         message: error.message || 'Server error'
@@ -409,6 +413,7 @@ router.delete(
   '/:id',
   [
     auth,
+    tenantMiddleware,
     requirePermission('create_orders'),
     param('id').isMongoId()
   ],
@@ -435,7 +440,7 @@ router.delete(
         message: 'Recurring expense deactivated successfully'
       });
     } catch (error) {
-      console.error('Error deleting recurring expense:', error);
+      logger.error('Error deleting recurring expense:', error);
       res.status(500).json({
         success: false,
         message: 'Server error'
@@ -517,7 +522,7 @@ router.post(
             const SupplierBalanceService = require('../services/supplierBalanceService');
             await SupplierBalanceService.recordPayment(recurringExpense.supplier, recurringExpense.amount, null);
           } catch (error) {
-            console.error('Error updating supplier balance for recurring bank payment:', error);
+            logger.error('Error updating supplier balance for recurring bank payment:', error);
           }
         }
 
@@ -526,7 +531,7 @@ router.post(
             const CustomerBalanceService = require('../services/customerBalanceService');
             await CustomerBalanceService.recordPayment(recurringExpense.customer, recurringExpense.amount, null);
           } catch (error) {
-            console.error('Error updating customer balance for recurring bank payment:', error);
+            logger.error('Error updating customer balance for recurring bank payment:', error);
           }
         }
 
@@ -534,7 +539,7 @@ router.post(
           const AccountingService = require('../services/accountingService');
           await AccountingService.recordBankPayment(bankPayment);
         } catch (error) {
-          console.error('Error creating accounting entries for recurring bank payment:', error);
+          logger.error('Error creating accounting entries for recurring bank payment:', error);
         }
       } else {
         const cashPayment = new CashPayment({
@@ -556,7 +561,7 @@ router.post(
             const SupplierBalanceService = require('../services/supplierBalanceService');
             await SupplierBalanceService.recordPayment(recurringExpense.supplier, recurringExpense.amount, null);
           } catch (error) {
-            console.error('Error updating supplier balance for recurring cash payment:', error);
+            logger.error('Error updating supplier balance for recurring cash payment:', error);
           }
         }
 
@@ -565,15 +570,16 @@ router.post(
             const CustomerBalanceService = require('../services/customerBalanceService');
             await CustomerBalanceService.recordPayment(recurringExpense.customer, recurringExpense.amount, null);
           } catch (error) {
-            console.error('Error updating customer balance for recurring cash payment:', error);
+            logger.error('Error updating customer balance for recurring cash payment:', error);
           }
         }
 
         try {
           const AccountingService = require('../services/accountingService');
+const logger = require('../utils/logger');
           await AccountingService.recordCashPayment(cashPayment);
         } catch (error) {
-          console.error('Error creating accounting entries for recurring cash payment:', error);
+          logger.error('Error creating accounting entries for recurring cash payment:', error);
         }
       }
 
@@ -612,7 +618,7 @@ router.post(
       });
     } catch (error) {
       await session.abortTransaction();
-      console.error('Error recording recurring expense payment:', error);
+      logger.error('Error recording recurring expense payment:', error);
       res.status(500).json({
         success: false,
         message: error.message || 'Server error'
@@ -627,6 +633,7 @@ router.post(
   '/:id/snooze',
   [
     auth,
+    tenantMiddleware,
     requirePermission('create_orders'),
     param('id').isMongoId(),
     body('snoozeDays').optional().isInt({ min: 1, max: 30 }),
@@ -678,7 +685,7 @@ router.post(
         data: recurringExpense
       });
     } catch (error) {
-      console.error('Error snoozing recurring expense:', error);
+      logger.error('Error snoozing recurring expense:', error);
       res.status(500).json({
         success: false,
         message: error.message || 'Server error'

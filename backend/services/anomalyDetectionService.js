@@ -3,6 +3,7 @@ const InventoryRepository = require('../repositories/InventoryRepository');
 const ProductRepository = require('../repositories/ProductRepository');
 const CashReceiptRepository = require('../repositories/CashReceiptRepository');
 const CashPaymentRepository = require('../repositories/CashPaymentRepository');
+const logger = require('../utils/logger');
 
 /**
  * Anomaly Detection Service
@@ -68,7 +69,7 @@ class AnomalyDetectionService {
         .filter(anomaly => severityOrder[anomaly.severity] >= minSeverityLevel)
         .sort((a, b) => severityOrder[b.severity] - severityOrder[a.severity]);
     } catch (error) {
-      console.error('Error detecting sales anomalies:', error);
+      logger.error('Error detecting sales anomalies:', error);
       throw error;
     }
   }
@@ -455,7 +456,7 @@ class AnomalyDetectionService {
 
       return anomalies;
     } catch (error) {
-      console.error('Error detecting inventory anomalies:', error);
+      logger.error('Error detecting inventory anomalies:', error);
       throw error;
     }
   }
@@ -552,7 +553,7 @@ class AnomalyDetectionService {
 
       return anomalies;
     } catch (error) {
-      console.error('Error detecting payment anomalies:', error);
+      logger.error('Error detecting payment anomalies:', error);
       throw error;
     }
   }
@@ -606,7 +607,7 @@ class AnomalyDetectionService {
         }
       };
     } catch (error) {
-      console.error('Error getting all anomalies:', error);
+      logger.error('Error getting all anomalies:', error);
       throw error;
     }
   }

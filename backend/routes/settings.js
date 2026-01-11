@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { auth } = require('../middleware/auth');
 const settingsService = require('../services/settingsService');
+const logger = require('../utils/logger');
 
 // @route   GET /api/settings/company
 // @desc    Get company settings
@@ -14,7 +15,7 @@ router.get('/company', auth, async (req, res) => {
       data: settings
     });
   } catch (error) {
-    console.error('Get company settings error:', error);
+    logger.error('Get company settings error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Failed to fetch company settings',
@@ -58,7 +59,7 @@ router.put('/company', auth, async (req, res) => {
         message: error.message
       });
     }
-    console.error('Update company settings error:', error);
+    logger.error('Update company settings error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Failed to update company settings',
@@ -85,7 +86,7 @@ router.get('/preferences', auth, async (req, res) => {
         message: error.message
       });
     }
-    console.error('Get user preferences error:', error);
+    logger.error('Get user preferences error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Failed to fetch user preferences',
@@ -113,7 +114,7 @@ router.put('/preferences', auth, async (req, res) => {
         message: error.message
       });
     }
-    console.error('Update user preferences error:', error);
+    logger.error('Update user preferences error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Failed to update user preferences',

@@ -4,7 +4,8 @@ const CustomerRepository = require('../repositories/CustomerRepository');
 const SupplierRepository = require('../repositories/SupplierRepository');
 const AccountingService = require('./accountingService');
 const Counter = require('../models/Counter'); // Keep for findOneAndUpdate with upsert
-const ChartOfAccounts = require('../models/ChartOfAccounts'); // Keep for instance creation
+const ChartOfAccounts = require('../models/ChartOfAccounts');
+const logger = require('../utils/logger'); // Keep for instance creation
 
 const isStatusActive = (status) => {
   if (!status) return true;
@@ -40,6 +41,7 @@ const createLedgerAccount = async ({
     accountType,
     accountCategory,
     normalBalance,
+    tenantId: tenantId,
     allowDirectPosting: true,
     isActive: isStatusActive(status),
     tags,
@@ -55,7 +57,7 @@ const createLedgerAccount = async ({
   } catch (err) {
     if (err.code === 11000) {
       // Duplicate key error - account already exists, fetch and return it
-      console.log('Duplicate accountCode, fetching existing account:', accountCode);
+      logger.info('Duplicate accountCode, fetching existing account:', accountCode);
       const existingAccount = await ChartOfAccountsRepository.findOne(
         { accountCode },
         { session }
@@ -81,6 +83,11 @@ const createLedgerAccount = async ({
 
 const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => {
   if (!customer) return null;
+  
+  const tenantId = customer.tenantId;
+  if (!tenantId) {
+    throw new Error('Customer must have tenantId');
+  }
 
   // Find or get the general "Accounts Receivable" account
   // Try multiple possible account codes/names that might exist (dynamic lookup)
@@ -98,14 +105,14 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
   for (const code of possibleAccountCodes) {
     const upperCode = code.toUpperCase();
     accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
-      { accountCode: upperCode, isActive: true }
+      { tenantId: tenantId, accountCode: upperCode, isActive: true, isDeleted: false }
     );
     if (accountsReceivableAccount) break;
     
     // If not found without session, try with session
     if (!accountsReceivableAccount && session) {
       accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
-        { accountCode: upperCode, isActive: true },
+        { tenantId: tenantId, accountCode: upperCode, isActive: true, isDeleted: false },
         { session }
       );
       if (accountsReceivableAccount) break;
@@ -118,10 +125,12 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
       // Try with isActive: true first
       accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
         {
+          tenantId: tenantId,
           accountName: { $regex: pattern },
           accountType: 'asset',
           accountCategory: 'current_assets',
-          isActive: true
+          isActive: true,
+          isDeleted: false
         }
       );
       if (accountsReceivableAccount) break;
@@ -130,9 +139,11 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
       if (!accountsReceivableAccount) {
         accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
           {
+            tenantId: tenantId,
             accountName: { $regex: pattern },
             accountType: 'asset',
-            accountCategory: 'current_assets'
+            accountCategory: 'current_assets',
+            isDeleted: false
           }
         );
         if (accountsReceivableAccount) {
@@ -147,10 +158,12 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
       if (!accountsReceivableAccount && session) {
         accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
           {
+            tenantId: tenantId,
             accountName: { $regex: pattern },
             accountType: 'asset',
             accountCategory: 'current_assets',
-            isActive: true
+            isActive: true,
+            isDeleted: false
           },
           { session }
         );
@@ -163,9 +176,11 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
   if (!accountsReceivableAccount) {
     accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
       {
+        tenantId: tenantId,
         accountName: { $regex: /receivable/i },
         accountType: 'asset',
-        isActive: true
+        isActive: true,
+        isDeleted: false
       }
     );
     
@@ -173,9 +188,11 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
     if (!accountsReceivableAccount && session) {
       accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
         {
+          tenantId: tenantId,
           accountName: { $regex: /receivable/i },
           accountType: 'asset',
-          isActive: true
+          isActive: true,
+          isDeleted: false
         },
         { session }
       );
@@ -191,7 +208,7 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
     // Check if 1130 is available, if not try other codes (without session first for better reliability)
     for (const code of possibleAccountCodes) {
       const existing = await ChartOfAccountsRepository.findOne(
-        { accountCode: code.toUpperCase() }
+        { tenantId: tenantId, accountCode: code.toUpperCase(), isDeleted: false }
       );
       if (!existing) {
         accountCode = code.toUpperCase();
@@ -205,7 +222,7 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
       for (let i = 1100; i <= 1199; i++) {
         const code = String(i).toUpperCase();
         const existing = await ChartOfAccountsRepository.findOne(
-          { accountCode: code }
+          { tenantId: tenantId, accountCode: code, isDeleted: false }
         );
         if (!existing) {
           accountCode = code;
@@ -221,6 +238,7 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
       accountType: 'asset',
       accountCategory: 'current_assets',
       normalBalance: 'debit',
+      tenantId: tenantId,
       allowDirectPosting: true,
       isActive: true,
       isSystemAccount: true,
@@ -237,11 +255,11 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
         const saveOptions = session ? { session } : {};
         await newAccount.save(saveOptions);
         accountsReceivableAccount = newAccount;
-        console.log('Successfully created Accounts Receivable account:', accountCode);
+        logger.info('Successfully created Accounts Receivable account:', accountCode);
       } catch (createError) {
         // If creation fails due to duplicate, try fetching
         if (createError.code === 11000 || createError.name === 'MongoServerError') {
-          console.log('Account already exists, fetching:', accountCode);
+          logger.info('Account already exists, fetching:', accountCode);
           // Try with session first
           accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
             { accountCode: accountCode },
@@ -276,30 +294,30 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
           }
         } else {
           // For other errors, try upsert as fallback
-          console.log('Trying upsert as fallback:', createError.message);
+          logger.info('Trying upsert as fallback:', createError.message);
           const updateOptions = session ? { session } : {};
           const result = await ChartOfAccounts.updateOne(
-            { accountCode: accountCode },
+            { tenantId: tenantId, accountCode: accountCode },
             { $setOnInsert: accountData },
             { upsert: true, ...updateOptions }
           );
           
           // Fetch after upsert
           accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
-            { accountCode: accountCode },
+            { tenantId: tenantId, accountCode: accountCode, isDeleted: false },
             { session }
           );
           
           // If still null, try without session
           if (!accountsReceivableAccount) {
             accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
-              { accountCode: accountCode }
+              { tenantId: tenantId, accountCode: accountCode, isDeleted: false }
             );
           }
         }
       }
     } catch (error) {
-      console.error('Error creating/finding Accounts Receivable account:', {
+      logger.error('Error creating/finding Accounts Receivable account:', {
         message: error.message,
         code: error.code,
         name: error.name,
@@ -309,9 +327,11 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
       // Last resort: try to find any active Accounts Receivable account (without session)
       accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
         {
+          tenantId: tenantId,
           accountName: { $regex: /receivable/i },
           accountType: 'asset',
-          isActive: true
+          isActive: true,
+          isDeleted: false
         }
       );
       
@@ -319,9 +339,11 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
       if (!accountsReceivableAccount) {
         accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
           {
+            tenantId: tenantId,
             accountName: { $regex: /receivable/i },
             accountType: 'asset',
-            isActive: true
+            isActive: true,
+            isDeleted: false
           },
           { session }
         );
@@ -333,7 +355,7 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
   if (!accountsReceivableAccount || !accountsReceivableAccount._id) {
     // Last resort: try to create a minimal account without session constraints
     try {
-      console.log('Last resort: attempting to create Accounts Receivable account without session');
+      logger.info('Last resort: attempting to create Accounts Receivable account without session');
       const minimalAccountData = {
         accountCode: '1130',
         accountName: 'Accounts Receivable',
@@ -350,17 +372,17 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
       
       // Try to find or create without session
       accountsReceivableAccount = await ChartOfAccountsRepository.findOne(
-        { accountCode: '1130' }
+        { tenantId: tenantId, accountCode: '1130', isDeleted: false }
       );
       
       if (!accountsReceivableAccount) {
         const newAccount = new ChartOfAccounts(minimalAccountData);
         await newAccount.save();
         accountsReceivableAccount = newAccount;
-        console.log('Successfully created Accounts Receivable account as last resort');
+        logger.info('Successfully created Accounts Receivable account as last resort');
       }
     } catch (lastResortError) {
-      console.error('Last resort account creation failed:', {
+      logger.error('Last resort account creation failed:', {
         message: lastResortError.message,
         code: lastResortError.code,
         name: lastResortError.name
@@ -385,18 +407,20 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
 
   // If customer has an individual account (like "Customer - NAME"), migrate to general account
   if (customer.ledgerAccount) {
-    const existingAccount = await ChartOfAccountsRepository.findById(
-      customer.ledgerAccount,
+    const existingAccount = await ChartOfAccountsRepository.findOne(
+      { _id: customer.ledgerAccount, tenantId: tenantId, isDeleted: false },
       { session }
     );
     if (existingAccount && existingAccount.accountName?.startsWith('Customer -')) {
       // This is an individual customer account - we should migrate to the general account
       // Deactivate the individual account
-      await ChartOfAccountsRepository.updateById(
-        customer.ledgerAccount,
+      await ChartOfAccounts.updateOne(
+        { _id: customer.ledgerAccount, tenantId: tenantId },
         {
-          isActive: false,
-          updatedBy: userId || undefined
+          $set: {
+            isActive: false,
+            updatedBy: userId || undefined
+          }
         },
         { session }
       );
@@ -412,6 +436,11 @@ const syncCustomerLedgerAccount = async (customer, { session, userId } = {}) => 
 
 const syncSupplierLedgerAccount = async (supplier, { session, userId } = {}) => {
   if (!supplier) return null;
+  
+  const tenantId = supplier.tenantId;
+  if (!tenantId) {
+    throw new Error('Supplier must have tenantId');
+  }
 
   const displayName = supplier.companyName || supplier.contactPerson?.name || 'Unnamed Supplier';
   const accountName = `Supplier - ${displayName}`;
@@ -429,27 +458,26 @@ const syncSupplierLedgerAccount = async (supplier, { session, userId } = {}) => 
       tags: ['supplier', supplier._id.toString()],
       status: supplier.status,
       userId,
+      tenantId: tenantId,
       session
     });
 
     supplier.ledgerAccount = account._id;
   } else {
-    account = await ChartOfAccountsRepository.updateById(
-      supplier.ledgerAccount,
-      {
-        accountName,
-        isActive: isStatusActive(supplier.status),
-        updatedBy: userId || undefined
-      },
-      { new: true, session }
+    account = await ChartOfAccountsRepository.findOne(
+      { _id: supplier.ledgerAccount, tenantId: tenantId, isDeleted: false },
+      { session }
     );
     if (account) {
+      account.accountName = accountName;
+      account.isActive = isStatusActive(supplier.status);
+      account.updatedBy = userId || undefined;
       const existingTags = Array.isArray(account.tags) ? account.tags : [];
       const mergedTags = Array.from(new Set([...existingTags, 'supplier', supplier._id.toString()]));
       if (mergedTags.length !== existingTags.length) {
         account.tags = mergedTags;
-        await account.save({ session, validateBeforeSave: false });
       }
+      await account.save({ session, validateBeforeSave: false });
     }
   }
 
@@ -457,21 +485,50 @@ const syncSupplierLedgerAccount = async (supplier, { session, userId } = {}) => 
   return account;
 };
 
-const deactivateLedgerAccount = async (accountId, { session, userId } = {}) => {
+const deactivateLedgerAccount = async (accountId, { session, userId, tenantId } = {}) => {
   if (!accountId) return;
-  await ChartOfAccountsRepository.updateById(
-    accountId,
-    {
-      isActive: false,
-      updatedBy: userId || undefined
-    },
-    { session }
-  );
+  
+  // If tenantId provided, use it for security; otherwise fetch account first to get tenantId
+  if (tenantId) {
+    await ChartOfAccounts.updateOne(
+      { _id: accountId, tenantId: tenantId },
+      {
+        $set: {
+          isActive: false,
+          updatedBy: userId || undefined
+        }
+      },
+      { session }
+    );
+  } else {
+    // Fallback: find account first to get tenantId (less secure but backward compatible)
+    const account = await ChartOfAccountsRepository.findOne(
+      { _id: accountId, isDeleted: false },
+      { session }
+    );
+    if (account && account.tenantId) {
+      await ChartOfAccounts.updateOne(
+        { _id: accountId, tenantId: account.tenantId },
+        {
+          $set: {
+            isActive: false,
+            updatedBy: userId || undefined
+          }
+        },
+        { session }
+      );
+    }
+  }
 };
 
-const ensureCustomerLedgerAccounts = async ({ userId } = {}) => {
+const ensureCustomerLedgerAccounts = async ({ userId, tenantId } = {}) => {
+  if (!tenantId) {
+    throw new Error('Tenant ID is required for ensureCustomerLedgerAccounts');
+  }
+  
   // Find all customers that need ledger accounts or have individual accounts
   const customers = await CustomerRepository.findAll({
+    tenantId: tenantId,
     $or: [
       { ledgerAccount: { $exists: false } }, 
       { ledgerAccount: null }
@@ -498,7 +555,7 @@ const ensureCustomerLedgerAccounts = async ({ userId } = {}) => {
         await session.commitTransaction();
       } catch (error) {
         await session.abortTransaction();
-        console.error('Failed to migrate ledger account for customer', customer._id, error.message);
+        logger.error('Failed to migrate ledger account for customer', customer._id, error.message);
       } finally {
         session.endSession();
       }
@@ -514,15 +571,20 @@ const ensureCustomerLedgerAccounts = async ({ userId } = {}) => {
       await session.commitTransaction();
     } catch (error) {
       await session.abortTransaction();
-      console.error('Failed to create ledger account for customer', customer._id, error.message);
+      logger.error('Failed to create ledger account for customer', customer._id, error.message);
     } finally {
       session.endSession();
     }
   }
 };
 
-const ensureSupplierLedgerAccounts = async ({ userId } = {}) => {
+const ensureSupplierLedgerAccounts = async ({ userId, tenantId } = {}) => {
+  if (!tenantId) {
+    throw new Error('Tenant ID is required for ensureSupplierLedgerAccounts');
+  }
+  
   const suppliers = await SupplierRepository.findAll({
+    tenantId: tenantId,
     $or: [{ ledgerAccount: { $exists: false } }, { ledgerAccount: null }]
   });
 
@@ -534,7 +596,7 @@ const ensureSupplierLedgerAccounts = async ({ userId } = {}) => {
       await session.commitTransaction();
     } catch (error) {
       await session.abortTransaction();
-      console.error('Failed to create ledger account for supplier', supplier._id, error.message);
+      logger.error('Failed to create ledger account for supplier', supplier._id, error.message);
     } finally {
       session.endSession();
     }

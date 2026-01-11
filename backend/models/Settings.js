@@ -6,7 +6,7 @@ const settingsSchema = new mongoose.Schema({
     type: String,
     required: true,
     trim: true,
-    default: 'Zaryab Traders New 2024'
+    default: 'Company Name'
   },
   contactNumber: {
     type: String,

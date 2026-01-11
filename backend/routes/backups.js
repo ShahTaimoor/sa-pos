@@ -6,6 +6,7 @@ const backupService = require('../services/backupService');
 const backupScheduler = require('../services/backupScheduler');
 const Backup = require('../models/Backup'); // Still needed for model reference
 const backupRepository = require('../repositories/BackupRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -62,7 +63,7 @@ router.post('/create', [
       },
     });
   } catch (error) {
-    console.error('Error creating backup:', error);
+    logger.error('Error creating backup:', error);
     res.status(500).json({ message: 'Server error creating backup', error: error.message });
   }
 });
@@ -119,7 +120,7 @@ router.get('/', [
       pagination
     });
   } catch (error) {
-    console.error('Error fetching backups:', error);
+    logger.error('Error fetching backups:', error);
     res.status(500).json({ message: 'Server error fetching backups', error: error.message });
   }
 });
@@ -140,7 +141,7 @@ router.get('/stats', [
     
     res.json(stats);
   } catch (error) {
-    console.error('Error fetching backup stats:', error);
+    logger.error('Error fetching backup stats:', error);
     res.status(500).json({ message: 'Server error fetching backup stats', error: error.message });
   }
 });
@@ -171,7 +172,7 @@ router.get('/:backupId', [
 
     res.json(backup);
   } catch (error) {
-    console.error('Error fetching backup details:', error);
+    logger.error('Error fetching backup details:', error);
     res.status(500).json({ message: 'Server error fetching backup details', error: error.message });
   }
 });
@@ -208,7 +209,7 @@ router.post('/:backupId/restore', [
       result,
     });
   } catch (error) {
-    console.error('Error restoring backup:', error);
+    logger.error('Error restoring backup:', error);
     res.status(500).json({ message: 'Server error restoring backup', error: error.message });
   }
 });
@@ -243,7 +244,7 @@ router.delete('/:backupId', [
         const fs = require('fs').promises;
         await fs.unlink(backup.files.local.path);
       } catch (error) {
-        console.error('Error deleting backup file:', error);
+        logger.error('Error deleting backup file:', error);
       }
     }
 
@@ -252,7 +253,7 @@ router.delete('/:backupId', [
 
     res.json({ message: 'Backup deleted successfully' });
   } catch (error) {
-    console.error('Error deleting backup:', error);
+    logger.error('Error deleting backup:', error);
     res.status(500).json({ message: 'Server error deleting backup', error: error.message });
   }
 });
@@ -282,7 +283,7 @@ router.post('/:backupId/verify', [
       verified: backup.verification.checksumVerified,
     });
   } catch (error) {
-    console.error('Error verifying backup:', error);
+    logger.error('Error verifying backup:', error);
     res.status(500).json({ message: 'Server error verifying backup', error: error.message });
   }
 });
@@ -327,7 +328,7 @@ router.post('/:backupId/retry', [
       },
     });
   } catch (error) {
-    console.error('Error retrying backup:', error);
+    logger.error('Error retrying backup:', error);
     res.status(500).json({ message: 'Server error retrying backup', error: error.message });
   }
 });
@@ -345,7 +346,7 @@ router.get('/scheduler/status', [
     const status = backupScheduler.getStatus();
     res.json(status);
   } catch (error) {
-    console.error('Error fetching scheduler status:', error);
+    logger.error('Error fetching scheduler status:', error);
     res.status(500).json({ message: 'Server error fetching scheduler status', error: error.message });
   }
 });
@@ -363,7 +364,7 @@ router.post('/scheduler/start', [
     backupScheduler.start();
     res.json({ message: 'Backup scheduler started successfully' });
   } catch (error) {
-    console.error('Error starting scheduler:', error);
+    logger.error('Error starting scheduler:', error);
     res.status(500).json({ message: 'Server error starting scheduler', error: error.message });
   }
 });
@@ -381,7 +382,7 @@ router.post('/scheduler/stop', [
     backupScheduler.stop();
     res.json({ message: 'Backup scheduler stopped successfully' });
   } catch (error) {
-    console.error('Error stopping scheduler:', error);
+    logger.error('Error stopping scheduler:', error);
     res.status(500).json({ message: 'Server error stopping scheduler', error: error.message });
   }
 });
@@ -412,7 +413,7 @@ router.post('/scheduler/trigger', [
       },
     });
   } catch (error) {
-    console.error('Error triggering backup:', error);
+    logger.error('Error triggering backup:', error);
     res.status(500).json({ message: 'Server error triggering backup', error: error.message });
   }
 });
@@ -434,7 +435,7 @@ router.post('/cleanup', [
       deletedCount,
     });
   } catch (error) {
-    console.error('Error running cleanup:', error);
+    logger.error('Error running cleanup:', error);
     res.status(500).json({ message: 'Server error running cleanup', error: error.message });
   }
 });

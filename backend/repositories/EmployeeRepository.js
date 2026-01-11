@@ -9,12 +9,15 @@ class EmployeeRepository extends BaseRepository {
   /**
    * Find employee by employee ID
    * @param {string} employeeId - Employee ID
+   * @param {string} tenantId - Tenant ID
    * @param {object} options - Query options
    * @returns {Promise<Employee|null>}
    */
-  async findByEmployeeId(employeeId, options = {}) {
+  async findByEmployeeId(employeeId, tenantId = null, options = {}) {
     if (!employeeId) return null;
-    return await this.findOne({ employeeId: employeeId.toUpperCase() }, options);
+    const query = { employeeId: employeeId.toUpperCase() };
+    if (tenantId) query.tenantId = tenantId;
+    return await this.findOne(query, options);
   }
 
   /**
@@ -153,12 +156,14 @@ class EmployeeRepository extends BaseRepository {
   /**
    * Check if employee ID exists
    * @param {string} employeeId - Employee ID to check
+   * @param {string} tenantId - Tenant ID
    * @param {string} excludeId - Employee ID to exclude from check
    * @returns {Promise<boolean>}
    */
-  async employeeIdExists(employeeId, excludeId = null) {
+  async employeeIdExists(employeeId, tenantId = null, excludeId = null) {
     if (!employeeId) return false;
     const query = { employeeId: employeeId.toUpperCase() };
+    if (tenantId) query.tenantId = tenantId;
     if (excludeId) {
       query._id = { $ne: excludeId };
     }

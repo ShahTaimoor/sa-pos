@@ -96,7 +96,7 @@ class InventoryReportService {
         throw error;
       }
     } catch (error) {
-      console.error('Error generating inventory report:', error);
+      logger.error('Error generating inventory report:', error);
       throw error;
     }
   }
@@ -187,7 +187,7 @@ class InventoryReportService {
       report.stockLevels = stockLevels;
       // Don't save here - will be saved at the end
     } catch (error) {
-      console.error('Error generating stock levels data:', error);
+      logger.error('Error generating stock levels data:', error);
       throw error;
     }
   }
@@ -298,7 +298,7 @@ class InventoryReportService {
       report.turnoverRates = turnoverRates;
       // Don't save here - will be saved at the end
     } catch (error) {
-      console.error('Error generating turnover rates data:', error);
+      logger.error('Error generating turnover rates data:', error);
       throw error;
     }
   }
@@ -397,7 +397,7 @@ class InventoryReportService {
       report.agingAnalysis = agingAnalysis;
       // Don't save here - will be saved at the end
     } catch (error) {
-      console.error('Error generating aging analysis data:', error);
+      logger.error('Error generating aging analysis data:', error);
       throw error;
     }
   }
@@ -500,7 +500,7 @@ class InventoryReportService {
       report.categoryPerformance = categoryPerformanceData;
       // Don't save here - will be saved at the end
     } catch (error) {
-      console.error('Error generating category performance data:', error);
+      logger.error('Error generating category performance data:', error);
       throw error;
     }
   }
@@ -512,6 +512,7 @@ class InventoryReportService {
       const PurchaseOrder = require('../models/PurchaseOrder');
       const PurchaseInvoice = require('../models/PurchaseInvoice');
       const Product = require('../models/Product');
+const logger = require('../utils/logger');
 
       // Get all products with suppliers
       const productsWithSuppliers = await Product.find({
@@ -612,7 +613,7 @@ class InventoryReportService {
       report.supplierPerformance = performanceArray;
       // Don't save here - will be saved at the end
     } catch (error) {
-      console.error('Error generating supplier performance data:', error);
+      logger.error('Error generating supplier performance data:', error);
       throw error;
     }
   }
@@ -704,7 +705,7 @@ class InventoryReportService {
 
       // Don't save here - will be saved at the end
     } catch (error) {
-      console.error('Error generating summary data:', error);
+      logger.error('Error generating summary data:', error);
       throw error;
     }
   }
@@ -777,7 +778,7 @@ class InventoryReportService {
 
       // Don't save here - will be saved at the end
     } catch (error) {
-      console.error('Error generating comparison data:', error);
+      logger.error('Error generating comparison data:', error);
       throw error;
     }
   }
@@ -789,7 +790,7 @@ class InventoryReportService {
       report.insights = insights;
       // Don't save here - will be saved at the end
     } catch (error) {
-      console.error('Error generating insights:', error);
+      logger.error('Error generating insights:', error);
       throw error;
     }
   }
@@ -953,7 +954,7 @@ class InventoryReportService {
         }
       };
     } catch (error) {
-      console.error('Error fetching inventory reports:', error);
+      logger.error('Error fetching inventory reports:', error);
       throw error;
     }
   }
@@ -977,7 +978,7 @@ class InventoryReportService {
 
       return report;
     } catch (error) {
-      console.error('Error fetching inventory report:', error);
+      logger.error('Error fetching inventory report:', error);
       throw error;
     }
   }
@@ -993,7 +994,7 @@ class InventoryReportService {
       await InventoryReport.findOneAndDelete({ reportId });
       return { message: 'Inventory report deleted successfully' };
     } catch (error) {
-      console.error('Error deleting inventory report:', error);
+      logger.error('Error deleting inventory report:', error);
       throw error;
     }
   }

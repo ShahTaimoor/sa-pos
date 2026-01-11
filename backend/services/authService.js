@@ -9,16 +9,32 @@ class AuthService {
    * @returns {Promise<{user: User, message: string}>}
    */
   async register(userData, createdBy) {
-    const { firstName, lastName, email, password, role, phone, department, permissions, status } = userData;
+    const { firstName, lastName, email, password, role, phone, department, permissions, status, tenantId } = userData;
 
-    // Check if email already exists
+    // Check if email already exists (per tenant - handled by unique index)
+    // Note: emailExists check should be tenant-aware, but for now we rely on unique index
     const emailExists = await userRepository.emailExists(email);
     if (emailExists) {
       throw new Error('User already exists');
     }
 
+    // Determine tenantId: use provided tenantId, or createdBy's tenantId, or throw error
+    let finalTenantId = tenantId;
+    if (!finalTenantId && createdBy) {
+      // Get tenantId from the user creating this account
+      const creator = await userRepository.findById(createdBy._id || createdBy);
+      if (creator && creator.tenantId) {
+        finalTenantId = creator.tenantId;
+      }
+    }
+    
+    if (!finalTenantId) {
+      throw new Error('tenantId is required. Cannot create user without tenant assignment.');
+    }
+
     // Create user
     const user = await userRepository.create({
+      tenantId: finalTenantId,
       firstName,
       lastName,
       email,
@@ -91,7 +107,8 @@ class AuthService {
     const payload = {
       userId: user._id,
       email: user.email,
-      role: user.role
+      role: user.role,
+      tenantId: user.tenantId
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET, {

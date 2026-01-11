@@ -3,6 +3,7 @@ const path = require('path');
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
 const FinancialStatement = require('../models/FinancialStatement');
+const logger = require('../utils/logger');
 
 class PLExportService {
   constructor() {
@@ -325,7 +326,7 @@ class PLExportService {
         format: 'excel'
       };
     } catch (error) {
-      console.error('Error exporting to Excel:', error);
+      logger.error('Error exporting to Excel:', error);
       throw error;
     }
   }
@@ -516,7 +517,7 @@ class PLExportService {
         stream.on('error', reject);
       });
     } catch (error) {
-      console.error('Error exporting to PDF:', error);
+      logger.error('Error exporting to PDF:', error);
       throw error;
     }
   }
@@ -656,7 +657,7 @@ class PLExportService {
         format: 'csv'
       };
     } catch (error) {
-      console.error('Error exporting to CSV:', error);
+      logger.error('Error exporting to CSV:', error);
       throw error;
     }
   }
@@ -682,11 +683,11 @@ class PLExportService {
         
         if (now - stats.mtime.getTime() > maxAge) {
           await fs.unlink(filepath);
-          console.log(`Cleaned up old export file: ${file}`);
+          logger.info(`Cleaned up old export file: ${file}`);
         }
       }
     } catch (error) {
-      console.error('Error cleaning up old exports:', error);
+      logger.error('Error cleaning up old exports:', error);
     }
   }
 }

@@ -79,28 +79,29 @@ const navigation = [
   { name: 'Customers', href: '/customers', icon: Users },
   { name: 'Suppliers', href: '/suppliers', icon: Building },
   { name: 'Banks', href: '/banks', icon: Building2 },
-  { name: 'Investors', href: '/investors', icon: TrendingUp },
-  { name: 'Drop Shipping', href: '/drop-shipping', icon: ArrowRight },
+  // { name: 'Investors', href: '/investors', icon: TrendingUp },
+  // { name: 'Drop Shipping', href: '/drop-shipping', icon: ArrowRight },
   
   // Inventory Management
   { type: 'heading', name: 'Inventory Management', color: 'bg-orange-500' },
   { name: 'Inventory', href: '/inventory', icon: Warehouse },
   { name: 'Warehouses', href: '/warehouses', icon: Warehouse },
-  { name: 'Stock Movements', href: '/stock-movements', icon: ArrowUpDown },
+  // { name: 'Stock Movements', href: '/stock-movements', icon: ArrowUpDown },
   
   // Accounting
   { type: 'heading', name: 'Accounting', color: 'bg-pink-500' },
   { name: 'Chart of Accounts', href: '/chart-of-accounts', icon: FolderTree },
   { name: 'Journal Vouchers', href: '/journal-vouchers', icon: FileText },
-  { name: 'Account Ledger', href: '/account-ledger', icon: FileText },
+  { name: 'Account Ledger Summary', href: '/account-ledger-summary', icon: BarChart3 },
+  { name: 'Account Ledger Summary', href: '/account-ledger-summary', icon: BarChart3 },
   
   // Reports & Analytics
   { type: 'heading', name: 'Reports & Analytics', color: 'bg-indigo-500' },
   { name: 'P&L Statements', href: '/pl-statements', icon: BarChart3 },
   { name: 'Balance Sheets', href: '/balance-sheets', icon: FileText },
   { name: 'Sales Performance', href: '/sales-performance', icon: TrendingUp },
-  { name: 'Inventory Reports', href: '/inventory-reports', icon: Warehouse },
-  { name: 'Reports', href: '/reports', icon: BarChart3 },
+  // { name: 'Inventory Reports', href: '/inventory-reports', icon: Warehouse },
+  // { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Backdate Report', href: '/backdate-report', icon: Clock },
   
   // System Management

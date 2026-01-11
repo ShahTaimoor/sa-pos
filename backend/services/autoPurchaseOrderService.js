@@ -3,7 +3,8 @@ const PurchaseOrderRepository = require('../repositories/PurchaseOrderRepository
 const SupplierRepository = require('../repositories/SupplierRepository');
 const SalesRepository = require('../repositories/SalesRepository');
 const InventoryAlertService = require('./inventoryAlertService');
-const PurchaseOrder = require('../models/PurchaseOrder'); // Keep for static methods and instance creation
+const PurchaseOrder = require('../models/PurchaseOrder');
+const logger = require('../utils/logger'); // Keep for static methods and instance creation
 
 class AutoPurchaseOrderService {
   /**
@@ -97,7 +98,7 @@ class AutoPurchaseOrderService {
       const generatedPOs = [];
       const errors = [];
 
-      console.log(`Processing ${Object.keys(supplierGroups).length} supplier groups`);
+      logger.info(`Processing ${Object.keys(supplierGroups).length} supplier groups`);
 
       for (const [supplierId, group] of Object.entries(supplierGroups)) {
         try {
@@ -110,10 +111,10 @@ class AutoPurchaseOrderService {
             return true;
           });
 
-          console.log(`Supplier ${group.supplier.companyName}: ${validItems.length} valid items out of ${group.items.length} total`);
+          logger.info(`Supplier ${group.supplier.companyName}: ${validItems.length} valid items out of ${group.items.length} total`);
 
           if (validItems.length === 0) {
-            console.log(`Skipping supplier ${group.supplier.companyName}: No valid items after filtering`);
+            logger.info(`Skipping supplier ${group.supplier.companyName}: No valid items after filtering`);
             continue;
           }
 
@@ -165,10 +166,10 @@ class AutoPurchaseOrderService {
             );
           }
 
-          console.log(`Successfully created PO ${purchaseOrder.poNumber} for supplier ${group.supplier.companyName}`);
+          logger.info(`Successfully created PO ${purchaseOrder.poNumber} for supplier ${group.supplier.companyName}`);
           generatedPOs.push(purchaseOrder);
         } catch (error) {
-          console.error(`Error generating PO for supplier ${supplierId}:`, error);
+          logger.error(`Error generating PO for supplier ${supplierId}:`, error);
           errors.push({
             supplier: group.supplier.companyName,
             error: error.message
@@ -198,7 +199,7 @@ class AutoPurchaseOrderService {
         }
       };
     } catch (error) {
-      console.error('Error generating purchase orders:', error);
+      logger.error('Error generating purchase orders:', error);
       throw error;
     }
   }
@@ -293,7 +294,7 @@ class AutoPurchaseOrderService {
           return supplierEntries.sort((a, b) => b.count - a.count)[0].supplier;
       }
     } catch (error) {
-      console.error('Error finding supplier for product:', error);
+      logger.error('Error finding supplier for product:', error);
       return null;
     }
   }
@@ -370,7 +371,7 @@ class AutoPurchaseOrderService {
       // Return forecasted quantity (minimum default quantity)
       return Math.max(defaultQuantity, Math.ceil(forecastedDemand + safetyStock));
     } catch (error) {
-      console.error('Error forecasting demand:', error);
+      logger.error('Error forecasting demand:', error);
       return defaultQuantity;
     }
   }
@@ -430,7 +431,7 @@ class AutoPurchaseOrderService {
 
       return productsWithSuppliers;
     } catch (error) {
-      console.error('Error getting products needing reorder:', error);
+      logger.error('Error getting products needing reorder:', error);
       throw error;
     }
   }

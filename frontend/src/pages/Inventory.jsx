@@ -217,7 +217,15 @@ export const Inventory = () => {
     {
       key: 'lastUpdated',
       header: 'Last Updated',
-      accessor: (item) => new Date(item.lastUpdated).toLocaleDateString(),
+      accessor: (item) => {
+        const date = item.lastUpdated || item.updatedAt || item.createdAt;
+        if (!date) return 'N/A';
+        try {
+          return new Date(date).toLocaleDateString();
+        } catch (e) {
+          return 'N/A';
+        }
+      },
       render: (value) => (
         <div className="text-sm text-gray-600">{value}</div>
       ),
@@ -256,7 +264,7 @@ export const Inventory = () => {
         </div>
       </div>
       
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between mb-2">
         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
           item.status === 'active' ? 'bg-green-100 text-green-800' :
           item.status === 'out_of_stock' ? 'bg-red-100 text-red-800' :
@@ -267,6 +275,17 @@ export const Inventory = () => {
         <div className="text-xs text-gray-500">
           {item.location?.warehouse || 'Main Warehouse'}
         </div>
+      </div>
+      <div className="text-xs text-gray-400">
+        Last Updated: {(() => {
+          const date = item.lastUpdated || item.updatedAt || item.createdAt;
+          if (!date) return 'N/A';
+          try {
+            return new Date(date).toLocaleDateString();
+          } catch (e) {
+            return 'N/A';
+          }
+        })()}
       </div>
     </div>
   );
@@ -470,7 +489,7 @@ export const Inventory = () => {
       {/* Inventory Table */}
       <div className="bg-white rounded-lg shadow">
         <ResponsiveTable
-          data={inventoryData?.data?.inventory || []}
+          data={inventoryData?.inventory || inventoryData?.data?.inventory || []}
           columns={columns}
           onRowClick={handleRowClick}
           onEdit={handleEdit}
@@ -482,26 +501,39 @@ export const Inventory = () => {
       </div>
 
       {/* Pagination */}
-      {inventoryData?.data?.pagination && (
+      {(inventoryData?.pagination || inventoryData?.data?.pagination) && (
         <div className="flex items-center justify-between">
           <div className="text-sm text-gray-700">
-            Showing {((currentPage - 1) * itemsPerPage) + 1} to {Math.min(currentPage * itemsPerPage, inventoryData.data.pagination.total)} of {inventoryData.data.pagination.total} results
+            {(() => {
+              const pagination = inventoryData?.pagination || inventoryData?.data?.pagination;
+              const total = pagination?.total || 0;
+              const start = ((currentPage - 1) * itemsPerPage) + 1;
+              const end = Math.min(currentPage * itemsPerPage, total);
+              return `Showing ${start} to ${end} of ${total} results`;
+            })()}
           </div>
           <div className="flex space-x-2">
-            <button
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              disabled={!inventoryData.data.pagination.hasPrev}
-              className="btn btn-secondary"
-            >
-              Previous
-            </button>
-            <button
-              onClick={() => setCurrentPage(prev => prev + 1)}
-              disabled={!inventoryData.data.pagination.hasNext}
-              className="btn btn-secondary"
-            >
-              Next
-            </button>
+            {(() => {
+              const pagination = inventoryData?.pagination || inventoryData?.data?.pagination;
+              return (
+                <>
+                  <button
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={!pagination?.hasPrev}
+                    className="btn btn-secondary"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage(prev => prev + 1)}
+                    disabled={!pagination?.hasNext}
+                    className="btn btn-secondary"
+                  >
+                    Next
+                  </button>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -511,7 +543,9 @@ export const Inventory = () => {
         isOpen={showAdjustmentModal}
         onClose={() => setShowAdjustmentModal(false)}
         onSuccess={() => {
-          queryClient.invalidateQueries('inventory');
+          // RTK Query mutations already invalidate tags automatically
+          // But we also refetch to ensure immediate update
+          refetch();
           setShowAdjustmentModal(false);
         }}
       />
@@ -521,7 +555,9 @@ export const Inventory = () => {
         onClose={() => setShowUpdateModal(false)}
         product={selectedProduct}
         onSuccess={() => {
-          queryClient.invalidateQueries('inventory');
+          // RTK Query mutations already invalidate tags automatically
+          // But we also refetch to ensure immediate update
+          refetch();
           setShowUpdateModal(false);
           setSelectedProduct(null);
         }}

@@ -1,4 +1,5 @@
 const FinancialStatementRepository = require('../repositories/FinancialStatementRepository');
+const FinancialStatement = require('../models/FinancialStatement');
 const SalesRepository = require('../repositories/SalesRepository');
 const ProductRepository = require('../repositories/ProductRepository');
 const PurchaseOrderRepository = require('../repositories/PurchaseOrderRepository');
@@ -12,6 +13,7 @@ const expenseCategorizationService = require('./expenseCategorizationService');
 const budgetComparisonService = require('./budgetComparisonService');
 const taxCalculationService = require('./taxCalculationService');
 const mongoose = require('mongoose');
+const logger = require('../utils/logger');
 
 class PLCalculationService {
   constructor() {
@@ -34,18 +36,23 @@ class PLCalculationService {
       companyInfo = {},
       includeDetails = true,
       calculateComparisons = true,
-      userId = null
+      userId = null,
+      tenantId = null
     } = options;
+
+    if (!tenantId) {
+      throw new Error('tenantId is required to generate P&L statement');
+    }
 
     const startTime = Date.now();
     
     try {
       // Calculate all financial data
-      const financialData = await this.calculateFinancialData(period);
+      const financialData = await this.calculateFinancialData(period, tenantId);
       
       // Create P&L statement (using model for instance methods)
-      const FinancialStatement = require('../models/FinancialStatement');
       const plStatement = new FinancialStatement({
+        tenantId: tenantId,
         type: 'profit_loss',
         period: {
           startDate: period.startDate,
@@ -85,19 +92,23 @@ class PLCalculationService {
       
       return plStatement;
     } catch (error) {
-      console.error('Error generating P&L statement:', error);
+      logger.error('Error generating P&L statement:', error);
       throw error;
     }
   }
 
   // Calculate all financial data from database
-  async calculateFinancialData(period) {
+  async calculateFinancialData(period, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate financial data');
+    }
+    
     const data = {
-      revenue: await this.calculateRevenue(period),
-      cogs: await this.calculateCOGS(period),
-      expenses: await this.calculateExpenses(period),
-      otherIncome: await this.calculateOtherIncome(period),
-      otherExpenses: await this.calculateOtherExpenses(period),
+      revenue: await this.calculateRevenue(period, tenantId),
+      cogs: await this.calculateCOGS(period, tenantId),
+      expenses: await this.calculateExpenses(period, tenantId),
+      otherIncome: await this.calculateOtherIncome(period, tenantId),
+      otherExpenses: await this.calculateOtherExpenses(period, tenantId),
     };
     
     // Calculate earnings before tax first (needed for income tax calculation)
@@ -112,27 +123,34 @@ class PLCalculationService {
        data.otherExpenses.amortization + data.otherExpenses.other);
     
     // Calculate taxes with earnings before tax
-    data.taxes = await this.calculateTaxes(period, earningsBeforeTax);
+    data.taxes = await this.calculateTaxes(period, earningsBeforeTax, tenantId);
     
     return data;
   }
 
   // Get account codes dynamically
-  async getAccountCodes() {
-    if (!this._accountCodes) {
-      this._accountCodes = await AccountingService.getDefaultAccountCodes();
+  async getAccountCodes(tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get account codes');
     }
+    // Always fetch fresh account codes for the specific tenant
+    this._accountCodes = await AccountingService.getDefaultAccountCodes(tenantId);
     return this._accountCodes;
   }
 
   // Calculate revenue data
-  async calculateRevenue(period) {
+  async calculateRevenue(period, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate revenue');
+    }
+    
     // Get Sales Revenue account code dynamically
-    const accountCodes = await this.getAccountCodes();
+    const accountCodes = await this.getAccountCodes(tenantId);
     const salesRevenueCode = accountCodes.salesRevenue;
     
     // Get revenue transactions
     const revenueTransactions = await TransactionRepository.findAll({
+      tenantId: tenantId,
       accountCode: salesRevenueCode,
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: 'completed'
@@ -146,7 +164,7 @@ class PLCalculationService {
     const discountsByType = {};
     const discountDetails = [];
 
-    // Calculate total sales revenue
+    // Calculate total sales revenue from transactions
     revenueTransactions.forEach(transaction => {
       if (transaction.creditAmount > 0) {
         grossSales += transaction.creditAmount;
@@ -159,6 +177,7 @@ class PLCalculationService {
 
     // Get sales returns (negative revenue transactions)
     const returnTransactions = await TransactionRepository.findAll({
+      tenantId: tenantId,
       accountCode: salesRevenueCode,
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: 'completed',
@@ -169,13 +188,37 @@ class PLCalculationService {
       salesReturns += transaction.debitAmount;
     });
 
-    // Get actual sales discounts from Sales orders
+    // Get actual sales orders for fallback calculation and discounts
     const salesOrders = await SalesRepository.findAll({
+      tenantId: tenantId,
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: { $in: ['completed', 'delivered', 'shipped', 'confirmed'] }
     }, {
-      select: 'orderNumber pricing.discountAmount items.discountAmount items.discountPercent createdAt customer'
+      select: 'orderNumber pricing.total pricing.subtotal pricing.discountAmount items.discountAmount items.discountPercent createdAt customer orderType'
     });
+
+    // FALLBACK: If no transactions found, calculate from Sales orders directly
+    if (grossSales === 0 && salesOrders.length > 0) {
+      salesOrders.forEach(order => {
+        // Only count sales (not returns or exchanges)
+        if (order.orderType !== 'return' && order.orderType !== 'exchange') {
+          const orderTotal = order.pricing?.total || order.pricing?.subtotal || 0;
+          if (orderTotal > 0) {
+            grossSales += orderTotal;
+            
+            // Categorize by order type
+            const category = order.orderType === 'wholesale' ? 'Wholesale' : 'Retail';
+            salesByCategory[category] = (salesByCategory[category] || 0) + orderTotal;
+          }
+        } else if (order.orderType === 'return') {
+          // Handle returns
+          const returnAmount = order.pricing?.total || order.pricing?.subtotal || 0;
+          if (returnAmount > 0) {
+            salesReturns += returnAmount;
+          }
+        }
+      });
+    }
 
     // Calculate discounts from orders
     salesOrders.forEach(order => {
@@ -227,6 +270,7 @@ class PLCalculationService {
 
     // Also check for discount-type transactions (if any)
     const discountTransactions = await TransactionRepository.findAll({
+      tenantId: tenantId,
       type: 'discount',
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: 'completed',
@@ -295,9 +339,13 @@ class PLCalculationService {
   }
 
   // Calculate Cost of Goods Sold
-  async calculateCOGS(period) {
+  async calculateCOGS(period, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate COGS');
+    }
+    
     // Get COGS account code dynamically
-    const accountCodes = await this.getAccountCodes();
+    const accountCodes = await this.getAccountCodes(tenantId);
     const cogsCode = accountCodes.costOfGoodsSold;
     
     // Get COGS transactions
@@ -323,16 +371,26 @@ class PLCalculationService {
     });
 
     // Get beginning inventory (from previous period)
-    const beginningInventory = await this.getInventoryValue(period.startDate);
+    const beginningInventory = await this.getInventoryValue(period.startDate, tenantId);
     
     // Get ending inventory (from current period end)
-    const endingInventory = await this.getInventoryValue(period.endDate);
+    const endingInventory = await this.getInventoryValue(period.endDate, tenantId);
     
     // Get purchases during the period
-    const purchases = await this.calculatePurchases(period);
+    const purchases = await this.calculatePurchases(period, tenantId);
     
     // Get purchase returns and discounts
-    const purchaseAdjustments = await this.calculatePurchaseAdjustments(period);
+    const purchaseAdjustments = await this.calculatePurchaseAdjustments(period, tenantId);
+    
+    // REMOVED: Direct Sales queries fallback - not event-based
+    // If no COGS transactions found, return 0 instead of using direct queries
+    // This ensures we only use journal entries (single source of truth)
+    // Direct queries can show incorrect data if transactions were deleted/edited
+    if (totalCOGS === 0) {
+      // No COGS transactions found - this is expected if no sales occurred
+      // or if journal entries haven't been created yet
+      // Return 0 to maintain data integrity rather than using direct queries
+    }
     
     return {
       beginningInventory,
@@ -349,8 +407,12 @@ class PLCalculationService {
   }
 
   // Calculate inventory value at a specific date
-  async getInventoryValue(date) {
-    const products = await ProductRepository.findAll({ status: 'active' });
+  async getInventoryValue(date, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get inventory value');
+    }
+    
+    const products = await ProductRepository.findAll({ tenantId: tenantId, status: 'active' });
     let totalValue = 0;
 
     for (const product of products) {
@@ -362,8 +424,13 @@ class PLCalculationService {
   }
 
   // Calculate purchases during period
-  async calculatePurchases(period) {
+  async calculatePurchases(period, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate purchases');
+    }
+    
     const purchaseOrders = await PurchaseOrderRepository.findAll({
+      tenantId: tenantId,
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: { $in: ['received', 'completed'] }
     }, {
@@ -400,7 +467,11 @@ class PLCalculationService {
   }
 
   // Calculate purchase adjustments (returns and discounts)
-  async calculatePurchaseAdjustments(period) {
+  async calculatePurchaseAdjustments(period, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate purchase adjustments');
+    }
+    
     let purchaseReturns = 0;
     let purchaseDiscounts = 0;
     const returnDetails = [];
@@ -408,6 +479,7 @@ class PLCalculationService {
 
     // Get purchase returns from PurchaseInvoice (invoiceType = 'return')
     const purchaseReturnInvoices = await PurchaseInvoiceRepository.findAll({
+      tenantId: tenantId,
       invoiceType: 'return',
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: { $in: ['confirmed', 'received', 'paid', 'closed'] }
@@ -431,6 +503,7 @@ class PLCalculationService {
 
     // Get purchase returns from Return model (origin = 'purchase')
     const purchaseReturnsFromReturnModel = await ReturnRepository.findAll({
+      tenantId: tenantId,
       origin: 'purchase',
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: { $in: ['approved', 'processing', 'received', 'completed'] }
@@ -454,6 +527,7 @@ class PLCalculationService {
 
     // Get purchase discounts from PurchaseInvoice (invoiceType = 'purchase' with discountAmount)
     const purchaseInvoices = await PurchaseInvoiceRepository.findAll({
+      tenantId: tenantId,
       invoiceType: 'purchase',
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: { $in: ['confirmed', 'received', 'paid', 'closed'] },
@@ -495,12 +569,17 @@ class PLCalculationService {
   }
 
   // Calculate operating expenses from actual transactions
-  async calculateExpenses(period) {
+  async calculateExpenses(period, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate expenses');
+    }
+    
     // Get expense account codes dynamically
-    const accountCodes = await this.getAccountCodes();
+    const accountCodes = await this.getAccountCodes(tenantId);
     
     // Get all expense accounts (operating expenses category)
     const expenseAccounts = await ChartOfAccountsRepository.findAll({
+      tenantId: tenantId,
       accountType: 'expense',
       accountCategory: 'operating_expenses',
       isActive: true,
@@ -521,6 +600,7 @@ class PLCalculationService {
     
     // Query all expense transactions
     const expenseTransactions = await TransactionRepository.findAll({
+      tenantId: tenantId,
       accountCode: { $in: expenseAccountCodes },
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: 'completed',
@@ -642,12 +722,17 @@ class PLCalculationService {
   }
 
   // Calculate other income from actual transactions
-  async calculateOtherIncome(period) {
+  async calculateOtherIncome(period, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate other income');
+    }
+    
     // Get account codes dynamically
-    const accountCodes = await this.getAccountCodes();
+    const accountCodes = await this.getAccountCodes(tenantId);
     
     // Find other income accounts (revenue accounts that are not sales revenue)
     const otherIncomeAccounts = await ChartOfAccountsRepository.findAll({
+      tenantId: tenantId,
       accountType: 'revenue',
       accountCategory: 'other_revenue',
       isActive: true,
@@ -658,6 +743,7 @@ class PLCalculationService {
     
     // Also find accounts by name patterns for interest and rental
     const interestAccounts = await ChartOfAccountsRepository.findAll({
+      tenantId: tenantId,
       accountType: 'revenue',
       isActive: true,
       allowDirectPosting: true,
@@ -670,6 +756,7 @@ class PLCalculationService {
     });
     
     const rentalAccounts = await ChartOfAccountsRepository.findAll({
+      tenantId: tenantId,
       accountType: 'revenue',
       isActive: true,
       allowDirectPosting: true,
@@ -691,6 +778,7 @@ class PLCalculationService {
     
     // Query all other income transactions
     const otherIncomeTransactions = await TransactionRepository.findAll({
+      tenantId: tenantId,
       accountCode: { $in: uniqueOtherIncomeCodes },
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: 'completed',
@@ -733,12 +821,17 @@ class PLCalculationService {
   }
 
   // Calculate other expenses from actual transactions
-  async calculateOtherExpenses(period) {
+  async calculateOtherExpenses(period, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate other expenses');
+    }
+    
     // Get account codes dynamically
-    const accountCodes = await this.getAccountCodes();
+    const accountCodes = await this.getAccountCodes(tenantId);
     
     // Find other expense accounts (expense accounts that are not operating expenses or COGS)
     const otherExpenseAccounts = await ChartOfAccountsRepository.findAll({
+      tenantId: tenantId,
       accountType: 'expense',
       accountCategory: 'other_expenses',
       isActive: true,
@@ -749,6 +842,7 @@ class PLCalculationService {
     
     // Find accounts by name patterns for interest, depreciation, and amortization
     const interestExpenseAccounts = await ChartOfAccountsRepository.findAll({
+      tenantId: tenantId,
       accountType: 'expense',
       isActive: true,
       allowDirectPosting: true,
@@ -761,6 +855,7 @@ class PLCalculationService {
     });
     
     const depreciationAccounts = await ChartOfAccountsRepository.findAll({
+      tenantId: tenantId,
       accountType: 'expense',
       isActive: true,
       allowDirectPosting: true,
@@ -770,6 +865,7 @@ class PLCalculationService {
     });
     
     const amortizationAccounts = await ChartOfAccountsRepository.findAll({
+      tenantId: tenantId,
       accountType: 'expense',
       isActive: true,
       allowDirectPosting: true,
@@ -792,6 +888,7 @@ class PLCalculationService {
     
     // Query all other expense transactions
     const otherExpenseTransactions = await TransactionRepository.findAll({
+      tenantId: tenantId,
       accountCode: { $in: uniqueOtherExpenseCodes },
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: 'completed',
@@ -840,9 +937,12 @@ class PLCalculationService {
   }
 
   // Calculate taxes
-  async calculateTaxes(period, earningsBeforeTax = 0) {
+  async calculateTaxes(period, earningsBeforeTax = 0, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate taxes');
+    }
     // Calculate all taxes using tax calculation service
-    const taxData = await taxCalculationService.calculateAllTaxes(period, earningsBeforeTax);
+    const taxData = await taxCalculationService.calculateAllTaxes(period, earningsBeforeTax, tenantId);
     
     return {
       salesTax: taxData.salesTax.salesTax,
@@ -1124,17 +1224,17 @@ class PLCalculationService {
     statement.otherExpenses.other.amount = data.otherExpenses.other;
 
     // Populate tax data
-    statement.incomeTax.current = data.taxes.incomeTax;
-    statement.incomeTax.deferred = data.taxes.deferred;
+    statement.incomeTax.current = data.taxes.incomeTax?.current || data.taxes.incomeTax?.total || 0;
+    statement.incomeTax.deferred = data.taxes.incomeTax?.deferred || data.taxes.deferred || 0;
     
     // Add sales tax and tax details if available
-    if (data.taxes.salesTaxDetails) {
+    if (data.taxes.salesTaxDetails || data.taxes.salesTax) {
       statement.salesTax = {
-        amount: data.taxes.salesTax,
-        taxableSales: data.taxes.salesTaxDetails.taxableSales,
-        taxExemptSales: data.taxes.salesTaxDetails.taxExemptSales,
-        taxByMonth: data.taxes.salesTaxDetails.taxByMonth,
-        source: data.taxes.salesTaxDetails.source
+        amount: data.taxes.salesTax?.salesTax || data.taxes.salesTax || 0,
+        taxableSales: data.taxes.salesTaxDetails?.taxableSales || data.taxes.salesTax?.taxableSales || 0,
+        taxExemptSales: data.taxes.salesTaxDetails?.taxExemptSales || data.taxes.salesTax?.taxExemptSales || 0,
+        taxByMonth: data.taxes.salesTaxDetails?.taxByMonth || data.taxes.salesTax?.taxByMonth || {},
+        source: data.taxes.salesTaxDetails?.source || data.taxes.salesTax?.source || 'sales_orders'
       };
     }
     
@@ -1150,8 +1250,14 @@ class PLCalculationService {
   // Add comparisons to P&L statement
   async addComparisons(statement) {
     try {
+      if (!statement.tenantId) {
+        logger.warn('Statement missing tenantId, skipping comparisons');
+        return;
+      }
+      
       // Get previous period statement
       const previousStatement = await FinancialStatementRepository.findOne({
+        tenantId: statement.tenantId,
         type: 'profit_loss',
         'period.endDate': { $lt: statement.period.startDate },
       }, {
@@ -1173,6 +1279,7 @@ class PLCalculationService {
 
       // Get budget statement (if exists)
       const budgetStatement = await FinancialStatementRepository.findOne({
+        tenantId: statement.tenantId,
         type: 'budget_profit_loss',
         'period.startDate': statement.period.startDate,
         'period.endDate': statement.period.endDate,
@@ -1191,40 +1298,103 @@ class PLCalculationService {
         };
       }
     } catch (error) {
-      console.error('Error adding comparisons:', error);
+      logger.error('Error adding comparisons:', error);
       // Don't throw error, just skip comparisons
     }
   }
 
   // Get P&L summary for dashboard
-  async getPLSummary(period) {
-    const statement = await FinancialStatement.findOne({
+  async getPLSummary(period, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get P&L summary');
+    }
+    
+    // Use date range query instead of exact date matching to handle timezone/normalization issues
+    const startOfDay = new Date(period.startDate);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfStartDay = new Date(period.startDate);
+    endOfStartDay.setHours(23, 59, 59, 999);
+    
+    const startOfEndDay = new Date(period.endDate);
+    startOfEndDay.setHours(0, 0, 0, 0);
+    const endOfEndDay = new Date(period.endDate);
+    endOfEndDay.setHours(23, 59, 59, 999);
+    
+    let statement = await FinancialStatement.findOne({
+      tenantId: tenantId,
       type: 'profit_loss',
-      'period.startDate': period.startDate,
-      'period.endDate': period.endDate,
-    });
+      'period.startDate': { $gte: startOfDay, $lte: endOfStartDay },
+      'period.endDate': { $gte: startOfEndDay, $lte: endOfEndDay }
+    }).sort({ createdAt: -1 }); // Get most recent if multiple exist
 
     if (!statement) {
       // Generate statement if it doesn't exist
-      return await this.generatePLStatement(period, { includeDetails: false });
+      statement = await this.generatePLStatement(period, { includeDetails: false, tenantId: tenantId });
     }
 
+    // Return summary format matching frontend expectations
     return {
-      totalRevenue: statement.revenue.totalRevenue.amount,
-      grossProfit: statement.grossProfit.amount,
-      operatingIncome: statement.operatingIncome.amount,
-      netIncome: statement.netIncome.amount,
-      grossMargin: statement.grossProfit.margin,
-      operatingMargin: statement.operatingIncome.margin,
-      netMargin: statement.netIncome.margin,
+      data: {
+        revenue: {
+          totalRevenue: {
+            amount: statement.revenue?.totalRevenue?.amount || 0
+          }
+        },
+        grossProfit: {
+          amount: statement.grossProfit?.amount || 0,
+          margin: statement.grossProfit?.margin
+        },
+        operatingIncome: {
+          amount: statement.operatingIncome?.amount || 0,
+          margin: statement.operatingIncome?.margin
+        },
+        netIncome: {
+          amount: statement.netIncome?.amount || 0,
+          margin: statement.netIncome?.margin
+        },
+        statement: {
+          revenue: {
+            totalRevenue: {
+              amount: statement.revenue?.totalRevenue?.amount || 0
+            }
+          },
+          grossProfit: {
+            amount: statement.grossProfit?.amount || 0,
+            margin: statement.grossProfit?.margin
+          },
+          operatingIncome: {
+            amount: statement.operatingIncome?.amount || 0,
+            margin: statement.operatingIncome?.margin
+          },
+          netIncome: {
+            amount: statement.netIncome?.amount || 0,
+            margin: statement.netIncome?.margin
+          }
+        },
+        period: statement.period,
+        lastUpdated: statement.metadata?.lastUpdated || new Date(),
+      },
+      // Also include flat format for backward compatibility
+      totalRevenue: statement.revenue?.totalRevenue?.amount || 0,
+      grossProfit: statement.grossProfit?.amount || 0,
+      operatingIncome: statement.operatingIncome?.amount || 0,
+      netIncome: statement.netIncome?.amount || 0,
+      grossMargin: statement.grossProfit?.margin,
+      operatingMargin: statement.operatingIncome?.margin,
+      netMargin: statement.netIncome?.margin,
       period: statement.period,
-      lastUpdated: statement.metadata.lastUpdated,
+      lastUpdated: statement.metadata?.lastUpdated || new Date(),
     };
   }
 
   // Get P&L trends over time
-  async getPLTrends(periods) {
+  async getPLTrends(periods, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get P&L trends');
+    }
+    
     const statements = await FinancialStatementRepository.findAll({
+      tenantId: tenantId,
       type: 'profit_loss',
       'period.startDate': { $in: periods.map(p => p.startDate) },
     }, {

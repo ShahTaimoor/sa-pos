@@ -24,11 +24,17 @@ const purchaseInvoiceItemSchema = new mongoose.Schema({
 });
 
 const purchaseInvoiceSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
+  
   // Invoice Information
   invoiceNumber: {
     type: String,
-    required: true,
-    unique: true
+    required: true
   },
   invoiceType: {
     type: String,
@@ -143,11 +149,11 @@ const purchaseInvoiceSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes
-// invoiceNumber index removed - already has unique: true in field definition
-purchaseInvoiceSchema.index({ supplier: 1 });
-purchaseInvoiceSchema.index({ status: 1 });
-purchaseInvoiceSchema.index({ createdAt: -1 });
+// Compound indexes for multi-tenant performance
+purchaseInvoiceSchema.index({ tenantId: 1, invoiceNumber: 1 }, { unique: true });
+purchaseInvoiceSchema.index({ tenantId: 1, createdAt: -1 });
+purchaseInvoiceSchema.index({ tenantId: 1, supplier: 1, createdAt: -1 });
+purchaseInvoiceSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
 
 // Pre-save middleware to generate invoice number
 purchaseInvoiceSchema.pre('save', async function(next) {

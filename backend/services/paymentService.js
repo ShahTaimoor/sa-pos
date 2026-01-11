@@ -3,7 +3,8 @@ const PaymentRepository = require('../repositories/PaymentRepository');
 const SalesRepository = require('../repositories/SalesRepository');
 const TransactionRepository = require('../repositories/TransactionRepository');
 const Payment = require('../models/Payment'); // Still needed for model methods
-const Transaction = require('../models/Transaction'); // Still needed for model methods
+const Transaction = require('../models/Transaction');
+const logger = require('../utils/logger'); // Still needed for model methods
 
 class PaymentService {
   constructor() {
@@ -197,7 +198,7 @@ class PaymentService {
       };
 
     } catch (error) {
-      console.error('Payment processing error:', error);
+      logger.error('Payment processing error:', { error: error });
       throw error;
     }
   }
@@ -283,7 +284,7 @@ class PaymentService {
       };
 
     } catch (error) {
-      console.error('Refund processing error:', error);
+      logger.error('Refund processing error:', { error: error });
       throw error;
     }
   }
@@ -330,7 +331,7 @@ class PaymentService {
       };
 
     } catch (error) {
-      console.error('Void transaction error:', error);
+      logger.error('Void transaction error:', { error: error });
       throw error;
     }
   }
@@ -380,7 +381,7 @@ class PaymentService {
       };
 
     } catch (error) {
-      console.error('Get payment history error:', error);
+      logger.error('Get payment history error:', { error: error });
       throw error;
     }
   }
@@ -396,7 +397,7 @@ class PaymentService {
         transactionStats
       };
     } catch (error) {
-      console.error('Get payment stats error:', error);
+      logger.error('Get payment stats error:', { error: error });
       throw error;
     }
   }
@@ -415,7 +416,7 @@ class PaymentService {
         await SalesRepository.update(orderId, { status: 'paid' });
       }
     } catch (error) {
-      console.error('Update order payment status error:', error);
+      logger.error('Update order payment status error:', { error: error });
     }
   }
 

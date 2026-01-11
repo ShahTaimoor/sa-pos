@@ -1,6 +1,7 @@
 const express = require('express');
 const { body } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const Supplier = require('../models/Supplier'); // Still needed for model reference
 const Product = require('../models/Product'); // Still needed for model reference
@@ -8,6 +9,7 @@ const StockMovementService = require('../services/stockMovementService');
 const SupplierBalanceService = require('../services/supplierBalanceService');
 const supplierRepository = require('../repositories/SupplierRepository');
 const productRepository = require('../repositories/ProductRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -16,6 +18,7 @@ const router = express.Router();
 // @access  Private (requires 'edit_purchases' permission)
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('edit_purchases'),
   sanitizeRequest,
   body('supplier').isMongoId().withMessage('Valid supplier ID is required'),
@@ -64,7 +67,7 @@ router.post('/', [
       await SupplierBalanceService.recordPayment(supplierDoc._id, totalAmount, null);
     } catch (balanceErr) {
       // Do not fail entire return; surface warning
-      console.error('Error updating supplier balance for purchase return:', balanceErr);
+      logger.error('Error updating supplier balance for purchase return:', balanceErr);
     }
 
     res.status(201).json({
@@ -77,7 +80,7 @@ router.post('/', [
       },
     });
   } catch (error) {
-    console.error('Error creating purchase return:', error);
+    logger.error('Error creating purchase return:', error);
     res.status(500).json({ message: 'Server error creating purchase return', error: error.message });
   }
 });

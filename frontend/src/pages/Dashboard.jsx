@@ -4,7 +4,6 @@ import {
   ShoppingCart, 
   Users, 
   Package, 
-  DollarSign,
   TrendingUp,
   AlertTriangle,
   Bell,
@@ -45,6 +44,7 @@ import PeriodComparisonSection from '../components/PeriodComparisonSection';
 import PeriodComparisonCard from '../components/PeriodComparisonCard';
 import ComparisonChart from '../components/ComparisonChart';
 import { usePeriodComparison } from '../hooks/usePeriodComparison';
+import DashboardReportModal from '../components/DashboardReportModal';
 
 const StatCard = ({ title, value, icon: Icon, color, change, changeType }) => (
   <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 h-full">
@@ -89,6 +89,13 @@ export const Dashboard = () => {
   const [toDate, setToDate] = useState(today);
   const [activeFromDate, setActiveFromDate] = useState(today);
   const [activeToDate, setActiveToDate] = useState(today);
+  const [reportModal, setReportModal] = useState({
+    isOpen: false,
+    type: null,
+    title: '',
+    dateFrom: today,
+    dateTo: today
+  });
 
   // Lazy query for period summary
   const [getPeriodSummary] = useLazyGetPeriodSummaryQuery();
@@ -332,6 +339,365 @@ export const Dashboard = () => {
   const grossProfit = netRevenue - costOfGoodsSold; // Gross Profit
   const netProfit = grossProfit - operatingExpenses;
 
+  // Report modal handlers
+  const openReportModal = (type, title) => {
+    setReportModal({
+      isOpen: true,
+      type,
+      title,
+      dateFrom: activeFromDate,
+      dateTo: activeToDate
+    });
+  };
+
+  const closeReportModal = () => {
+    setReportModal({
+      isOpen: false,
+      type: null,
+      title: '',
+      dateFrom: today,
+      dateTo: today
+    });
+  };
+
+  const handleReportDateChange = (newFromDate, newToDate) => {
+    setReportModal(prev => ({
+      ...prev,
+      dateFrom: newFromDate,
+      dateTo: newToDate
+    }));
+    setActiveFromDate(newFromDate);
+    setActiveToDate(newToDate);
+  };
+
+  // Prepare report data based on type
+  const getReportData = () => {
+    const { type, dateFrom: modalFromDate, dateTo: modalToDate } = reportModal;
+    
+    switch (type) {
+      case 'receipts': {
+        const allReceipts = [
+          ...(cashReceiptsData?.data?.cashReceipts || []).map(r => ({
+            ...r,
+            type: 'Cash',
+            _id: r._id || `cash-${r.voucherCode}`
+          })),
+          ...(bankReceiptsData?.data?.bankReceipts || []).map(r => ({
+            ...r,
+            type: 'Bank',
+            _id: r._id || `bank-${r.voucherCode}`
+          }))
+        ];
+        return {
+          columns: [
+            { key: 'date', label: 'Date', filterType: 'date', format: 'date', sortable: true },
+            { key: 'voucherCode', label: 'VoucherCode', filterType: 'text', sortable: true },
+            { key: 'amount', label: 'Amount', filterType: 'number', format: 'currency', sortable: true },
+            { key: 'particular', label: 'Particular', filterType: 'text', sortable: true },
+            { key: 'type', label: 'Type', filterType: 'text', sortable: true }
+          ],
+          data: allReceipts,
+          isLoading: cashReceiptsLoading || bankReceiptsLoading
+        };
+      }
+      case 'sales': {
+        const allSales = [
+          ...(salesOrdersData?.data?.salesOrders || salesOrdersData?.salesOrders || []).map(order => ({
+            date: order.orderDate || order.createdAt,
+            orderNumber: order.orderNumber || order._id,
+            customer: order.customer?.businessName || order.customer?.name || 'N/A',
+            amount: order.total || order.pricing?.total || 0,
+            type: 'Sales Order',
+            _id: order._id
+          })),
+          ...(salesInvoicesData?.data?.orders || salesInvoicesData?.orders || []).map(order => ({
+            date: order.orderDate || order.createdAt,
+            orderNumber: order.orderNumber || order._id,
+            customer: order.customer?.businessName || order.customer?.name || 'N/A',
+            amount: order.pricing?.total || order.total || 0,
+            type: 'Sales Invoice',
+            _id: order._id
+          }))
+        ];
+        return {
+          columns: [
+            { key: 'date', label: 'Date', filterType: 'date', format: 'date', sortable: true },
+            { key: 'orderNumber', label: 'Order Number', filterType: 'text', sortable: true },
+            { key: 'customer', label: 'Customer', filterType: 'text', sortable: true },
+            { key: 'amount', label: 'Amount', filterType: 'number', format: 'currency', sortable: true },
+            { key: 'type', label: 'Type', filterType: 'text', sortable: true }
+          ],
+          data: allSales,
+          isLoading: salesOrdersLoading || salesInvoicesLoading
+        };
+      }
+      case 'purchases': {
+        const allPurchases = [
+          ...(purchaseOrdersData?.data?.purchaseOrders || purchaseOrdersData?.purchaseOrders || []).map(order => ({
+            date: order.orderDate || order.createdAt,
+            orderNumber: order.orderNumber || order._id,
+            supplier: order.supplier?.companyName || order.supplier?.name || 'N/A',
+            amount: order.pricing?.total || order.total || 0,
+            type: 'Purchase Order',
+            _id: order._id
+          })),
+          ...(purchaseInvoicesData?.data?.invoices || purchaseInvoicesData?.invoices || []).map(invoice => ({
+            date: invoice.invoiceDate || invoice.createdAt,
+            orderNumber: invoice.invoiceNumber || invoice._id,
+            supplier: invoice.supplier?.companyName || invoice.supplier?.name || 'N/A',
+            amount: invoice.pricing?.total || 0,
+            type: 'Purchase Invoice',
+            _id: invoice._id
+          }))
+        ];
+        return {
+          columns: [
+            { key: 'date', label: 'Date', filterType: 'date', format: 'date', sortable: true },
+            { key: 'orderNumber', label: 'Invoice/Order Number', filterType: 'text', sortable: true },
+            { key: 'supplier', label: 'Supplier', filterType: 'text', sortable: true },
+            { key: 'amount', label: 'Amount', filterType: 'number', format: 'currency', sortable: true },
+            { key: 'type', label: 'Type', filterType: 'text', sortable: true }
+          ],
+          data: allPurchases,
+          isLoading: purchaseOrdersLoading || purchaseInvoicesLoading
+        };
+      }
+      case 'discounts': {
+        const allDiscounts = [
+          ...(salesOrdersData?.data?.salesOrders || salesOrdersData?.salesOrders || []).filter(o => (o.pricing?.discountAmount || 0) > 0).map(order => ({
+            date: order.orderDate || order.createdAt,
+            orderNumber: order.orderNumber || order._id,
+            customer: order.customer?.businessName || order.customer?.name || 'N/A',
+            amount: order.pricing?.discountAmount || 0,
+            type: 'Sales Order',
+            _id: order._id
+          })),
+          ...(salesInvoicesData?.data?.orders || salesInvoicesData?.orders || []).filter(o => (o.discountAmount || 0) > 0).map(order => ({
+            date: order.orderDate || order.createdAt,
+            orderNumber: order.orderNumber || order._id,
+            customer: order.customer?.businessName || order.customer?.name || 'N/A',
+            amount: order.discountAmount || 0,
+            type: 'Sales Invoice',
+            _id: order._id
+          }))
+        ];
+        return {
+          columns: [
+            { key: 'date', label: 'Date', filterType: 'date', format: 'date', sortable: true },
+            { key: 'orderNumber', label: 'Order Number', filterType: 'text', sortable: true },
+            { key: 'customer', label: 'Customer', filterType: 'text', sortable: true },
+            { key: 'amount', label: 'Discount Amount', filterType: 'number', format: 'currency', sortable: true },
+            { key: 'type', label: 'Type', filterType: 'text', sortable: true }
+          ],
+          data: allDiscounts,
+          isLoading: salesOrdersLoading || salesInvoicesLoading
+        };
+      }
+      case 'pending-sales-orders': {
+        const pendingOrders = (pendingSalesOrdersData?.data?.salesOrders || pendingSalesOrdersData?.salesOrders || []).map(order => ({
+          date: order.orderDate || order.createdAt,
+          orderNumber: order.orderNumber || order._id,
+          customer: order.customer?.businessName || order.customer?.name || 'N/A',
+          amount: order.total || order.pricing?.total || 0,
+          status: order.status || 'draft',
+          _id: order._id
+        }));
+        return {
+          columns: [
+            { key: 'date', label: 'Date', filterType: 'date', format: 'date', sortable: true },
+            { key: 'orderNumber', label: 'Order Number', filterType: 'text', sortable: true },
+            { key: 'customer', label: 'Customer', filterType: 'text', sortable: true },
+            { key: 'amount', label: 'Amount', filterType: 'number', format: 'currency', sortable: true },
+            { key: 'status', label: 'Status', filterType: 'text', sortable: true }
+          ],
+          data: pendingOrders,
+          isLoading: pendingSalesOrdersLoading
+        };
+      }
+      case 'pending-purchase-orders': {
+        const pendingOrders = (pendingPurchaseOrdersData?.data?.purchaseOrders || pendingPurchaseOrdersData?.purchaseOrders || []).map(order => ({
+          date: order.orderDate || order.createdAt,
+          orderNumber: order.orderNumber || order._id,
+          supplier: order.supplier?.companyName || order.supplier?.name || 'N/A',
+          amount: order.pricing?.total || order.total || 0,
+          status: order.status || 'draft',
+          _id: order._id
+        }));
+        return {
+          columns: [
+            { key: 'date', label: 'Date', filterType: 'date', format: 'date', sortable: true },
+            { key: 'orderNumber', label: 'Order Number', filterType: 'text', sortable: true },
+            { key: 'supplier', label: 'Supplier', filterType: 'text', sortable: true },
+            { key: 'amount', label: 'Amount', filterType: 'number', format: 'currency', sortable: true },
+            { key: 'status', label: 'Status', filterType: 'text', sortable: true }
+          ],
+          data: pendingOrders,
+          isLoading: pendingPurchaseOrdersLoading
+        };
+      }
+      case 'gross-profit': {
+        // Calculate profit per transaction
+        const salesMap = new Map();
+        (salesOrdersData?.data?.salesOrders || salesOrdersData?.salesOrders || []).forEach(order => {
+          salesMap.set(order._id, {
+            date: order.orderDate || order.createdAt,
+            orderNumber: order.orderNumber || order._id,
+            revenue: order.total || order.pricing?.total || 0,
+            discount: order.pricing?.discountAmount || 0,
+            type: 'Sales Order'
+          });
+        });
+        (salesInvoicesData?.data?.orders || salesInvoicesData?.orders || []).forEach(order => {
+          salesMap.set(order._id, {
+            date: order.orderDate || order.createdAt,
+            orderNumber: order.orderNumber || order._id,
+            revenue: order.pricing?.total || order.total || 0,
+            discount: order.discountAmount || 0,
+            type: 'Sales Invoice'
+          });
+        });
+
+        const profitData = Array.from(salesMap.values()).map(sale => {
+          // For simplicity, we'll show revenue - we'd need COGS per sale for accurate profit
+          return {
+            date: sale.date,
+            orderNumber: sale.orderNumber,
+            revenue: sale.revenue - sale.discount,
+            discount: sale.discount,
+            type: sale.type,
+            _id: sale.orderNumber
+          };
+        });
+        return {
+          columns: [
+            { key: 'date', label: 'Date', filterType: 'date', format: 'date', sortable: true },
+            { key: 'orderNumber', label: 'Order Number', filterType: 'text', sortable: true },
+            { key: 'revenue', label: 'Revenue', filterType: 'number', format: 'currency', sortable: true },
+            { key: 'discount', label: 'Discount', filterType: 'number', format: 'currency', sortable: true },
+            { key: 'type', label: 'Type', filterType: 'text', sortable: true }
+          ],
+          data: profitData,
+          isLoading: salesOrdersLoading || salesInvoicesLoading
+        };
+      }
+      case 'payments': {
+        const allPayments = [
+          ...(cashPaymentsData?.data?.cashPayments || []).map(p => ({
+            ...p,
+            type: 'Cash',
+            _id: p._id || `cash-${p.voucherCode}`
+          })),
+          ...(bankPaymentsData?.data?.bankPayments || []).map(p => ({
+            ...p,
+            type: 'Bank',
+            _id: p._id || `bank-${p.voucherCode}`
+          }))
+        ];
+        return {
+          columns: [
+            { key: 'date', label: 'Date', filterType: 'date', format: 'date', sortable: true },
+            { key: 'voucherCode', label: 'VoucherCode', filterType: 'text', sortable: true },
+            { key: 'amount', label: 'Amount', filterType: 'number', format: 'currency', sortable: true },
+            { key: 'particular', label: 'Particular', filterType: 'text', sortable: true },
+            { key: 'type', label: 'Type', filterType: 'text', sortable: true }
+          ],
+          data: allPayments,
+          isLoading: cashPaymentsLoading || bankPaymentsLoading
+        };
+      }
+      case 'net-cash-flow': {
+        // Combined receipts and payments
+        const allReceipts = [
+          ...(cashReceiptsData?.data?.cashReceipts || []).map(r => ({
+            date: r.date,
+            voucherCode: r.voucherCode,
+            amount: r.amount || 0,
+            type: 'Receipt - Cash',
+            particular: r.particular,
+            _id: `receipt-cash-${r._id}`
+          })),
+          ...(bankReceiptsData?.data?.bankReceipts || []).map(r => ({
+            date: r.date,
+            voucherCode: r.voucherCode,
+            amount: r.amount || 0,
+            type: 'Receipt - Bank',
+            particular: r.particular,
+            _id: `receipt-bank-${r._id}`
+          }))
+        ];
+        const allPayments = [
+          ...(cashPaymentsData?.data?.cashPayments || []).map(p => ({
+            date: p.date,
+            voucherCode: p.voucherCode,
+            amount: -(p.amount || 0),
+            type: 'Payment - Cash',
+            particular: p.particular,
+            _id: `payment-cash-${p._id}`
+          })),
+          ...(bankPaymentsData?.data?.bankPayments || []).map(p => ({
+            date: p.date,
+            voucherCode: p.voucherCode,
+            amount: -(p.amount || 0),
+            type: 'Payment - Bank',
+            particular: p.particular,
+            _id: `payment-bank-${p._id}`
+          }))
+        ];
+        return {
+          columns: [
+            { key: 'date', label: 'Date', filterType: 'date', format: 'date', sortable: true },
+            { key: 'voucherCode', label: 'VoucherCode', filterType: 'text', sortable: true },
+            { key: 'amount', label: 'Amount', filterType: 'number', format: 'currency', sortable: true, render: (val) => (
+              <span className={val >= 0 ? 'text-green-600' : 'text-red-600'}>
+                {formatCurrency(val)}
+              </span>
+            )},
+            { key: 'type', label: 'Type', filterType: 'text', sortable: true },
+            { key: 'particular', label: 'Particular', filterType: 'text', sortable: true }
+          ],
+          data: [...allReceipts, ...allPayments].sort((a, b) => new Date(b.date) - new Date(a.date)),
+          isLoading: cashReceiptsLoading || bankReceiptsLoading || cashPaymentsLoading || bankPaymentsLoading
+        };
+      }
+      case 'transactions': {
+        // All transactions combined
+        const allTransactions = [
+          ...(salesInvoicesData?.data?.orders || salesInvoicesData?.orders || []).map(order => ({
+            date: order.orderDate || order.createdAt,
+            transactionNumber: order.orderNumber || order._id,
+            type: 'Sales Invoice',
+            amount: order.pricing?.total || order.total || 0,
+            customer: order.customer?.businessName || order.customer?.name || 'N/A',
+            _id: `sales-${order._id}`
+          })),
+          ...(purchaseInvoicesData?.data?.invoices || purchaseInvoicesData?.invoices || []).map(invoice => ({
+            date: invoice.invoiceDate || invoice.createdAt,
+            transactionNumber: invoice.invoiceNumber || invoice._id,
+            type: 'Purchase Invoice',
+            amount: invoice.pricing?.total || 0,
+            supplier: invoice.supplier?.companyName || invoice.supplier?.name || 'N/A',
+            _id: `purchase-${invoice._id}`
+          }))
+        ];
+        return {
+          columns: [
+            { key: 'date', label: 'Date', filterType: 'date', format: 'date', sortable: true },
+            { key: 'transactionNumber', label: 'Transaction Number', filterType: 'text', sortable: true },
+            { key: 'type', label: 'Type', filterType: 'text', sortable: true },
+            { key: 'amount', label: 'Amount', filterType: 'number', format: 'currency', sortable: true },
+            { key: 'customer', label: 'Customer/Supplier', filterType: 'text', sortable: true, render: (val, row) => row.customer || row.supplier || 'N/A' }
+          ],
+          data: allTransactions,
+          isLoading: salesInvoicesLoading || purchaseInvoicesLoading
+        };
+      }
+      default:
+        return { columns: [], data: [], isLoading: false };
+    }
+  };
+
+  const reportData = getReportData();
+
   return (
     <div className="space-y-6">
       <div>
@@ -447,44 +813,53 @@ export const Dashboard = () => {
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-5 lg:grid-cols-5">
             
             {/* Sales */}
-            <div className="text-center p-4 border-2 border-green-300 bg-green-50 rounded-lg">
+            <div 
+              className="text-center p-4 border-2 border-green-300 bg-green-50 rounded-lg cursor-pointer hover:bg-green-100 hover:border-green-400 transition-colors"
+              onClick={() => openReportModal('sales', 'Sales Revenue Report')}
+            >
               <div className="flex justify-center mb-2">
                 <div className="p-3 bg-green-500 rounded-full">
                   <CreditCard className="h-6 w-6 text-white" />
                 </div>
               </div>
               <p className="text-sm font-medium text-green-700 mb-1">Sales (Revenue)</p>
-              <p className="text-xl font-bold text-green-800">${Math.round(totalSales).toLocaleString()}</p>
-              <p className="text-xs text-green-600 mt-1">SO: ${Math.round(salesOrdersTotal)} | SI: ${Math.round(salesInvoicesTotal)}</p>
+              <p className="text-xl font-bold text-green-800">{Math.round(totalSales).toLocaleString()}</p>
+              <p className="text-xs text-green-600 mt-1">SO: {Math.round(salesOrdersTotal)} | SI: {Math.round(salesInvoicesTotal)}</p>
             </div>
 
             {/* Purchase (COGS) */}
-            <div className="text-center p-4 border-2 border-purple-300 bg-purple-50 rounded-lg">
+            <div 
+              className="text-center p-4 border-2 border-purple-300 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 hover:border-purple-400 transition-colors"
+              onClick={() => openReportModal('purchases', 'Purchase Cost Report')}
+            >
               <div className="flex justify-center mb-2">
                 <div className="p-3 bg-purple-500 rounded-full">
                   <Truck className="h-6 w-6 text-white" />
                 </div>
               </div>
               <p className="text-sm font-medium text-purple-700 mb-1">Purchase (COGS)</p>
-              <p className="text-xl font-bold text-purple-800">${Math.round(totalPurchases).toLocaleString()}</p>
-              <p className="text-xs text-purple-600 mt-1">PO: ${Math.round(purchaseOrdersTotal)} | PI: ${Math.round(purchaseInvoicesTotal)}</p>
+              <p className="text-xl font-bold text-purple-800">{Math.round(totalPurchases).toLocaleString()}</p>
+              <p className="text-xs text-purple-600 mt-1">PO: {Math.round(purchaseOrdersTotal)} | PI: {Math.round(purchaseInvoicesTotal)}</p>
             </div>
 
             {/* Discount */}
-            <div className="text-center p-4 border-2 border-red-300 bg-red-50 rounded-lg">
+            <div 
+              className="text-center p-4 border-2 border-red-300 bg-red-50 rounded-lg cursor-pointer hover:bg-red-100 hover:border-red-400 transition-colors"
+              onClick={() => openReportModal('discounts', 'Discount Report')}
+            >
               <div className="flex justify-center mb-2">
                 <div className="p-3 bg-red-500 rounded-full">
                   <Tag className="h-6 w-6 text-white" />
                 </div>
               </div>
               <p className="text-sm font-medium text-red-700 mb-1">Discount Given</p>
-              <p className="text-xl font-bold text-red-800">${Math.round(totalDiscounts).toLocaleString()}</p>
+              <p className="text-xl font-bold text-red-800">{Math.round(totalDiscounts).toLocaleString()}</p>
             </div>
 
              {/* Pending Sales Orders */}
              <div 
                className="text-center p-4 border-2 border-cyan-300 bg-cyan-50 rounded-lg cursor-pointer hover:bg-cyan-100 hover:border-cyan-400 transition-colors"
-               onClick={() => navigate('/sales-orders')}
+               onClick={() => openReportModal('pending-sales-orders', 'Pending Sales Orders Report')}
              >
                <div className="flex justify-center mb-2">
                  <div className="p-3 bg-cyan-500 rounded-full">
@@ -498,7 +873,7 @@ export const Dashboard = () => {
              {/* Pending Purchase Orders */}
              <div 
                className="text-center p-4 border-2 border-indigo-300 bg-indigo-50 rounded-lg cursor-pointer hover:bg-indigo-100 hover:border-indigo-400 transition-colors"
-               onClick={() => navigate('/purchase-orders')}
+               onClick={() => openReportModal('pending-purchase-orders', 'Pending Purchase Orders Report')}
              >
                <div className="flex justify-center mb-2">
                  <div className="p-3 bg-indigo-500 rounded-full">
@@ -517,7 +892,10 @@ export const Dashboard = () => {
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
             
             {/* Gross Profit */}
-            <div className="text-center p-4 border-2 border-blue-300 bg-blue-50 rounded-lg">
+            <div 
+              className="text-center p-4 border-2 border-blue-300 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 hover:border-blue-400 transition-colors"
+              onClick={() => openReportModal('gross-profit', 'Gross Profit Report')}
+            >
               <div className="flex justify-center mb-2">
                 <div className="p-3 bg-blue-500 rounded-full">
                   <BarChart3 className="h-6 w-6 text-white" />
@@ -525,37 +903,46 @@ export const Dashboard = () => {
               </div>
               <p className="text-sm font-medium text-gray-700 mb-1">Gross Profit</p>
               <p className={`text-xl font-bold ${grossProfit >= 0 ? 'text-blue-700' : 'text-red-600'}`}>
-                ${Math.round(grossProfit).toLocaleString()}
+                {Math.round(grossProfit).toLocaleString()}
               </p>
               <p className="text-xs text-gray-600 mt-1">Revenue - COGS</p>
             </div>
             
             {/* Total Receipts */}
-            <div className="text-center p-4 border-2 border-emerald-300 bg-emerald-50 rounded-lg">
+            <div 
+              className="text-center p-4 border-2 border-emerald-300 bg-emerald-50 rounded-lg cursor-pointer hover:bg-emerald-100 hover:border-emerald-400 transition-colors"
+              onClick={() => openReportModal('receipts', 'Total Receipts Report')}
+            >
               <div className="flex justify-center mb-2">
                 <div className="p-3 bg-emerald-500 rounded-full">
                   <Receipt className="h-6 w-6 text-white" />
                 </div>
               </div>
               <p className="text-sm font-medium text-emerald-700 mb-1">Total Receipts</p>
-              <p className="text-xl font-bold text-emerald-800">${Math.round(totalReceipts).toLocaleString()}</p>
-              <p className="text-xs text-emerald-600 mt-1">Cash: ${Math.round(totalCashReceipts)} | Bank: ${Math.round(totalBankReceipts)}</p>
+              <p className="text-xl font-bold text-emerald-800">{Math.round(totalReceipts).toLocaleString()}</p>
+              <p className="text-xs text-emerald-600 mt-1">Cash: {Math.round(totalCashReceipts)} | Bank: {Math.round(totalBankReceipts)}</p>
             </div>
             
             {/* Total Payments */}
-            <div className="text-center p-4 border-2 border-orange-300 bg-orange-50 rounded-lg">
+            <div 
+              className="text-center p-4 border-2 border-orange-300 bg-orange-50 rounded-lg cursor-pointer hover:bg-orange-100 hover:border-orange-400 transition-colors"
+              onClick={() => openReportModal('payments', 'Total Payments Report')}
+            >
               <div className="flex justify-center mb-2">
                 <div className="p-3 bg-orange-500 rounded-full">
                   <Banknote className="h-6 w-6 text-white" />
                 </div>
               </div>
               <p className="text-sm font-medium text-orange-700 mb-1">Total Payments</p>
-              <p className="text-xl font-bold text-orange-800">${Math.round(totalPayments).toLocaleString()}</p>
-              <p className="text-xs text-orange-600 mt-1">Cash: ${Math.round(totalCashPayments)} | Bank: ${Math.round(totalBankPayments)}</p>
+              <p className="text-xl font-bold text-orange-800">{Math.round(totalPayments).toLocaleString()}</p>
+              <p className="text-xs text-orange-600 mt-1">Cash: {Math.round(totalCashPayments)} | Bank: {Math.round(totalBankPayments)}</p>
             </div>
             
             {/* Net Cash Flow */}
-            <div className={`text-center p-4 border-2 rounded-lg ${netCashFlow >= 0 ? 'border-green-300 bg-green-50' : 'border-red-300 bg-red-50'}`}>
+            <div 
+              className={`text-center p-4 border-2 rounded-lg cursor-pointer transition-colors ${netCashFlow >= 0 ? 'border-green-300 bg-green-50 hover:bg-green-100 hover:border-green-400' : 'border-red-300 bg-red-50 hover:bg-red-100 hover:border-red-400'}`}
+              onClick={() => openReportModal('net-cash-flow', 'Net Cash Flow Report')}
+            >
               <div className="flex justify-center mb-2">
                 <div className={`p-3 rounded-full ${netCashFlow >= 0 ? 'bg-green-500' : 'bg-red-500'}`}>
                   <Wallet className="h-6 w-6 text-white" />
@@ -563,13 +950,16 @@ export const Dashboard = () => {
               </div>
               <p className="text-sm font-medium text-gray-700 mb-1">Net Cash Flow</p>
               <p className={`text-xl font-bold ${netCashFlow >= 0 ? 'text-green-700' : 'text-red-600'}`}>
-                ${Math.round(netCashFlow).toLocaleString()}
+                {Math.round(netCashFlow).toLocaleString()}
               </p>
               <p className="text-xs text-gray-600 mt-1">Receipts - Payments</p>
             </div>
             
             {/* Total Orders */}
-            <div className="text-center p-4 border-2 border-yellow-300 bg-yellow-50 rounded-lg">
+            <div 
+              className="text-center p-4 border-2 border-yellow-300 bg-yellow-50 rounded-lg cursor-pointer hover:bg-yellow-100 hover:border-yellow-400 transition-colors"
+              onClick={() => openReportModal('transactions', 'Total Transactions Report')}
+            >
               <div className="flex justify-center mb-2">
                 <div className="p-3 bg-yellow-500 rounded-full">
                   <ShoppingCart className="h-6 w-6 text-white" />
@@ -588,8 +978,8 @@ export const Dashboard = () => {
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-7">
         <StatCard
           title="Today's Revenue"
-          value={`$${summary.totalRevenue?.toFixed(2) || '0.00'}`}
-          icon={DollarSign}
+          value={`${summary.totalRevenue?.toFixed(2) || '0.00'}`}
+          icon={TrendingUp}
           color="bg-success-500"
           change="12%"
           changeType="positive"
@@ -624,7 +1014,7 @@ export const Dashboard = () => {
         />
         <StatCard
           title="Average Order Value"
-          value={`$${summary.averageOrderValue?.toFixed(2) || '0.00'}`}
+          value={`${summary.averageOrderValue?.toFixed(2) || '0.00'}`}
           icon={BarChart3}
           color="bg-indigo-500"
         />
@@ -646,7 +1036,7 @@ export const Dashboard = () => {
               data: res.data?.data?.totalRevenue || 0
             })),
             format: 'currency',
-            icon: DollarSign,
+            icon: TrendingUp,
             iconColor: 'bg-green-500'
           },
           {
@@ -786,6 +1176,19 @@ export const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* Dashboard Report Modal */}
+      <DashboardReportModal
+        isOpen={reportModal.isOpen}
+        onClose={closeReportModal}
+        title={reportModal.title}
+        columns={reportData.columns}
+        data={reportData.data}
+        isLoading={reportData.isLoading}
+        dateFrom={reportModal.dateFrom}
+        dateTo={reportModal.dateTo}
+        onDateChange={handleReportDateChange}
+      />
     </div>
   );
 };

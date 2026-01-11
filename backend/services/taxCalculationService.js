@@ -33,11 +33,17 @@ class TaxCalculationService {
   /**
    * Calculate sales tax from actual sales
    * @param {Object} period - Period object with startDate and endDate
+   * @param {string} tenantId - Tenant ID
    * @returns {Object} - Sales tax data
    */
-  async calculateSalesTax(period) {
+  async calculateSalesTax(period, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate sales tax');
+    }
+    
     // Get sales tax from sales orders
     const salesOrders = await SalesRepository.findAll({
+      tenantId: tenantId,
       createdAt: { $gte: period.startDate, $lte: period.endDate },
       status: { $in: ['completed', 'delivered', 'shipped', 'confirmed'] }
     }, {
@@ -73,6 +79,7 @@ class TaxCalculationService {
 
     // Also check for sales tax payable account transactions
     const salesTaxPayableAccount = await ChartOfAccountsRepository.findOne({
+      tenantId: tenantId,
       accountCode: '2120',
       accountName: { $regex: /sales.*tax.*payable/i },
       isActive: true
@@ -81,6 +88,7 @@ class TaxCalculationService {
     let salesTaxFromTransactions = 0;
     if (salesTaxPayableAccount) {
       const salesTaxTransactions = await TransactionRepository.findAll({
+        tenantId: tenantId,
         accountCode: salesTaxPayableAccount.accountCode,
         createdAt: { $gte: period.startDate, $lte: period.endDate },
         status: 'completed',
@@ -179,10 +187,14 @@ class TaxCalculationService {
    * Calculate all taxes for P&L statement
    * @param {Object} period - Period object with startDate and endDate
    * @param {number} earningsBeforeTax - Earnings before tax
+   * @param {string} tenantId - Tenant ID
    * @returns {Object} - Complete tax data
    */
-  async calculateAllTaxes(period, earningsBeforeTax) {
-    const salesTaxData = await this.calculateSalesTax(period);
+  async calculateAllTaxes(period, earningsBeforeTax, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate all taxes');
+    }
+    const salesTaxData = await this.calculateSalesTax(period, tenantId);
     const incomeTaxData = this.calculateIncomeTax(earningsBeforeTax);
 
     return {

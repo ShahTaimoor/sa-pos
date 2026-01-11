@@ -1,6 +1,13 @@
 const mongoose = require('mongoose');
 
 const supplierSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
+  
   // Basic Information
   companyName: {
     type: String,
@@ -181,10 +188,11 @@ const supplierSchema = new mongoose.Schema({
 });
 
 // Indexes
-supplierSchema.index({ companyName: 1 });
-supplierSchema.index({ email: 1 });
-supplierSchema.index({ businessType: 1, status: 1 });
-supplierSchema.index({ status: 1 });
+// Compound indexes for multi-tenant performance
+supplierSchema.index({ tenantId: 1, companyName: 1 }, { unique: true });
+supplierSchema.index({ tenantId: 1, email: 1 });
+supplierSchema.index({ tenantId: 1, businessType: 1, status: 1 });
+supplierSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
 
 // Virtual for contact person full name
 supplierSchema.virtual('contactPerson.fullName').get(function() {

@@ -1,1799 +1,453 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   TrendingUp,
-  TrendingDown,
-  DollarSign,
   Calendar,
-  Download,
-  Plus,
-  Eye,
-  Edit,
-  Trash2,
-  FileText,
-  BarChart3,
-  PieChart,
-  RefreshCw,
-  Filter,
   Search,
-  AlertCircle,
-  CheckCircle,
-  Clock,
-  XCircle,
+  TrendingDown,
+  ArrowUpCircle,
+  ArrowDownCircle,
+  FileText,
+  Download,
+  BarChart3,
 } from 'lucide-react';
-import {
-  useGetStatementsQuery,
-  useGetStatementQuery,
-  useGenerateStatementMutation,
-  useDeleteStatementMutation,
-  useUpdateStatementMutation,
-  useUpdateStatementStatusMutation,
-  useExportStatementMutation,
-} from '../store/services/plStatementsApi';
-import { handleApiError, showSuccessToast, showErrorToast } from '../utils/errorHandler';
-import { LoadingSpinner, LoadingButton, LoadingCard, LoadingGrid, LoadingPage, LoadingInline } from '../components/LoadingSpinner';
-import AsyncErrorBoundary from '../components/AsyncErrorBoundary';
-import { useResponsive, ResponsiveContainer, ResponsiveGrid } from '../components/ResponsiveContainer';
-import PLStatementDetail from '../components/PLStatementDetail';
+import { useGetSummaryQuery } from '../store/services/plStatementsApi';
+import { handleApiError } from '../utils/errorHandler';
+import { LoadingSpinner } from '../components/LoadingSpinner';
+import { formatCurrency } from '../utils/formatters';
+import PLSummaryReportModal from '../components/PLSummaryReportModal';
 
-// P&L Statement Card Component
-const PLStatementCard = ({ statement, onView, onEdit, onDelete, onExport }) => {
-  const formatCurrency = (amount) => `$${amount?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`;
-  const formatDate = (date) => new Date(date).toLocaleDateString();
+// Helper function to get local date in YYYY-MM-DD format
+const getLocalDateString = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+// Helper function to format date for display
+const formatDate = (dateString) => {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-US', { 
+    year: 'numeric', 
+    month: 'short', 
+    day: 'numeric' 
+  });
+};
+
+export const PLStatements = () => {
+  // Get first day of current month and today
+  const today = new Date();
+  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'published': return <CheckCircle className="h-4 w-4 text-green-500" />;
-      case 'approved': return <CheckCircle className="h-4 w-4 text-blue-500" />;
-      case 'review': return <Clock className="h-4 w-4 text-yellow-500" />;
-      case 'draft': return <Edit className="h-4 w-4 text-gray-500" />;
-      default: return <AlertCircle className="h-4 w-4 text-red-500" />;
+  const [fromDate, setFromDate] = useState(getLocalDateString(firstDayOfMonth));
+  const [toDate, setToDate] = useState(getLocalDateString(today));
+  const [searchFromDate, setSearchFromDate] = useState(getLocalDateString(firstDayOfMonth));
+  const [searchToDate, setSearchToDate] = useState(getLocalDateString(today));
+  const [showData, setShowData] = useState(false);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+
+  // Fetch P&L summary when search is clicked
+  const { data: summaryData, isLoading, error, refetch } = useGetSummaryQuery(
+    {
+      startDate: searchFromDate,
+      endDate: searchToDate,
+    },
+    {
+      skip: !showData, // Only fetch when showData is true
+      onError: (error) => handleApiError(error, 'Profit & Loss Statement'),
     }
+  );
+
+  const handleSearch = () => {
+    if (!fromDate || !toDate) {
+      alert('Please select both From Date and To Date');
+      return;
+    }
+    
+    if (new Date(fromDate) > new Date(toDate)) {
+      alert('From Date cannot be after To Date');
+      return;
+    }
+    
+    setSearchFromDate(fromDate);
+    setSearchToDate(toDate);
+    setShowData(true);
+    refetch();
   };
 
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'published': return 'text-green-600 bg-green-50 border-green-200';
-      case 'approved': return 'text-blue-600 bg-blue-50 border-blue-200';
-      case 'review': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-      case 'draft': return 'text-gray-600 bg-gray-50 border-gray-200';
-      default: return 'text-red-600 bg-red-50 border-red-200';
-    }
-  };
-
-  const netIncome = statement.netIncome?.amount || 0;
-  const isPositive = netIncome >= 0;
+  // Extract summary data - handle different response structures
+  const summary = summaryData?.data || summaryData;
+  
+  // Extract values from summary - handle both direct values and nested structure
+  // The backend might return a full statement object or just summary values
+  const totalRevenue = summary?.revenue?.totalRevenue?.amount || 
+                      summary?.statement?.revenue?.totalRevenue?.amount ||
+                      summary?.totalRevenue || 0;
+  const grossProfit = summary?.grossProfit?.amount || 
+                     summary?.statement?.grossProfit?.amount ||
+                     summary?.grossProfit || 0;
+  const operatingIncome = summary?.operatingIncome?.amount || 
+                         summary?.statement?.operatingIncome?.amount ||
+                         summary?.operatingIncome || 0;
+  const netIncome = summary?.netIncome?.amount || 
+                   summary?.statement?.netIncome?.amount ||
+                   summary?.netIncome || 0;
+  const grossMargin = summary?.grossProfit?.margin || 
+                     summary?.statement?.grossProfit?.margin ||
+                     summary?.grossMargin;
+  const operatingMargin = summary?.operatingIncome?.margin || 
+                         summary?.statement?.operatingIncome?.margin ||
+                         summary?.operatingMargin;
+  const netMargin = summary?.netIncome?.margin || 
+                   summary?.statement?.netIncome?.margin ||
+                   summary?.netMargin;
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-      <div className="p-6">
-        {/* Header */}
-        <div className="flex items-start justify-between mb-4">
+    <div className="space-y-6 p-6">
+      {/* Header */}
+      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <div className="flex items-center justify-between mb-6">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">
-              P&L Statement
-            </h3>
-            <p className="text-sm text-gray-600">
-              {formatDate(statement.period?.startDate)} - {formatDate(statement.period?.endDate)}
-            </p>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+              <FileText className="h-7 w-7 mr-3 text-primary-600" />
+              Profit & Loss Statement
+            </h1>
+            <p className="text-gray-600 mt-1">View your business financial performance</p>
           </div>
-          <div className={`flex items-center px-2 py-1 rounded-full text-xs font-medium border ${getStatusColor(statement.status)}`}>
-            {getStatusIcon(statement.status)}
-            <span className="ml-1 capitalize">{statement.status}</span>
-          </div>
-        </div>
-
-        {/* Key Metrics */}
-        <div className="grid grid-cols-2 gap-4 mb-4">
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide">Total Revenue</p>
-            <p className="text-lg font-semibold text-gray-900">
-              {formatCurrency(statement.revenue?.totalRevenue?.amount)}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs text-gray-500 uppercase tracking-wide">Net Income</p>
-            <div className="flex items-center">
-              {isPositive ? (
-                <TrendingUp className="h-4 w-4 text-green-500 mr-1" />
-              ) : (
-                <TrendingDown className="h-4 w-4 text-red-500 mr-1" />
-              )}
-              <p className={`text-lg font-semibold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                {formatCurrency(Math.abs(netIncome))}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Margins */}
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          <div className="text-center">
-            <p className="text-xs text-gray-500">Gross Margin</p>
-            <p className="text-sm font-medium text-gray-900">
-              {statement.grossProfit?.margin?.toFixed(1) || '0.0'}%
-            </p>
-          </div>
-          <div className="text-center">
-            <p className="text-xs text-gray-500">Operating Margin</p>
-            <p className="text-sm font-medium text-gray-900">
-              {statement.operatingIncome?.margin?.toFixed(1) || '0.0'}%
-            </p>
-          </div>
-          <div className="text-center">
-            <p className="text-xs text-gray-500">Net Margin</p>
-            <p className="text-sm font-medium text-gray-900">
-              {statement.netIncome?.margin?.toFixed(1) || '0.0'}%
-            </p>
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-          <div className="flex space-x-2">
+          {showData && summary && (
             <button
-              onClick={() => onView(statement)}
-              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="View Details"
+              onClick={() => setShowSummaryModal(true)}
+              className="btn btn-primary flex items-center space-x-2 px-4 py-2"
             >
-              <Eye className="h-4 w-4" />
-            </button>
-            {statement.status === 'draft' && (
-              <button
-                onClick={() => onEdit(statement)}
-                className="p-2 text-gray-400 hover:text-yellow-600 hover:bg-yellow-50 rounded-lg transition-colors"
-                title="Edit Statement"
-              >
-                <Edit className="h-4 w-4" />
-              </button>
-            )}
-            <button
-              onClick={() => onExport(statement)}
-              className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-              title="Export Statement"
-            >
-              <Download className="h-4 w-4" />
-            </button>
-          </div>
-          
-          {statement.status === 'draft' && (
-            <button
-              onClick={() => onDelete(statement)}
-              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-              title="Delete Statement"
-            >
-              <Trash2 className="h-4 w-4" />
+              <BarChart3 className="h-5 w-5" />
+              <span>View Summary Report</span>
             </button>
           )}
         </div>
-      </div>
-    </div>
-  );
-};
 
-// P&L Statement Generation Modal
-const GenerateStatementModal = ({ isOpen, onClose, onGenerate }) => {
-  const [formData, setFormData] = useState({
-    startDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-    endDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().split('T')[0],
-    periodType: 'monthly',
-    includeDetails: true,
-    calculateComparisons: true,
-    companyInfo: {
-      name: '',
-      address: '',
-      taxId: '',
-    },
-  });
+        {/* Date Range Selector */}
+        <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+          <div className="flex flex-col md:flex-row items-start md:items-center gap-4">
+            <div className="flex items-center space-x-3 flex-1">
+              <Calendar className="h-5 w-5 text-gray-500" />
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  From Date
+                </label>
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+            </div>
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    
-    // Validate dates
-    if (!formData.startDate || !formData.endDate) {
-      showErrorToast('Please select both start and end dates');
-      return;
-    }
-    
-    // Allow same date for start and end (single day statement)
-    // Only prevent start date from being after end date, but allow equal dates
-    if (new Date(formData.startDate) > new Date(formData.endDate)) {
-      showErrorToast('Start date cannot be after end date');
-      return;
-    }
-    
-    // If start and end dates are the same, add one day to end date for API compatibility
-    let adjustedFormData = { ...formData };
-    if (formData.startDate === formData.endDate) {
-      const endDate = new Date(formData.endDate);
-      endDate.setDate(endDate.getDate() + 1); // Add one day
-      adjustedFormData.endDate = endDate.toISOString().split('T')[0];
-    }
-    
-    onGenerate(adjustedFormData);
-  };
+            <div className="flex items-center space-x-3 flex-1">
+              <Calendar className="h-5 w-5 text-gray-500" />
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  To Date
+                </label>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+            </div>
 
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-gray-900">Generate P&L Statement</h2>
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <XCircle className="h-6 w-6" />
-            </button>
+            <div className="flex items-end">
+              <button
+                onClick={handleSearch}
+                disabled={isLoading}
+                className="btn btn-primary flex items-center space-x-2 px-6 py-2.5 h-fit disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Search className="h-5 w-5" />
+                <span>{isLoading ? 'Loading...' : 'Search'}</span>
+              </button>
+            </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Period Selection */}
-            <div className="mb-2">
+          {showData && (
+            <div className="mt-4 pt-4 border-t border-gray-200">
               <p className="text-sm text-gray-600">
-                <strong>Note:</strong> You can select the same date for both start and end to generate a single-day statement.
+                Showing data from <strong>{formatDate(searchFromDate)}</strong> to <strong>{formatDate(searchToDate)}</strong>
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Start Date
-                </label>
-                <input
-                  type="date"
-                  value={formData.startDate}
-                  onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                  className="input"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  End Date
-                </label>
-                <input
-                  type="date"
-                  value={formData.endDate}
-                  onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                  className="input"
-                  required
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Period Type
-              </label>
-              <select
-                value={formData.periodType}
-                onChange={(e) => setFormData({ ...formData, periodType: e.target.value })}
-                className="input"
-              >
-                <option value="monthly">Monthly</option>
-                <option value="quarterly">Quarterly</option>
-                <option value="yearly">Yearly</option>
-                <option value="custom">Custom</option>
-              </select>
-            </div>
-
-            {/* Company Information */}
-            <div className="border-t pt-6">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Company Information</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Company Name
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.companyInfo.name}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      companyInfo: { ...formData.companyInfo, name: e.target.value }
-                    })}
-                    className="input"
-                    placeholder="Enter company name"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Address
-                  </label>
-                  <textarea
-                    value={formData.companyInfo.address}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      companyInfo: { ...formData.companyInfo, address: e.target.value }
-                    })}
-                    className="input"
-                    rows="3"
-                    placeholder="Enter company address"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Tax ID
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.companyInfo.taxId}
-                    onChange={(e) => setFormData({
-                      ...formData,
-                      companyInfo: { ...formData.companyInfo, taxId: e.target.value }
-                    })}
-                    className="input"
-                    placeholder="Enter tax ID"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Options */}
-            <div className="border-t pt-6">
-              <h3 className="text-lg font-medium text-gray-900 mb-4">Options</h3>
-              <div className="space-y-4">
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={formData.includeDetails}
-                    onChange={(e) => setFormData({ ...formData, includeDetails: e.target.checked })}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="ml-2 text-sm text-gray-700">Include detailed breakdowns</span>
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={formData.calculateComparisons}
-                    onChange={(e) => setFormData({ ...formData, calculateComparisons: e.target.checked })}
-                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                  />
-                  <span className="ml-2 text-sm text-gray-700">Calculate period comparisons</span>
-                </label>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex justify-end space-x-3 pt-6 border-t">
-              <button
-                type="button"
-                onClick={onClose}
-                className="btn btn-secondary"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-              >
-                Generate Statement
-              </button>
-            </div>
-          </form>
+          )}
         </div>
       </div>
-    </div>
-  );
-};
 
-// P&L Statement Edit Modal
-const EditStatementModal = ({ isOpen, onClose, onUpdate, statement }) => {
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    status: 'draft',
-    tags: [],
-    notes: '',
-  });
-
-  // Initialize form data when statement changes
-  React.useEffect(() => {
-    if (statement) {
-      setFormData({
-        title: statement.title || '',
-        description: statement.description || '',
-        status: statement.status || 'draft',
-        tags: statement.tags || [],
-        notes: statement.notes || '',
-      });
-    }
-  }, [statement]);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onUpdate(formData);
-  };
-
-  const handleInputChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">Edit P&L Statement</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <XCircle className="h-6 w-6" />
-          </button>
+      {/* Loading State */}
+      {isLoading && showData && (
+        <div className="flex justify-center items-center py-12">
+          <LoadingSpinner />
+          <p className="ml-3 text-gray-600">Loading Profit & Loss data...</p>
         </div>
-        
-        <div className="p-6">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Title */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Statement Title
-              </label>
-              <input
-                type="text"
-                value={formData.title}
-                onChange={(e) => handleInputChange('title', e.target.value)}
-                className="input w-full"
-                placeholder="Enter statement title"
-                required
-              />
+      )}
+
+      {/* Error State */}
+      {error && showData && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
             </div>
-
-            {/* Description */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Description
-              </label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => handleInputChange('description', e.target.value)}
-                className="input w-full h-24"
-                placeholder="Enter statement description"
-                rows={3}
-              />
-            </div>
-
-            {/* Status */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Status
-              </label>
-              <select
-                value={formData.status}
-                onChange={(e) => handleInputChange('status', e.target.value)}
-                className="input w-full"
-              >
-                <option value="draft">Draft</option>
-                <option value="review">Under Review</option>
-                <option value="approved">Approved</option>
-                <option value="published">Published</option>
-              </select>
-            </div>
-
-            {/* Notes */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Notes
-              </label>
-              <textarea
-                value={formData.notes}
-                onChange={(e) => handleInputChange('notes', e.target.value)}
-                className="input w-full h-32"
-                placeholder="Add any additional notes or comments"
-                rows={4}
-              />
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-              <button
-                type="button"
-                onClick={onClose}
-                className="btn btn-secondary"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-              >
-                <Edit className="h-4 w-4 mr-2" />
-                Update Statement
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// P&L Statement Export Modal
-const ExportStatementModal = ({ isOpen, onClose, onExport, statement }) => {
-  const [exportOptions, setExportOptions] = useState({
-    format: 'pdf',
-    includeDetails: true,
-    includeCharts: false,
-    includeNotes: true,
-  });
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onExport(exportOptions.format, exportOptions.includeDetails);
-  };
-
-  const handleOptionChange = (option, value) => {
-    setExportOptions(prev => ({
-      ...prev,
-      [option]: value
-    }));
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
-        <div className="flex justify-between items-center p-6 border-b border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900">Export P&L Statement</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-          >
-            <XCircle className="h-6 w-6" />
-          </button>
-        </div>
-        
-        <div className="p-6">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Export Format */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                Export Format
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="flex items-center p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                  <input
-                    type="radio"
-                    name="format"
-                    value="pdf"
-                    checked={exportOptions.format === 'pdf'}
-                    onChange={(e) => handleOptionChange('format', e.target.value)}
-                    className="mr-3"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">PDF</div>
-                    <div className="text-sm text-gray-500">Print-ready format</div>
-                  </div>
-                </label>
-                
-                <label className="flex items-center p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                  <input
-                    type="radio"
-                    name="format"
-                    value="excel"
-                    checked={exportOptions.format === 'excel'}
-                    onChange={(e) => handleOptionChange('format', e.target.value)}
-                    className="mr-3"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">Excel</div>
-                    <div className="text-sm text-gray-500">Spreadsheet format</div>
-                  </div>
-                </label>
-                
-                <label className="flex items-center p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                  <input
-                    type="radio"
-                    name="format"
-                    value="csv"
-                    checked={exportOptions.format === 'csv'}
-                    onChange={(e) => handleOptionChange('format', e.target.value)}
-                    className="mr-3"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">CSV</div>
-                    <div className="text-sm text-gray-500">Comma-separated values</div>
-                  </div>
-                </label>
-                
-                <label className="flex items-center p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
-                  <input
-                    type="radio"
-                    name="format"
-                    value="json"
-                    checked={exportOptions.format === 'json'}
-                    onChange={(e) => handleOptionChange('format', e.target.value)}
-                    className="mr-3"
-                  />
-                  <div>
-                    <div className="font-medium text-gray-900">JSON</div>
-                    <div className="text-sm text-gray-500">Data format</div>
-                  </div>
-                </label>
+            <div className="ml-3 flex-1">
+              <h3 className="text-sm font-medium text-red-800">Error loading Profit & Loss data</h3>
+              <div className="mt-2 text-sm text-red-700">
+                <p>{error?.data?.message || error?.message || 'An unexpected error occurred. Please try again.'}</p>
+                {process.env.NODE_ENV === 'development' && error && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs">Technical details</summary>
+                    <pre className="mt-2 text-xs bg-red-100 p-2 rounded overflow-auto">
+                      {JSON.stringify(error, null, 2)}
+                    </pre>
+                  </details>
+                )}
               </div>
-            </div>
-
-            {/* Export Options */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                Export Options
-              </label>
-              <div className="space-y-3">
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={exportOptions.includeDetails}
-                    onChange={(e) => handleOptionChange('includeDetails', e.target.checked)}
-                    className="mr-3"
-                  />
-                  <span className="text-sm text-gray-700">Include detailed breakdown</span>
-                </label>
-                
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={exportOptions.includeCharts}
-                    onChange={(e) => handleOptionChange('includeCharts', e.target.checked)}
-                    className="mr-3"
-                  />
-                  <span className="text-sm text-gray-700">Include charts and graphs</span>
-                </label>
-                
-                <label className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={exportOptions.includeNotes}
-                    onChange={(e) => handleOptionChange('includeNotes', e.target.checked)}
-                    className="mr-3"
-                  />
-                  <span className="text-sm text-gray-700">Include notes and comments</span>
-                </label>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200">
-              <button
-                type="button"
-                onClick={onClose}
-                className="btn btn-secondary"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="btn btn-primary"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export Statement
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Main P&L Statements Page
-export const PLStatements = () => {
-  const [filters, setFilters] = useState({
-    page: 1,
-    limit: 12,
-    periodType: '',
-    status: '',
-    startDate: '',
-    endDate: '',
-  });
-  const [showGenerateModal, setShowGenerateModal] = useState(false);
-  const [selectedStatement, setSelectedStatement] = useState(null);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
-  const { isMobile, isTablet } = useResponsive();
-
-  // Fetch P&L statements
-  const { data: statementsData, isLoading, error, refetch } = useGetStatementsQuery(filters, {
-    onError: (error) => handleApiError(error, 'P&L Statements'),
-  });
-
-  // Get selected statement details
-  const { data: selectedStatementData } = useGetStatementQuery(selectedStatement?._id, {
-    skip: !selectedStatement?._id,
-  });
-
-  // Mutations
-  const [generateStatement] = useGenerateStatementMutation();
-  const [deleteStatement] = useDeleteStatementMutation();
-  const [exportStatement] = useExportStatementMutation();
-  const [updateStatement] = useUpdateStatementMutation();
-  const [updateStatementStatus] = useUpdateStatementStatusMutation();
-
-  React.useEffect(() => {
-    if (selectedStatementData?.data) {
-      setSelectedStatement(selectedStatementData.data);
-    }
-  }, [selectedStatementData]);
-
-  const handleGenerateStatement = async (formData) => {
-    try {
-      await generateStatement(formData).unwrap();
-      showSuccessToast('P&L statement generated successfully!');
-      setShowGenerateModal(false);
-      refetch();
-    } catch (error) {
-      if (error?.data?.message) {
-        showErrorToast(error.data.message);
-      } else if (error?.message?.includes('input')) {
-        showErrorToast('Please check your input and try again. Make sure dates are valid.');
-      } else {
-        handleApiError(error, 'P&L Statement Generation');
-      }
-    }
-  };
-
-  const handleViewStatement = (statement) => {
-    setSelectedStatement(statement);
-  };
-
-  const handleEditStatement = (statement) => {
-    setSelectedStatement(statement);
-    setShowEditModal(true);
-  };
-
-  const handleDeleteStatement = async (statement) => {
-    if (window.confirm('Are you sure you want to delete this P&L statement?')) {
-      try {
-        await deleteStatement(statement._id).unwrap();
-        showSuccessToast('P&L statement deleted successfully!');
-        refetch();
-      } catch (error) {
-        handleApiError(error, 'P&L Statement Deletion');
-      }
-    }
-  };
-
-  const handleExportStatement = (statement) => {
-    setSelectedStatement(statement);
-    setShowExportModal(true);
-  };
-
-  const handleUpdateStatement = async (formData) => {
-    try {
-      await updateStatement({ id: selectedStatement._id, ...formData }).unwrap();
-      showSuccessToast('P&L statement updated successfully!');
-      setShowEditModal(false);
-      setSelectedStatement(null);
-      refetch();
-    } catch (error) {
-      handleApiError(error, 'P&L Statement Update');
-    }
-  };
-
-  const handleExportDownload = (format, includeDetails = true) => {
-    if (!selectedStatement) return;
-
-    // Create export data based on statement
-    const exportData = {
-      statement: selectedStatement,
-      format: format,
-      includeDetails: includeDetails,
-      timestamp: new Date().toISOString()
-    };
-
-    // Generate filename
-    const dateRange = `${selectedStatement.startDate || 'start'}_${selectedStatement.endDate || 'end'}`;
-    const filename = `P&L_Statement_${dateRange}_${new Date().toISOString().split('T')[0]}`;
-
-    if (format === 'pdf') {
-      // For PDF, we'll create a simple HTML representation and use browser print
-      generatePDFExport(selectedStatement, filename);
-    } else if (format === 'excel' || format === 'csv') {
-      // For Excel/CSV, create downloadable file
-      generateExcelExport(selectedStatement, filename, format);
-    } else if (format === 'json') {
-      // For JSON, create downloadable JSON file
-      generateJSONExport(selectedStatement, filename);
-    }
-
-    setShowExportModal(false);
-    setSelectedStatement(null);
-    showSuccessToast(`P&L statement exported as ${format.toUpperCase()} successfully!`);
-  };
-
-  const generatePDFExport = (statement, filename) => {
-    // Create a new window with formatted content for printing
-    const printWindow = window.open('', '_blank');
-    
-    // Calculate detailed P&L components using correct statement structure
-    const totalRevenue = statement.revenue?.totalRevenue?.amount || 0;
-    
-    // Calculate Cost of Goods Sold from detailed components with fallbacks
-    let beginningInventory = statement.costOfGoodsSold?.beginningInventory || 
-                               statement.beginningInventory || 
-                               statement.inventory?.beginning || 0;
-    
-    let purchases = statement.costOfGoodsSold?.purchases?.amount || 
-                     statement.costOfGoodsSold?.purchases || 
-                     statement.purchases?.amount || 
-                     statement.purchases || 
-                     statement.purchaseData?.total || 0;
-    
-    let freightIn = statement.costOfGoodsSold?.freightIn || 
-                     statement.freightIn || 
-                     statement.shipping?.freight || 0;
-    
-    let purchaseReturns = statement.costOfGoodsSold?.purchaseReturns || 
-                           statement.purchaseReturns || 
-                           statement.returns?.purchases || 0;
-    
-    let purchaseDiscounts = statement.costOfGoodsSold?.purchaseDiscounts || 
-                              statement.purchaseDiscounts || 
-                              statement.discounts?.purchases || 0;
-    
-    let endingInventory = statement.costOfGoodsSold?.endingInventory || 
-                           statement.endingInventory || 
-                           statement.inventory?.ending || 0;
-    
-    // COGS = Beginning Inventory + Purchases + Freight In - Purchase Returns - Purchase Discounts - Ending Inventory
-    let costOfGoodsSold = beginningInventory + purchases + freightIn - purchaseReturns - purchaseDiscounts - endingInventory;
-    
-    // If COGS is still 0, try to get it from the statement's total COGS field
-    if (costOfGoodsSold === 0) {
-      costOfGoodsSold = statement.costOfGoodsSold?.amount || 
-                       statement.costOfGoodsSold || 
-                       statement.totalCostOfGoodsSold || 0;
-    }
-    
-    // If still 0, try to calculate from revenue and gross profit
-    if (costOfGoodsSold === 0 && totalRevenue > 0) {
-      const grossProfitAmount = statement.grossProfit?.amount || 0;
-      costOfGoodsSold = totalRevenue - grossProfitAmount;
-    }
-    
-    const grossProfit = statement.grossProfit?.amount || (totalRevenue - costOfGoodsSold);
-    const operatingExpenses = statement.operatingExpenses?.amount || 0;
-    const operatingIncome = statement.operatingIncome?.amount || (grossProfit - operatingExpenses);
-    const otherIncome = statement.otherIncome?.amount || 0;
-    const otherExpenses = statement.otherExpenses?.amount || 0;
-    const netIncome = statement.netIncome?.amount || (operatingIncome + otherIncome - otherExpenses);
-    
-    // Use pre-calculated margins from statement structure
-    const grossMargin = statement.grossProfit?.margin || (totalRevenue > 0 ? (grossProfit / totalRevenue * 100) : 0);
-    const operatingMargin = statement.operatingIncome?.margin || (totalRevenue > 0 ? (operatingIncome / totalRevenue * 100) : 0);
-    const netMargin = statement.netIncome?.margin || (totalRevenue > 0 ? (netIncome / totalRevenue * 100) : 0);
-    
-    // Helper function to calculate percentage safely
-    const calculatePercentage = (value, total) => {
-      if (total === 0 || isNaN(total) || isNaN(value)) return '0.0';
-      return ((value / total) * 100).toFixed(1);
-    };
-    
-    // Helper function to format currency safely
-    const formatCurrency = (value) => {
-      if (isNaN(value) || value === null || value === undefined) return '$0';
-      return `$${Number(value).toLocaleString()}`;
-    };
-    
-    // Helper function to format date range
-    const formatDateRange = (startDate, endDate) => {
-      // Use the correct statement structure for dates
-      const actualStartDate = statement.period?.startDate || startDate;
-      const actualEndDate = statement.period?.endDate || endDate;
-      
-      if (!actualStartDate || !actualEndDate) {
-        return 'N/A - N/A';
-      }
-      return formatDate(actualStartDate) + ' - ' + formatDate(actualEndDate);
-    };
-    
-    // Helper function to format individual dates
-    const formatDate = (dateString) => {
-      if (!dateString) return 'N/A';
-      
-      try {
-        const date = new Date(dateString);
-        if (isNaN(date.getTime())) return 'N/A';
-        
-        // Format as DD/MM/YYYY to match system display
-        return date.toLocaleDateString('en-GB', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric'
-        });
-      } catch (error) {
-        return 'N/A';
-      }
-    };
-    
-    const content = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Detailed P&L Statement - ${filename}</title>
-        <style>
-          body { 
-            font-family: Arial, sans-serif; 
-            margin: 20px; 
-            line-height: 1.6;
-            color: #1f2937;
-          }
-          .header { 
-            text-align: center; 
-            margin-bottom: 40px; 
-            border-bottom: 2px solid #e5e7eb;
-            padding-bottom: 20px;
-          }
-          .statement-title { 
-            font-size: 28px; 
-            font-weight: bold; 
-            color: #1f2937; 
-            margin-bottom: 10px;
-          }
-          .statement-period { 
-            font-size: 18px; 
-            color: #6b7280; 
-            margin-bottom: 5px;
-          }
-          .company-info {
-            font-size: 14px;
-            color: #6b7280;
-            margin-top: 10px;
-          }
-          .pl-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 30px 0;
-            font-size: 14px;
-          }
-          .pl-table th {
-            background-color: #f9fafb;
-            padding: 12px 15px;
-            text-align: left;
-            font-weight: bold;
-            border: 1px solid #e5e7eb;
-            color: #374151;
-          }
-          .pl-table td {
-            padding: 10px 15px;
-            border: 1px solid #e5e7eb;
-          }
-          .pl-table .section-header {
-            background-color: #f3f4f6;
-            font-weight: bold;
-            color: #1f2937;
-          }
-          .pl-table .subsection-header {
-            background-color: #f9fafb;
-            font-weight: 600;
-            color: #374151;
-            padding-left: 30px;
-          }
-          .pl-table .line-item {
-            padding-left: 45px;
-            color: #6b7280;
-          }
-          .pl-table .total-line {
-            font-weight: bold;
-            background-color: #f0f9ff;
-            color: #1e40af;
-          }
-          .pl-table .net-income {
-            font-weight: bold;
-            background-color: #f0fdf4;
-            color: #166534;
-            font-size: 16px;
-          }
-          .pl-table .negative-net {
-            background-color: #fef2f2;
-            color: #dc2626;
-          }
-          .amount {
-            text-align: right;
-            font-family: 'Courier New', monospace;
-          }
-          .positive { color: #059669; }
-          .negative { color: #dc2626; }
-          .footer { 
-            margin-top: 40px; 
-            text-align: center; 
-            color: #6b7280; 
-            font-size: 12px;
-            border-top: 1px solid #e5e7eb;
-            padding-top: 20px;
-          }
-          .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 20px;
-            margin: 20px 0;
-          }
-          .summary-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 15px;
-            text-align: center;
-          }
-          .summary-label {
-            font-size: 12px;
-            color: #6b7280;
-            margin-bottom: 5px;
-          }
-          .summary-value {
-            font-size: 18px;
-            font-weight: bold;
-            color: #1f2937;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="statement-title">PROFIT & LOSS STATEMENT</div>
-          <div class="statement-period">For the period: ${formatDateRange(statement.startDate, statement.endDate)}</div>
-          <div class="company-info">
-            Generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}
-          </div>
-        </div>
-        
-        <table class="pl-table">
-          <thead>
-            <tr>
-              <th style="width: 60%;">Description</th>
-              <th style="width: 20%; text-align: right;">Amount</th>
-              <th style="width: 20%; text-align: right;">% of Revenue</th>
-            </tr>
-          </thead>
-          <tbody>
-            <!-- REVENUE SECTION -->
-            <tr class="section-header">
-              <td colspan="3">REVENUE</td>
-            </tr>
-            <tr class="subsection-header">
-              <td>Sales Revenue</td>
-              <td class="amount">${formatCurrency(totalRevenue)}</td>
-              <td class="amount">100.0%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Product Sales</td>
-              <td class="amount">${formatCurrency(statement.productSales || totalRevenue)}</td>
-              <td class="amount">${calculatePercentage(statement.productSales || totalRevenue, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Service Revenue</td>
-              <td class="amount">${formatCurrency(statement.serviceRevenue || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.serviceRevenue || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Other Revenue</td>
-              <td class="amount">${formatCurrency(statement.otherRevenue || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.otherRevenue || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="total-line">
-              <td><strong>TOTAL REVENUE</strong></td>
-              <td class="amount"><strong>${formatCurrency(totalRevenue)}</strong></td>
-              <td class="amount"><strong>100.0%</strong></td>
-            </tr>
-            
-              <!-- COST OF GOODS SOLD -->
-              <tr class="section-header">
-                <td colspan="3">COST OF GOODS SOLD</td>
-              </tr>
-              <tr class="line-item">
-                <td>Beginning Inventory</td>
-                <td class="amount">${formatCurrency(beginningInventory)}</td>
-                <td class="amount">${calculatePercentage(beginningInventory, totalRevenue)}%</td>
-              </tr>
-              <tr class="line-item">
-                <td>Purchases</td>
-                <td class="amount">${formatCurrency(purchases)}</td>
-                <td class="amount">${calculatePercentage(purchases, totalRevenue)}%</td>
-              </tr>
-              <tr class="line-item">
-                <td>Freight In</td>
-                <td class="amount">${formatCurrency(freightIn)}</td>
-                <td class="amount">${calculatePercentage(freightIn, totalRevenue)}%</td>
-              </tr>
-              <tr class="line-item">
-                <td>Less: Purchase Returns</td>
-                <td class="amount">${formatCurrency(-purchaseReturns)}</td>
-                <td class="amount">${calculatePercentage(-purchaseReturns, totalRevenue)}%</td>
-              </tr>
-              <tr class="line-item">
-                <td>Less: Purchase Discounts</td>
-                <td class="amount">${formatCurrency(-purchaseDiscounts)}</td>
-                <td class="amount">${calculatePercentage(-purchaseDiscounts, totalRevenue)}%</td>
-              </tr>
-              <tr class="line-item">
-                <td>Less: Ending Inventory</td>
-                <td class="amount">${formatCurrency(-endingInventory)}</td>
-                <td class="amount">${calculatePercentage(-endingInventory, totalRevenue)}%</td>
-              </tr>
-              <tr class="total-line">
-                <td><strong>TOTAL COST OF GOODS SOLD</strong></td>
-                <td class="amount"><strong>${formatCurrency(costOfGoodsSold)}</strong></td>
-                <td class="amount"><strong>${calculatePercentage(costOfGoodsSold, totalRevenue)}%</strong></td>
-              </tr>
-            
-            <!-- GROSS PROFIT -->
-            <tr class="total-line">
-              <td><strong>GROSS PROFIT</strong></td>
-              <td class="amount"><strong>${formatCurrency(grossProfit)}</strong></td>
-              <td class="amount"><strong>${calculatePercentage(grossProfit, totalRevenue)}%</strong></td>
-            </tr>
-            
-            <!-- OPERATING EXPENSES -->
-            <tr class="section-header">
-              <td colspan="3">OPERATING EXPENSES</td>
-            </tr>
-            <tr class="subsection-header">
-              <td>Selling Expenses</td>
-              <td class="amount">${formatCurrency(statement.sellingExpenses || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.sellingExpenses || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Sales & Marketing</td>
-              <td class="amount">${formatCurrency(statement.salesMarketing || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.salesMarketing || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Advertising</td>
-              <td class="amount">${formatCurrency(statement.advertising || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.advertising || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="subsection-header">
-              <td>General & Administrative</td>
-              <td class="amount">${formatCurrency(statement.generalAdmin || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.generalAdmin || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Salaries & Wages</td>
-              <td class="amount">${formatCurrency(statement.salariesWages || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.salariesWages || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Rent & Utilities</td>
-              <td class="amount">${formatCurrency(statement.rentUtilities || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.rentUtilities || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Professional Services</td>
-              <td class="amount">${formatCurrency(statement.professionalServices || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.professionalServices || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Insurance</td>
-              <td class="amount">${formatCurrency(statement.insurance || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.insurance || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Depreciation</td>
-              <td class="amount">${formatCurrency(statement.depreciation || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.depreciation || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="total-line">
-              <td><strong>TOTAL OPERATING EXPENSES</strong></td>
-              <td class="amount"><strong>${formatCurrency(operatingExpenses)}</strong></td>
-              <td class="amount"><strong>${calculatePercentage(operatingExpenses, totalRevenue)}%</strong></td>
-            </tr>
-            
-            <!-- OPERATING INCOME -->
-            <tr class="total-line">
-              <td><strong>OPERATING INCOME</strong></td>
-              <td class="amount"><strong>${formatCurrency(operatingIncome)}</strong></td>
-              <td class="amount"><strong>${calculatePercentage(operatingIncome, totalRevenue)}%</strong></td>
-            </tr>
-            
-            <!-- OTHER INCOME/EXPENSES -->
-            <tr class="section-header">
-              <td colspan="3">OTHER INCOME & EXPENSES</td>
-            </tr>
-            <tr class="line-item">
-              <td>Interest Income</td>
-              <td class="amount">${formatCurrency(statement.otherIncome?.interestIncome || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.otherIncome?.interestIncome || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Rental Income</td>
-              <td class="amount">${formatCurrency(statement.otherIncome?.rentalIncome || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.otherIncome?.rentalIncome || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Other Income</td>
-              <td class="amount">${formatCurrency(statement.otherIncome?.other?.amount || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.otherIncome?.other?.amount || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Interest Expense</td>
-              <td class="amount">${formatCurrency(statement.otherExpenses?.interestExpense || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.otherExpenses?.interestExpense || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Depreciation</td>
-              <td class="amount">${formatCurrency(statement.otherExpenses?.depreciation || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.otherExpenses?.depreciation || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Amortization</td>
-              <td class="amount">${formatCurrency(statement.otherExpenses?.amortization || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.otherExpenses?.amortization || 0, totalRevenue)}%</td>
-            </tr>
-            <tr class="line-item">
-              <td>Other Expenses</td>
-              <td class="amount">${formatCurrency(statement.otherExpenses?.other?.amount || 0)}</td>
-              <td class="amount">${calculatePercentage(statement.otherExpenses?.other?.amount || 0, totalRevenue)}%</td>
-            </tr>
-            
-            <!-- SALES TAX -->
-            ${statement.salesTax && statement.salesTax.amount > 0 ? `
-            <tr class="section-header">
-              <td colspan="3">TAXES</td>
-            </tr>
-            <tr class="line-item">
-              <td>Sales Tax</td>
-              <td class="amount">${formatCurrency(statement.salesTax.amount)}</td>
-              <td class="amount">${calculatePercentage(statement.salesTax.amount, totalRevenue)}%</td>
-            </tr>
-            ` : ''}
-            
-            <!-- NET INCOME -->
-            <tr class="net-income ${netIncome >= 0 ? '' : 'negative-net'}">
-              <td><strong>NET INCOME</strong></td>
-              <td class="amount"><strong>${formatCurrency(netIncome)}</strong></td>
-              <td class="amount"><strong>${calculatePercentage(netIncome, totalRevenue)}%</strong></td>
-            </tr>
-          </tbody>
-        </table>
-        
-        <div class="summary-grid">
-          <div class="summary-card">
-            <div class="summary-label">Gross Margin</div>
-            <div class="summary-value">${grossMargin.toFixed(1)}%</div>
-          </div>
-          <div class="summary-card">
-            <div class="summary-label">Operating Margin</div>
-            <div class="summary-value">${operatingMargin.toFixed(1)}%</div>
-          </div>
-          <div class="summary-card">
-            <div class="summary-label">Net Margin</div>
-            <div class="summary-value">${netMargin.toFixed(1)}%</div>
-          </div>
-        </div>
-        
-        <div class="footer">
-          <p><strong>Note:</strong> This Profit & Loss Statement has been generated automatically from your business data.</p>
-          <p>For questions about this statement, please contact your accounting department.</p>
-        </div>
-      </body>
-      </html>
-    `;
-    
-    printWindow.document.write(content);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-  };
-
-  const generateExcelExport = (statement, filename, format) => {
-    // Calculate detailed P&L components using correct statement structure
-    const totalRevenue = statement.revenue?.totalRevenue?.amount || 0;
-    
-    // Calculate Cost of Goods Sold from detailed components
-    let beginningInventory = statement.costOfGoodsSold?.beginningInventory || 0;
-    let purchases = statement.costOfGoodsSold?.purchases?.amount || 0;
-    let freightIn = statement.costOfGoodsSold?.freightIn || 0;
-    let purchaseReturns = statement.costOfGoodsSold?.purchaseReturns || 0;
-    let purchaseDiscounts = statement.costOfGoodsSold?.purchaseDiscounts || 0;
-    let endingInventory = statement.costOfGoodsSold?.endingInventory || 0;
-    
-    // COGS = Beginning Inventory + Purchases + Freight In - Purchase Returns - Purchase Discounts - Ending Inventory
-    let costOfGoodsSold = beginningInventory + purchases + freightIn - purchaseReturns - purchaseDiscounts - endingInventory;
-    
-    // If COGS is still 0, try to get it from the statement's total COGS field
-    if (costOfGoodsSold === 0) {
-      costOfGoodsSold = statement.costOfGoodsSold?.amount || 
-                       statement.costOfGoodsSold || 
-                       statement.totalCostOfGoodsSold || 0;
-    }
-    
-    // If still 0, try to calculate from revenue and gross profit
-    if (costOfGoodsSold === 0 && totalRevenue > 0) {
-      const grossProfitAmount = statement.grossProfit?.amount || 0;
-      costOfGoodsSold = totalRevenue - grossProfitAmount;
-    }
-    
-    const grossProfit = statement.grossProfit?.amount || (totalRevenue - costOfGoodsSold);
-    const operatingExpenses = statement.operatingExpenses?.amount || 0;
-    const operatingIncome = statement.operatingIncome?.amount || (grossProfit - operatingExpenses);
-    const otherIncome = statement.otherIncome?.amount || 0;
-    const otherExpenses = statement.otherExpenses?.amount || 0;
-    const netIncome = statement.netIncome?.amount || (operatingIncome + otherIncome - otherExpenses);
-    
-    // Use pre-calculated margins from statement structure
-    const grossMargin = statement.grossProfit?.margin || (totalRevenue > 0 ? (grossProfit / totalRevenue * 100) : 0);
-    const operatingMargin = statement.operatingIncome?.margin || (totalRevenue > 0 ? (operatingIncome / totalRevenue * 100) : 0);
-    const netMargin = statement.netIncome?.margin || (totalRevenue > 0 ? (netIncome / totalRevenue * 100) : 0);
-    
-    // Helper function to calculate percentage safely
-    const calculatePercentage = (value, total) => {
-      if (total === 0 || isNaN(total) || isNaN(value)) return '0.0';
-      return ((value / total) * 100).toFixed(1);
-    };
-    
-    // Helper function to format currency safely
-    const formatCurrency = (value) => {
-      if (isNaN(value) || value === null || value === undefined) return '$0';
-      return `$${Number(value).toLocaleString()}`;
-    };
-    
-    // Helper function to format date range for CSV
-    const formatDateRange = (startDate, endDate) => {
-      // Use the correct statement structure for dates
-      const actualStartDate = statement.period?.startDate || startDate;
-      const actualEndDate = statement.period?.endDate || endDate;
-      
-      if (!actualStartDate || !actualEndDate) {
-        return 'N/A to N/A';
-      }
-      return formatDate(actualStartDate) + ' to ' + formatDate(actualEndDate);
-    };
-    
-    // Helper function to format individual dates
-    const formatDate = (dateString) => {
-      if (!dateString) return 'N/A';
-      
-      try {
-        const date = new Date(dateString);
-        if (isNaN(date.getTime())) return 'N/A';
-        
-        // Format as DD/MM/YYYY to match system display
-        return date.toLocaleDateString('en-GB', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric'
-        });
-      } catch (error) {
-        return 'N/A';
-      }
-    };
-    
-    // Create detailed CSV content
-    const csvContent = [
-      ['DETAILED PROFIT & LOSS STATEMENT'],
-      ['Generated:', new Date().toLocaleString()],
-      ['Period:', formatDateRange(statement.startDate, statement.endDate)],
-      [''],
-      ['Description', 'Amount', '% of Revenue'],
-      [''],
-      ['REVENUE', '', ''],
-      ['Sales Revenue', formatCurrency(totalRevenue), '100.0%'],
-      ['Product Sales', formatCurrency(statement.productSales || totalRevenue), `${calculatePercentage(statement.productSales || totalRevenue, totalRevenue)}%`],
-      ['Service Revenue', formatCurrency(statement.serviceRevenue || 0), `${calculatePercentage(statement.serviceRevenue || 0, totalRevenue)}%`],
-      ['Other Revenue', formatCurrency(statement.otherRevenue || 0), `${calculatePercentage(statement.otherRevenue || 0, totalRevenue)}%`],
-      ['TOTAL REVENUE', formatCurrency(totalRevenue), '100.0%'],
-      [''],
-      ['COST OF GOODS SOLD', '', ''],
-      ['Beginning Inventory', formatCurrency(beginningInventory), `${calculatePercentage(beginningInventory, totalRevenue)}%`],
-      ['Purchases', formatCurrency(purchases), `${calculatePercentage(purchases, totalRevenue)}%`],
-      ['Freight In', formatCurrency(freightIn), `${calculatePercentage(freightIn, totalRevenue)}%`],
-      ['Less: Purchase Returns', formatCurrency(-purchaseReturns), `${calculatePercentage(-purchaseReturns, totalRevenue)}%`],
-      ['Less: Purchase Discounts', formatCurrency(-purchaseDiscounts), `${calculatePercentage(-purchaseDiscounts, totalRevenue)}%`],
-      ['Less: Ending Inventory', formatCurrency(-endingInventory), `${calculatePercentage(-endingInventory, totalRevenue)}%`],
-      ['TOTAL COST OF GOODS SOLD', formatCurrency(costOfGoodsSold), `${calculatePercentage(costOfGoodsSold, totalRevenue)}%`],
-      [''],
-      ['GROSS PROFIT', formatCurrency(grossProfit), `${calculatePercentage(grossProfit, totalRevenue)}%`],
-      [''],
-      ['OPERATING EXPENSES', '', ''],
-      ['Selling Expenses', formatCurrency(statement.sellingExpenses || 0), `${calculatePercentage(statement.sellingExpenses || 0, totalRevenue)}%`],
-      ['Sales & Marketing', formatCurrency(statement.salesMarketing || 0), `${calculatePercentage(statement.salesMarketing || 0, totalRevenue)}%`],
-      ['Advertising', formatCurrency(statement.advertising || 0), `${calculatePercentage(statement.advertising || 0, totalRevenue)}%`],
-      ['General & Administrative', formatCurrency(statement.generalAdmin || 0), `${calculatePercentage(statement.generalAdmin || 0, totalRevenue)}%`],
-      ['Salaries & Wages', formatCurrency(statement.salariesWages || 0), `${calculatePercentage(statement.salariesWages || 0, totalRevenue)}%`],
-      ['Rent & Utilities', formatCurrency(statement.rentUtilities || 0), `${calculatePercentage(statement.rentUtilities || 0, totalRevenue)}%`],
-      ['Professional Services', formatCurrency(statement.professionalServices || 0), `${calculatePercentage(statement.professionalServices || 0, totalRevenue)}%`],
-      ['Insurance', formatCurrency(statement.insurance || 0), `${calculatePercentage(statement.insurance || 0, totalRevenue)}%`],
-      ['Depreciation', formatCurrency(statement.depreciation || 0), `${calculatePercentage(statement.depreciation || 0, totalRevenue)}%`],
-      ['TOTAL OPERATING EXPENSES', formatCurrency(operatingExpenses), `${calculatePercentage(operatingExpenses, totalRevenue)}%`],
-      [''],
-      ['OPERATING INCOME', formatCurrency(operatingIncome), `${calculatePercentage(operatingIncome, totalRevenue)}%`],
-      [''],
-      ['OTHER INCOME & EXPENSES', '', ''],
-      ['Interest Income', formatCurrency(statement.otherIncome?.interestIncome || 0), `${calculatePercentage(statement.otherIncome?.interestIncome || 0, totalRevenue)}%`],
-      ['Rental Income', formatCurrency(statement.otherIncome?.rentalIncome || 0), `${calculatePercentage(statement.otherIncome?.rentalIncome || 0, totalRevenue)}%`],
-      ['Other Income', formatCurrency(statement.otherIncome?.other?.amount || 0), `${calculatePercentage(statement.otherIncome?.other?.amount || 0, totalRevenue)}%`],
-      ['Interest Expense', formatCurrency(statement.otherExpenses?.interestExpense || 0), `${calculatePercentage(statement.otherExpenses?.interestExpense || 0, totalRevenue)}%`],
-      ['Depreciation', formatCurrency(statement.otherExpenses?.depreciation || 0), `${calculatePercentage(statement.otherExpenses?.depreciation || 0, totalRevenue)}%`],
-      ['Amortization', formatCurrency(statement.otherExpenses?.amortization || 0), `${calculatePercentage(statement.otherExpenses?.amortization || 0, totalRevenue)}%`],
-      ['Other Expenses', formatCurrency(statement.otherExpenses?.other?.amount || 0), `${calculatePercentage(statement.otherExpenses?.other?.amount || 0, totalRevenue)}%`],
-      ...(statement.salesTax && statement.salesTax.amount > 0 ? [['SALES TAX', formatCurrency(statement.salesTax.amount), `${calculatePercentage(statement.salesTax.amount, totalRevenue)}%`]] : []),
-      [''],
-      ['NET INCOME', formatCurrency(netIncome), `${calculatePercentage(netIncome, totalRevenue)}%`],
-      [''],
-      ['KEY RATIOS', '', ''],
-      ['Gross Margin', `${grossMargin.toFixed(1)}%`, ''],
-      ['Operating Margin', `${operatingMargin.toFixed(1)}%`, ''],
-      ['Net Margin', `${netMargin.toFixed(1)}%`, ''],
-    ].map(row => row.join(',')).join('\n');
-
-    // Create and download file
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `${filename}.${format === 'excel' ? 'csv' : format}`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const generateJSONExport = (statement, filename) => {
-    const jsonContent = JSON.stringify(statement, null, 2);
-    const blob = new Blob([jsonContent], { type: 'application/json;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `${filename}.json`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleFilterChange = (key, value) => {
-    setFilters(prev => ({
-      ...prev,
-      [key]: value,
-      page: 1, // Reset to first page when filters change
-    }));
-  };
-
-  // Extract statements and pagination
-  // Backend returns: { statements: [...], pagination: {...} }
-  // RTK Query wraps it as: { data: { statements: [...], pagination: {...} } }
-  const statements = Array.isArray(statementsData?.data?.statements) 
-    ? statementsData.data.statements 
-    : Array.isArray(statementsData?.statements) 
-    ? statementsData.statements 
-    : [];
-    
-  const pagination = statementsData?.data?.pagination || statementsData?.pagination || {
-    current: 1,
-    pages: 1,
-    total: 0,
-    hasNext: false,
-    hasPrev: false,
-  };
-
-  return (
-    <AsyncErrorBoundary>
-      <ResponsiveContainer className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">P&L Statements</h1>
-            <p className="text-gray-600">Generate and manage profit & loss statements</p>
-          </div>
-          
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={() => setShowFilters(!showFilters)}
-              className="btn btn-secondary"
-            >
-              <Filter className="h-4 w-4 mr-2" />
-              Filters
-            </button>
-            <button
-              onClick={() => refetch()}
-              className="btn btn-secondary"
-            >
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </button>
-            <button
-              onClick={() => setShowGenerateModal(true)}
-              className="btn btn-primary btn-md"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Generate Statement
-            </button>
-          </div>
-        </div>
-
-        {/* Filters */}
-        {showFilters && (
-          <div className="bg-white p-4 rounded-lg border border-gray-200">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Period Type
-                </label>
-                <select
-                  value={filters.periodType}
-                  onChange={(e) => handleFilterChange('periodType', e.target.value)}
-                  className="input"
-                >
-                  <option value="">All Periods</option>
-                  <option value="monthly">Monthly</option>
-                  <option value="quarterly">Quarterly</option>
-                  <option value="yearly">Yearly</option>
-                  <option value="custom">Custom</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Status
-                </label>
-                <select
-                  value={filters.status}
-                  onChange={(e) => handleFilterChange('status', e.target.value)}
-                  className="input"
-                >
-                  <option value="">All Statuses</option>
-                  <option value="draft">Draft</option>
-                  <option value="review">Review</option>
-                  <option value="approved">Approved</option>
-                  <option value="published">Published</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Start Date
-                </label>
-                <input
-                  type="date"
-                  value={filters.startDate}
-                  onChange={(e) => handleFilterChange('startDate', e.target.value)}
-                  className="input"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  End Date
-                </label>
-                <input
-                  type="date"
-                  value={filters.endDate}
-                  onChange={(e) => handleFilterChange('endDate', e.target.value)}
-                  className="input"
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Loading State */}
-        {isLoading && (
-          <div className="flex items-center justify-center py-12">
-            <LoadingSpinner size="lg" />
-          </div>
-        )}
-
-        {/* Error State */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <div className="flex items-center">
-              <AlertCircle className="h-5 w-5 text-red-500 mr-2" />
-              <p className="text-red-700">Failed to load P&L statements. Please try again.</p>
-            </div>
-          </div>
-        )}
-
-        {/* Statements Grid */}
-        {!isLoading && !error && (
-          <>
-            {statements.length === 0 ? (
-              <div className="text-center py-12">
-                <FileText className="mx-auto h-12 w-12 text-gray-400" />
-                <h3 className="mt-2 text-sm font-medium text-gray-900">No P&L statements</h3>
-                <p className="mt-1 text-sm text-gray-500">
-                  Get started by generating your first P&L statement.
-                </p>
-                <div className="mt-6">
-                  <button
-                    onClick={() => setShowGenerateModal(true)}
-                    className="btn btn-primary btn-md"
-                  >
-                    <Plus className="h-4 w-4 mr-2" />
-                    Generate Statement
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <ResponsiveGrid
-                cols={{ default: 1, sm: 2, lg: 3 }}
-                gap={6}
-                className="space-y-6 lg:space-y-0"
-              >
-                {statements.map((statement) => (
-                  <PLStatementCard
-                    key={statement._id}
-                    statement={statement}
-                    onView={handleViewStatement}
-                    onEdit={handleEditStatement}
-                    onDelete={handleDeleteStatement}
-                    onExport={handleExportStatement}
-                  />
-                ))}
-              </ResponsiveGrid>
-            )}
-          </>
-        )}
-
-        {/* Pagination */}
-        {pagination.pages > 1 && (
-          <div className="flex items-center justify-between bg-white px-4 py-3 border-t border-gray-200">
-            <div className="flex-1 flex justify-between sm:hidden">
-              <button
-                onClick={() => handleFilterChange('page', pagination.current - 1)}
-                disabled={!pagination.hasPrev}
-                className="btn btn-secondary disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => handleFilterChange('page', pagination.current + 1)}
-                disabled={!pagination.hasNext}
-                className="btn btn-secondary disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-            <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm text-gray-700">
-                  Showing page <span className="font-medium">{pagination.current}</span> of{' '}
-                  <span className="font-medium">{pagination.pages}</span> ({pagination.total} total statements)
-                </p>
-              </div>
-              <div>
-                <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
-                  <button
-                    onClick={() => handleFilterChange('page', pagination.current - 1)}
-                    disabled={!pagination.hasPrev}
-                    className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Previous
-                  </button>
-                  <button
-                    onClick={() => handleFilterChange('page', pagination.current + 1)}
-                    disabled={!pagination.hasNext}
-                    className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    Next
-                  </button>
-                </nav>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Generate Statement Modal */}
-        <GenerateStatementModal
-          isOpen={showGenerateModal}
-          onClose={() => setShowGenerateModal(false)}
-          onGenerate={handleGenerateStatement}
-        />
-
-        {/* Statement Detail Modal */}
-        {selectedStatement && !showEditModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center p-6 border-b border-gray-200">
-                <h2 className="text-xl font-semibold text-gray-900">P&L Statement Details</h2>
+              <div className="mt-4">
                 <button
-                  onClick={() => setSelectedStatement(null)}
-                  className="text-gray-400 hover:text-gray-600 transition-colors"
+                  onClick={() => {
+                    setShowData(true);
+                    refetch();
+                  }}
+                  className="text-sm font-medium text-red-800 hover:text-red-900 underline"
                 >
-                  <XCircle className="h-6 w-6" />
+                  Try again
                 </button>
               </div>
-              <div className="p-6">
-                <PLStatementDetail
-                  statement={selectedStatement}
-                  onExport={handleExportStatement}
-                  onShare={async (statement) => {
-                    try {
-                      const formatDate = (date) => {
-                        if (!date) return '';
-                        const d = new Date(date);
-                        return d.toLocaleDateString();
-                      };
-                      const formatCurrency = (amount) => {
-                        return `$${amount?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`;
-                      };
-                      
-                      const startDate = statement.period?.startDate || statement.startDate;
-                      const endDate = statement.period?.endDate || statement.endDate;
-                      const statementTitle = statement.title || `P&L Statement - ${formatDate(startDate)} to ${formatDate(endDate)}`;
-                      const statementText = `${statementTitle}\n\n` +
-                        `Period: ${formatDate(startDate)} to ${formatDate(endDate)}\n` +
-                        `Total Revenue: ${formatCurrency(statement.revenue?.totalRevenue?.amount || 0)}\n` +
-                        `Gross Profit: ${formatCurrency(statement.grossProfit?.amount || 0)}\n` +
-                        `Net Profit: ${formatCurrency(statement.netProfit?.amount || 0)}\n\n` +
-                        `Generated on ${formatDate(new Date())}`;
-                      
-                      // Try Web Share API first (mobile/native sharing)
-                      if (navigator.share) {
-                        await navigator.share({
-                          title: statementTitle,
-                          text: statementText,
-                        });
-                        showSuccessToast('Statement shared successfully!');
-                      } else {
-                        // Fallback: Copy to clipboard
-                        await navigator.clipboard.writeText(statementText);
-                        showSuccessToast('Statement details copied to clipboard!');
-                      }
-                    } catch (error) {
-                      // User cancelled or error occurred
-                      if (error.name !== 'AbortError') {
-                        // Fallback to clipboard if Web Share fails
-                        try {
-                          const formatDate = (date) => {
-                            if (!date) return '';
-                            const d = new Date(date);
-                            return d.toLocaleDateString();
-                          };
-                          const formatCurrency = (amount) => {
-                            return `$${amount?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}`;
-                          };
-                          
-                          const startDate = statement.period?.startDate || statement.startDate;
-                          const endDate = statement.period?.endDate || statement.endDate;
-                          const statementTitle = statement.title || `P&L Statement - ${formatDate(startDate)} to ${formatDate(endDate)}`;
-                          const statementText = `${statementTitle}\n\n` +
-                            `Period: ${formatDate(startDate)} to ${formatDate(endDate)}\n` +
-                            `Total Revenue: ${formatCurrency(statement.revenue?.totalRevenue?.amount || 0)}\n` +
-                            `Gross Profit: ${formatCurrency(statement.grossProfit?.amount || 0)}\n` +
-                            `Net Profit: ${formatCurrency(statement.netProfit?.amount || 0)}\n\n` +
-                            `Generated on ${formatDate(new Date())}`;
-                          await navigator.clipboard.writeText(statementText);
-                          showSuccessToast('Statement details copied to clipboard!');
-                        } catch (clipboardError) {
-                          showErrorToast('Failed to share statement. Please try exporting instead.');
-                        }
-                      }
-                    }
-                  }}
-                />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* P&L Data Display */}
+      {!isLoading && !error && showData && summary && (
+        <div className="space-y-6">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* Total Revenue */}
+            <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg border-2 border-green-300 p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-green-800 uppercase tracking-wide">
+                  Total Revenue
+                </h3>
+                <ArrowUpCircle className="h-6 w-6 text-green-600" />
+              </div>
+              <p className="text-3xl font-bold text-green-900">
+                {formatCurrency(totalRevenue)}
+              </p>
+              <p className="text-xs text-green-700 mt-2">
+                All income from sales
+              </p>
+            </div>
+
+            {/* Gross Profit */}
+            <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg border-2 border-blue-300 p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-blue-800 uppercase tracking-wide">
+                  Gross Profit
+                </h3>
+                <TrendingUp className="h-6 w-6 text-blue-600" />
+              </div>
+              <p className={`text-3xl font-bold ${grossProfit >= 0 ? 'text-blue-900' : 'text-red-600'}`}>
+                {formatCurrency(grossProfit)}
+              </p>
+              <p className="text-xs text-blue-700 mt-2">
+                Revenue - Cost of Goods Sold
+              </p>
+              {grossMargin !== undefined && (
+                <p className="text-xs text-blue-600 mt-1">
+                  Margin: {grossMargin.toFixed(1)}%
+                </p>
+              )}
+            </div>
+
+            {/* Net Income */}
+            <div className={`bg-gradient-to-br rounded-lg border-2 p-6 shadow-sm ${
+              netIncome >= 0 
+                ? 'from-teal-50 to-teal-100 border-teal-300' 
+                : 'from-red-50 to-red-100 border-red-300'
+            }`}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className={`text-sm font-semibold uppercase tracking-wide ${
+                  netIncome >= 0 ? 'text-teal-800' : 'text-red-800'
+                }`}>
+                  Net Profit / Loss
+                </h3>
+                {netIncome >= 0 ? (
+                  <TrendingUp className="h-6 w-6 text-teal-600" />
+                ) : (
+                  <TrendingDown className="h-6 w-6 text-red-600" />
+                )}
+              </div>
+              <p className={`text-3xl font-bold ${
+                netIncome >= 0 ? 'text-teal-900' : 'text-red-900'
+              }`}>
+                {formatCurrency(netIncome)}
+              </p>
+              <p className={`text-xs mt-2 ${
+                netIncome >= 0 ? 'text-teal-700' : 'text-red-700'
+              }`}>
+                Gross Profit - Operating Expenses
+              </p>
+              {netMargin !== undefined && (
+                <p className={`text-xs mt-1 ${
+                  netIncome >= 0 ? 'text-teal-600' : 'text-red-600'
+                }`}>
+                  Margin: {netMargin.toFixed(1)}%
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Detailed Breakdown */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Detailed Breakdown
+              </h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Period: {formatDate(searchFromDate)} to {formatDate(searchToDate)}
+              </p>
+            </div>
+
+            <div className="p-6">
+              {/* Revenue Section */}
+              <div className="mb-6">
+                <div className="flex items-center mb-4">
+                  <ArrowUpCircle className="h-5 w-5 text-green-600 mr-2" />
+                  <h3 className="text-lg font-semibold text-gray-900">Revenue</h3>
+                </div>
+                <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-700 font-medium">Total Revenue</span>
+                    <span className="text-xl font-bold text-green-700">
+                      {formatCurrency(totalRevenue)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Expenses Section */}
+              <div className="mb-6">
+                <div className="flex items-center mb-4">
+                  <ArrowDownCircle className="h-5 w-5 text-red-600 mr-2" />
+                  <h3 className="text-lg font-semibold text-gray-900">Expenses</h3>
+                </div>
+                <div className="bg-red-50 rounded-lg p-4 border border-red-200">
+                  <div className="flex justify-between items-center">
+                    <span className="text-gray-700 font-medium">Total Expenses</span>
+                    <span className="text-xl font-bold text-red-700">
+                      {formatCurrency(totalRevenue - grossProfit)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Operating Income */}
+              {operatingIncome !== undefined && (
+                <div className="mb-6">
+                  <div className="flex items-center mb-4">
+                    <TrendingUp className="h-5 w-5 text-blue-600 mr-2" />
+                    <h3 className="text-lg font-semibold text-gray-900">Operating Income</h3>
+                  </div>
+                  <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-700 font-medium">Operating Income</span>
+                      <span className={`text-xl font-bold ${
+                        operatingIncome >= 0 ? 'text-blue-700' : 'text-red-700'
+                      }`}>
+                        {formatCurrency(operatingIncome)}
+                      </span>
+                    </div>
+                    {operatingMargin !== undefined && (
+                      <p className="text-sm text-blue-600 mt-2">
+                        Operating Margin: {operatingMargin.toFixed(1)}%
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Net Income Summary */}
+              <div className="bg-gray-50 rounded-lg p-6 border-2 border-gray-300">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-1">
+                      Net Profit / Loss
+                    </h3>
+                    <p className="text-sm text-gray-600">
+                      Your final profit or loss for this period
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className={`text-3xl font-bold ${
+                      netIncome >= 0 ? 'text-teal-700' : 'text-red-700'
+                    }`}>
+                      {formatCurrency(netIncome)}
+                    </p>
+                    {netMargin !== undefined && (
+                      <p className={`text-sm mt-1 ${
+                        netIncome >= 0 ? 'text-teal-600' : 'text-red-600'
+                      }`}>
+                        Net Margin: {netMargin.toFixed(1)}%
+                      </p>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-        )}
 
-        {/* Edit Statement Modal */}
-        <EditStatementModal
-          isOpen={showEditModal}
-          onClose={() => {
-            setShowEditModal(false);
-            setSelectedStatement(null);
-          }}
-          onUpdate={handleUpdateStatement}
-          statement={selectedStatement}
-        />
+          {/* Info Box */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="flex items-start">
+              <FileText className="h-5 w-5 text-blue-600 mr-3 mt-0.5" />
+              <div className="flex-1">
+                <h4 className="text-sm font-semibold text-blue-900 mb-1">
+                  Understanding Your Profit & Loss Statement
+                </h4>
+                <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
+                  <li><strong>Total Revenue:</strong> All money received from sales</li>
+                  <li><strong>Gross Profit:</strong> Revenue minus the cost of goods you sold</li>
+                  <li><strong>Operating Income:</strong> Gross profit minus operating expenses</li>
+                  <li><strong>Net Profit/Loss:</strong> Your final profit or loss after all expenses</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
-        {/* Export Statement Modal */}
-        <ExportStatementModal
-          isOpen={showExportModal}
-          onClose={() => {
-            setShowExportModal(false);
-            setSelectedStatement(null);
-          }}
-          onExport={handleExportDownload}
-          statement={selectedStatement}
-        />
-      </ResponsiveContainer>
-    </AsyncErrorBoundary>
+      {/* Initial State - No Data Shown */}
+      {!showData && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-12 text-center">
+          <FileText className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            Select Date Range and Click Search
+          </h3>
+          <p className="text-gray-600">
+            Choose your date range above and click the Search button to view your Profit & Loss statement.
+          </p>
+        </div>
+      )}
+
+      {/* Summary Report Modal */}
+      <PLSummaryReportModal
+        isOpen={showSummaryModal}
+        onClose={() => setShowSummaryModal(false)}
+        summaryData={summaryData}
+        fromDate={searchFromDate}
+        toDate={searchToDate}
+      />
+    </div>
   );
 };
 

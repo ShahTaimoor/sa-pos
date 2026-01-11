@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, query } = require('express-validator');
 const { auth, requireAnyPermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const tillService = require('../services/tillService');
 
 const router = express.Router();
@@ -38,6 +39,7 @@ router.post('/open', [
 
 router.post('/close', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['close_till']),
   body('closingDeclaredAmount').isFloat({ min: 0 }).withMessage('closingDeclaredAmount must be >= 0'),
   body('expectedAmount').optional().isFloat({ min: 0 }),

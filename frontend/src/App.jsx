@@ -51,6 +51,7 @@ const Settings2 = lazy(() => import('./pages/Settings').then(m => ({ default: m.
 const StockMovements = lazy(() => import('./pages/StockMovements').then(m => ({ default: m.StockMovements })));
 const ChartOfAccounts = lazy(() => import('./pages/ChartOfAccounts'));
 const AccountLedger = lazy(() => import('./pages/AccountLedger'));
+const AccountLedgerSummary = lazy(() => import('./pages/AccountLedgerSummary'));
 const Migration = lazy(() => import('./pages/Migration'));
 const BackdateReport = lazy(() => import('./pages/BackdateReport'));
 const Categories = lazy(() => import('./pages/Categories'));
@@ -120,6 +121,7 @@ function App() {
                         <Route path="/journal-vouchers" element={<Suspense fallback={<LoadingPage />}><JournalVouchers /></Suspense>} />
                         <Route path="/chart-of-accounts" element={<Suspense fallback={<LoadingPage />}><ChartOfAccounts /></Suspense>} />
                         <Route path="/account-ledger" element={<Suspense fallback={<LoadingPage />}><AccountLedger /></Suspense>} />
+                        <Route path="/account-ledger-summary" element={<Suspense fallback={<LoadingPage />}><AccountLedgerSummary /></Suspense>} />
                         <Route path="/reports" element={<Suspense fallback={<LoadingPage />}><Reports /></Suspense>} />
                         <Route path="/backdate-report" element={<Suspense fallback={<LoadingPage />}><BackdateReport /></Suspense>} />
                         <Route path="/settings" element={<Suspense fallback={<LoadingPage />}><Settings2 /></Suspense>} />

@@ -1,7 +1,9 @@
 const express = require('express');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const AnomalyDetectionService = require('../services/anomalyDetectionService');
 const { query, validationResult } = require('express-validator');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -10,6 +12,7 @@ const router = express.Router();
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_anomaly_detection'),
   query('startDate').optional().isISO8601(),
   query('endDate').optional().isISO8601(),
@@ -51,7 +54,7 @@ router.get('/', [
       }
     });
   } catch (error) {
-    console.error('Anomaly detection error:', error);
+    logger.error('Anomaly detection error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Error detecting anomalies',
@@ -65,6 +68,7 @@ router.get('/', [
 // @access  Private
 router.get('/sales', [
   auth,
+  tenantMiddleware,
   requirePermission('view_anomaly_detection'),
   query('startDate').optional().isISO8601(),
   query('endDate').optional().isISO8601(),
@@ -90,7 +94,7 @@ router.get('/sales', [
       count: anomalies.length
     });
   } catch (error) {
-    console.error('Sales anomaly detection error:', error);
+    logger.error('Sales anomaly detection error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Error detecting sales anomalies',
@@ -115,7 +119,7 @@ router.get('/inventory', [
       count: anomalies.length
     });
   } catch (error) {
-    console.error('Inventory anomaly detection error:', error);
+    logger.error('Inventory anomaly detection error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Error detecting inventory anomalies',
@@ -129,6 +133,7 @@ router.get('/inventory', [
 // @access  Private
 router.get('/payments', [
   auth,
+  tenantMiddleware,
   requirePermission('view_anomaly_detection'),
   query('startDate').optional().isISO8601(),
   query('endDate').optional().isISO8601()
@@ -152,7 +157,7 @@ router.get('/payments', [
       count: anomalies.length
     });
   } catch (error) {
-    console.error('Payment anomaly detection error:', error);
+    logger.error('Payment anomaly detection error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Error detecting payment anomalies',
@@ -185,7 +190,7 @@ router.get('/summary', [
       }
     });
   } catch (error) {
-    console.error('Anomaly summary error:', error);
+    logger.error('Anomaly summary error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Error getting anomaly summary',

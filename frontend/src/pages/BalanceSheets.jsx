@@ -9,7 +9,6 @@ import {
   Trash2,
   TrendingUp,
   TrendingDown,
-  DollarSign,
   BarChart3,
   FileText,
   Calendar,
@@ -261,7 +260,7 @@ const BalanceSheets = () => {
                       Average Total Assets
                     </dt>
                     <dd className="text-2xl font-semibold text-gray-900">
-                      ${(stats.averageTotalAssets || 0).toLocaleString()}
+                      {(stats.averageTotalAssets || 0).toLocaleString()}
                     </dd>
                   </dl>
                 </div>
@@ -283,7 +282,7 @@ const BalanceSheets = () => {
                       Average Total Liabilities
                     </dt>
                     <dd className="text-2xl font-semibold text-gray-900">
-                      ${(stats.averageTotalLiabilities || 0).toLocaleString()}
+                      {(stats.averageTotalLiabilities || 0).toLocaleString()}
                     </dd>
                   </dl>
                 </div>
@@ -305,7 +304,7 @@ const BalanceSheets = () => {
                       Average Total Equity
                     </dt>
                     <dd className="text-2xl font-semibold text-gray-900">
-                      ${(stats.averageTotalEquity || 0).toLocaleString()}
+                      {(stats.averageTotalEquity || 0).toLocaleString()}
                     </dd>
                   </dl>
                 </div>
@@ -398,10 +397,10 @@ const BalanceSheets = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        ${balanceSheet.assets?.totalAssets?.toLocaleString() || '0'}
+                        {balanceSheet.assets?.totalAssets?.toLocaleString() || '0'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        ${balanceSheet.equity?.totalEquity?.toLocaleString() || '0'}
+                        {balanceSheet.equity?.totalEquity?.toLocaleString() || '0'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex space-x-2">

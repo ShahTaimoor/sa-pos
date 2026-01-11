@@ -7,6 +7,9 @@ const PDFDocument = require('pdfkit');
 const PurchaseInvoice = require('../models/PurchaseInvoice'); // Still needed for new PurchaseInvoice() and static methods
 const { auth, requirePermission } = require('../middleware/auth');
 const { sanitizeRequest, handleValidationErrors } = require('../middleware/validation');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
+const journalEntryService = require('../services/journalEntryService');
+const mongoose = require('mongoose');
 const purchaseInvoiceService = require('../services/purchaseInvoiceService');
 const purchaseInvoiceRepository = require('../repositories/PurchaseInvoiceRepository');
 const supplierRepository = require('../repositories/SupplierRepository');
@@ -61,7 +64,7 @@ router.get('/', [
       pagination: result.pagination
     });
   } catch (error) {
-    console.error('Error fetching purchase invoices:', error);
+    logger.error('Error fetching purchase invoices:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -81,7 +84,7 @@ router.get('/:id', [
     if (error.message === 'Purchase invoice not found') {
       return res.status(404).json({ message: 'Purchase invoice not found' });
     }
-    console.error('Error fetching purchase invoice:', error);
+    logger.error('Error fetching purchase invoice:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -91,6 +94,7 @@ router.get('/:id', [
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   body('supplier').optional().isMongoId().withMessage('Invalid supplier ID'),
   body('items').isArray({ min: 1 }).withMessage('Items array is required'),
   body('items.*.product').isMongoId().withMessage('Valid Product ID is required'),
@@ -101,189 +105,214 @@ router.post('/', [
   body('invoiceNumber').trim().isLength({ min: 1 }).withMessage('Invoice number is required'),
   handleValidationErrors
 ], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+  
+  const {
+    supplier,
+    supplierInfo,
+    items,
+    pricing,
+    payment,
+    invoiceNumber,
+    expectedDelivery,
+    notes,
+    terms
+  } = req.body;
+  
+  const invoiceData = {
+    tenantId: req.tenantId, // Add tenantId from middleware
+    supplier,
+    supplierInfo,
+    items,
+    pricing,
+    payment: {
+      ...payment,
+      status: payment?.status || 'pending',
+      method: payment?.method || 'cash',
+      paidAmount: payment?.amount || payment?.paidAmount || 0,
+      isPartialPayment: payment?.isPartialPayment || false
+    },
+    invoiceNumber,
+    expectedDelivery,
+    notes,
+    terms,
+    createdBy: req.user._id
+  };
+  
+  // Use MongoDB transaction for atomicity
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-    
-    const {
-      supplier,
-      supplierInfo,
-      items,
-      pricing,
-      payment,
-      invoiceNumber,
-      expectedDelivery,
-      notes,
-      terms
-    } = req.body;
-    
-    const invoiceData = {
-      supplier,
-      supplierInfo,
-      items,
-      pricing,
-      payment: {
-        ...payment,
-        status: payment?.status || 'pending',
-        method: payment?.method || 'cash',
-        paidAmount: payment?.amount || payment?.paidAmount || 0,
-        isPartialPayment: payment?.isPartialPayment || false
-      },
-      invoiceNumber,
-      expectedDelivery,
-      notes,
-      terms,
-      createdBy: req.user._id
-    };
-    
-    // Handle potential duplicate invoice number by generating a new one if needed
-    let invoice = new PurchaseInvoice(invoiceData);
-    let retryCount = 0;
-    const maxRetries = 3;
-    
-    while (retryCount < maxRetries) {
-      try {
-        await invoice.save();
-        break; // Success, exit retry loop
-      } catch (error) {
-        if (error.code === 11000 && error.keyPattern && error.keyPattern.invoiceNumber) {
-          // Duplicate invoice number error
-          retryCount++;
-          if (retryCount >= maxRetries) {
-            throw new Error('Failed to generate unique invoice number after multiple attempts');
+      // Handle potential duplicate invoice number by generating a new one if needed
+      let invoice = new PurchaseInvoice(invoiceData);
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      while (retryCount < maxRetries) {
+        try {
+          await invoice.save({ session });
+          break; // Success, exit retry loop
+        } catch (error) {
+          if (error.code === 11000 && error.keyPattern && error.keyPattern.invoiceNumber) {
+            // Duplicate invoice number error
+            retryCount++;
+            if (retryCount >= maxRetries) {
+              throw new Error('Failed to generate unique invoice number after multiple attempts');
+            }
+            
+            // Generate a new invoice number with additional randomness
+            const timestamp = Date.now();
+            const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+            const newInvoiceNumber = `${invoiceData.invoiceNumber}-${timestamp}-${random}`;
+            
+            invoiceData.invoiceNumber = newInvoiceNumber;
+            invoice = new PurchaseInvoice(invoiceData);
+          } else {
+            // Different error, re-throw
+            throw error;
           }
-          
-          // Generate a new invoice number with additional randomness
-          const timestamp = Date.now();
-          const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
-          const newInvoiceNumber = `${invoiceData.invoiceNumber}-${timestamp}-${random}`;
-          
-          invoiceData.invoiceNumber = newInvoiceNumber;
-          invoice = new PurchaseInvoice(invoiceData);
-        } else {
-          // Different error, re-throw
-          throw error;
         }
       }
-    }
-    
-    // IMMEDIATE INVENTORY UPDATE - No confirmation required
-    const inventoryService = require('../services/inventoryService');
-    const inventoryUpdates = [];
-    let inventoryUpdateFailed = false;
-    
-    for (const item of items) {
-      try {
-        
-        const inventoryUpdate = await inventoryService.updateStock({
-          productId: item.product,
-          type: 'in',
-          quantity: item.quantity,
-          reason: 'Purchase Invoice Creation',
-          reference: 'Purchase Invoice',
-          referenceId: invoice._id,
-          referenceModel: 'PurchaseInvoice',
-          performedBy: req.user._id,
-          notes: `Stock increased due to purchase invoice creation - Invoice: ${invoiceNumber}`
-        });
-        
-        inventoryUpdates.push({
-          productId: item.product,
-          quantity: item.quantity,
-          newStock: inventoryUpdate.currentStock,
-          success: true
-        });
-        
-      } catch (inventoryError) {
-        console.error(`Failed to update inventory for product ${item.product}:`, inventoryError);
-        console.error('Full error details:', {
-          message: inventoryError.message,
-          stack: inventoryError.stack,
-          name: inventoryError.name
-        });
-        
-        inventoryUpdates.push({
-          productId: item.product,
-          quantity: item.quantity,
-          success: false,
-          error: inventoryError.message
-        });
-        
-        inventoryUpdateFailed = true;
-        
-        // Continue with other items instead of failing immediately
-        console.warn(`Continuing with other items despite inventory update failure for product ${item.product}`);
-      }
-    }
-    
-    // If any inventory updates failed, still create the invoice but warn about it
-    if (inventoryUpdateFailed) {
-      console.warn('Some inventory updates failed, but invoice will still be created');
-      // Don't return error - just log the issue and continue
-    }
-    
-    // Update supplier outstanding balance for purchase invoices
-    // Logic: 
-    // 1. Add invoice total to pendingBalance (we owe this amount)
-    // 2. Record payment which will reduce pendingBalance and handle overpayments (add to advanceBalance)
-    
-    if (supplier && pricing && pricing.total > 0) {
-      try {
-        const SupplierBalanceService = require('../services/supplierBalanceService');
-        const supplierExists = await supplierRepository.findById(supplier);
-        
-        if (supplierExists) {
-          // Step 1: Add invoice total to pendingBalance (we owe this amount to supplier)
-          await supplierRepository.updateById(supplier, {
-            $inc: { pendingBalance: pricing.total }
+      
+      // IMMEDIATE INVENTORY UPDATE - No confirmation required
+      const inventoryService = require('../services/inventoryService');
+      const inventoryUpdates = [];
+      let inventoryUpdateFailed = false;
+      
+      for (const item of items) {
+        try {
+          const inventoryUpdate = await inventoryService.updateStock({
+            productId: item.product,
+            type: 'in',
+            quantity: item.quantity,
+            cost: item.unitCost, // Pass cost price from purchase invoice
+            reason: 'Purchase Invoice Creation',
+            reference: 'Purchase Invoice',
+            referenceId: invoice._id,
+            referenceModel: 'PurchaseInvoice',
+            performedBy: req.user._id,
+            notes: `Stock increased due to purchase invoice creation - Invoice: ${invoice.invoiceNumber || invoiceNumber}`
           });
           
-          // Step 2: Record payment (this will reduce pendingBalance and handle overpayments)
-          const amountPaid = payment?.amount || payment?.paidAmount || 0;
-          if (amountPaid > 0) {
-            await SupplierBalanceService.recordPayment(supplier, amountPaid, invoice._id);
-          }
-        } else {
+          inventoryUpdates.push({
+            productId: item.product,
+            quantity: item.quantity,
+            newStock: inventoryUpdate.currentStock,
+            success: true
+          });
+          
+        } catch (inventoryError) {
+          logger.error(`Failed to update inventory for product ${item.product}:`, inventoryError);
+          logger.error('Full error details:', {
+            message: inventoryError.message,
+            stack: inventoryError.stack,
+            name: inventoryError.name
+          });
+          
+          inventoryUpdates.push({
+            productId: item.product,
+            quantity: item.quantity,
+            success: false,
+            error: inventoryError.message
+          });
+          
+          inventoryUpdateFailed = true;
+          
+          // Continue with other items instead of failing immediately
+          logger.warn(`Continuing with other items despite inventory update failure for product ${item.product}`);
         }
-      } catch (error) {
-        console.error('Error updating supplier balance on purchase invoice creation:', error);
-        // Don't fail the invoice creation if supplier update fails
       }
+      
+      // If any inventory updates failed, still create the invoice but warn about it
+      if (inventoryUpdateFailed) {
+        logger.warn('Some inventory updates failed, but invoice will still be created');
+        // Don't return error - just log the issue and continue
+      }
+      
+      // Update supplier outstanding balance for purchase invoices
+      // Logic: 
+      // 1. Add invoice total to pendingBalance (we owe this amount)
+      // 2. Record payment which will reduce pendingBalance and handle overpayments (add to advanceBalance)
+      
+      if (supplier && pricing && pricing.total > 0) {
+        try {
+          const SupplierBalanceService = require('../services/supplierBalanceService');
+          const supplierExists = await supplierRepository.findById(supplier);
+          
+          if (supplierExists) {
+            // Step 1: Add invoice total to pendingBalance (we owe this amount to supplier)
+            await supplierRepository.updateById(supplier, {
+              $inc: { pendingBalance: pricing.total }
+            });
+            
+            // Step 2: Record payment (this will reduce pendingBalance and handle overpayments)
+            const amountPaid = payment?.amount || payment?.paidAmount || 0;
+            if (amountPaid > 0) {
+              await SupplierBalanceService.recordPayment(supplier, amountPaid, invoice._id);
+            }
+          }
+        } catch (error) {
+          logger.error('Error updating supplier balance on purchase invoice creation:', error);
+          // Don't fail the invoice creation if supplier update fails
+        }
+      }
+      
+      // Create journal entries (double-entry accounting - single source of truth)
+      try {
+        await journalEntryService.createPurchaseEntries(invoice, {
+          session,
+          tenantId: req.tenantId,
+          createdBy: req.user._id
+        });
+      } catch (error) {
+        logger.error('Error creating journal entries for purchase invoice:', error);
+        // This is critical - journal entries must be created, so we should fail the transaction
+        throw new Error(`Failed to create journal entries: ${error.message}`);
+      }
+      
+      // Update invoice status to 'confirmed' since inventory was updated
+      invoice.status = 'confirmed';
+      invoice.confirmedDate = new Date();
+      await invoice.save({ session });
+      
+      // Commit transaction
+      await session.commitTransaction();
+      
+      // Populate invoice after transaction
+      await invoice.populate([
+        { path: 'supplier', select: 'name companyName email phone' },
+        { path: 'items.product', select: 'name description pricing' },
+        { path: 'createdBy', select: 'name email' }
+      ]);
+      
+      const successCount = inventoryUpdates.filter(update => update.success).length;
+      const failureCount = inventoryUpdates.filter(update => !update.success).length;
+      
+      let message = 'Purchase invoice created successfully';
+      if (successCount > 0) {
+        message += ` and ${successCount} product(s) added to inventory`;
+      }
+      if (failureCount > 0) {
+        message += ` (${failureCount} inventory update(s) failed - check logs for details)`;
+      }
+      
+      res.status(201).json({
+        message: message,
+        invoice,
+        inventoryUpdates: inventoryUpdates
+      });
+    } catch (error) {
+      // Rollback transaction on error
+      await session.abortTransaction();
+      logger.error('Error creating purchase invoice:', error);
+      res.status(500).json({ message: 'Server error', error: error.message });
+    } finally {
+      session.endSession();
     }
-    
-    // Update invoice status to 'confirmed' since inventory was updated
-    invoice.status = 'confirmed';
-    invoice.confirmedDate = new Date();
-    await invoice.save();
-    
-    await invoice.populate([
-      { path: 'supplier', select: 'name companyName email phone' },
-      { path: 'items.product', select: 'name description pricing' },
-      { path: 'createdBy', select: 'name email' }
-    ]);
-    
-    const successCount = inventoryUpdates.filter(update => update.success).length;
-    const failureCount = inventoryUpdates.filter(update => !update.success).length;
-    
-    let message = 'Purchase invoice created successfully';
-    if (successCount > 0) {
-      message += ` and ${successCount} product(s) added to inventory`;
-    }
-    if (failureCount > 0) {
-      message += ` (${failureCount} inventory update(s) failed - check logs for details)`;
-    }
-    
-    res.status(201).json({
-      message: message,
-      invoice,
-      inventoryUpdates: inventoryUpdates
-    });
-  } catch (error) {
-    console.error('Error creating purchase invoice:', error);
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
 });
 
 // @route   PUT /api/purchase-invoices/:id
@@ -304,6 +333,21 @@ router.put('/:id', [
     const invoice = await purchaseInvoiceRepository.findById(req.params.id);
     if (!invoice) {
       return res.status(404).json({ message: 'Purchase invoice not found' });
+    }
+    
+    // CRITICAL: Block edits if journal entries are posted
+    const JournalEntry = require('../models/JournalEntry');
+    const hasJournalEntries = await JournalEntry.exists({
+      referenceType: 'purchase',
+      referenceId: invoice._id,
+      status: 'posted'
+    });
+
+    if (hasJournalEntries) {
+      return res.status(403).json({
+        message: 'Cannot edit purchase invoice with posted journal entries. Use return/adjustment to correct errors.',
+        error: 'JOURNAL_ENTRIES_POSTED'
+      });
     }
     
     // Cannot update received, paid, or closed invoices
@@ -445,7 +489,7 @@ router.put('/:id', [
           }
         }
       } catch (error) {
-        console.error('Error adjusting inventory on purchase invoice update:', error);
+        logger.error('Error adjusting inventory on purchase invoice update:', error);
         // Don't fail update if inventory adjustment fails
       }
     }
@@ -507,7 +551,7 @@ router.put('/:id', [
           }
         }
       } catch (error) {
-        console.error('Error adjusting supplier balance on purchase invoice update:', error);
+        logger.error('Error adjusting supplier balance on purchase invoice update:', error);
         // Don't fail update if balance adjustment fails
       }
     }
@@ -522,7 +566,7 @@ router.put('/:id', [
       invoice: updatedInvoice
     });
   } catch (error) {
-    console.error('Error updating purchase invoice:', error);
+    logger.error('Error updating purchase invoice:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -538,6 +582,23 @@ router.delete('/:id', [
     const invoice = await purchaseInvoiceRepository.findById(req.params.id);
     if (!invoice) {
       return res.status(404).json({ message: 'Purchase invoice not found' });
+    }
+    
+    // CRITICAL: Check if journal entries exist - if posted, block deletion
+    const JournalEntry = require('../models/JournalEntry');
+    const journalEntry = await JournalEntry.findOne({
+      referenceType: 'purchase',
+      referenceId: invoice._id,
+      status: 'posted'
+    });
+
+    if (journalEntry) {
+      return res.status(403).json({
+        message: 'Cannot delete purchase invoice with posted journal entries. Use return/adjustment instead.',
+        error: 'JOURNAL_ENTRIES_EXIST',
+        journalEntryId: journalEntry._id,
+        journalEntryNumber: journalEntry.entryNumber
+      });
     }
     
     // Cannot delete paid or closed invoices
@@ -574,7 +635,7 @@ router.delete('/:id', [
           });
           
         } catch (error) {
-          console.error(`Failed to rollback inventory for product ${item.product}:`, error);
+          logger.error(`Failed to rollback inventory for product ${item.product}:`, error);
           inventoryRollbacks.push({
             productId: item.product,
             quantity: item.quantity,
@@ -585,11 +646,36 @@ router.delete('/:id', [
       }
     }
     
+    // CRITICAL: Reverse journal entries if they exist (draft or posted status)
+    const journalEntryService = require('../services/journalEntryService');
+    const existingJournalEntry = await JournalEntry.findOne({
+      referenceType: 'purchase',
+      referenceId: invoice._id,
+      status: { $in: ['posted', 'draft'] }
+    });
+
+    if (existingJournalEntry && existingJournalEntry.status === 'posted') {
+      try {
+        await journalEntryService.reverseJournalEntry(existingJournalEntry._id, {
+          reason: `Purchase invoice deletion: ${invoice.invoiceNumber || invoice._id}`,
+          createdBy: req.user._id,
+          tenantId: req.tenantId || invoice.tenantId
+        });
+      } catch (error) {
+        logger.error('Error reversing journal entry on purchase deletion:', error);
+        return res.status(500).json({
+          message: 'Failed to reverse journal entries. Cannot delete purchase invoice.',
+          error: error.message
+        });
+      }
+    }
+
     // ROLLBACK SUPPLIER BALANCE - Reverse invoice total and payment
     // This matches the new logic in purchase invoice creation
     if (invoice.supplier && invoice.pricing && invoice.pricing.total > 0) {
       try {
         const Supplier = require('../models/Supplier');
+const logger = require('../utils/logger');
         const supplierExists = await supplierRepository.findById(invoice.supplier);
         
         if (supplierExists) {
@@ -615,7 +701,7 @@ router.delete('/:id', [
         } else {
         }
       } catch (error) {
-        console.error('Error rolling back supplier balance:', error);
+        logger.error('Error rolling back supplier balance:', error);
         // Continue with deletion even if supplier update fails
       }
     }
@@ -629,7 +715,7 @@ router.delete('/:id', [
       inventoryRollbacks: inventoryRollbacks
     });
   } catch (error) {
-    console.error('Error deleting purchase invoice:', error);
+    logger.error('Error deleting purchase invoice:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -653,7 +739,7 @@ router.put('/:id/confirm', [
       invoice
     });
   } catch (error) {
-    console.error('Error confirming purchase invoice:', error);
+    logger.error('Error confirming purchase invoice:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -684,7 +770,7 @@ router.put('/:id/cancel', [
       invoice
     });
   } catch (error) {
-    console.error('Error cancelling purchase invoice:', error);
+    logger.error('Error cancelling purchase invoice:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -1125,7 +1211,7 @@ router.post('/export/pdf', [auth, requirePermission('view_purchase_invoices')], 
     });
     
   } catch (error) {
-    console.error('PDF export error:', error);
+    logger.error('PDF export error:', { error: error });
     res.status(500).json({ message: 'Export failed', error: error.message });
   }
 });
@@ -1144,14 +1230,14 @@ router.get('/download/:filename', [auth, requirePermission('view_purchase_invoic
     
     res.download(filepath, filename, (err) => {
       if (err) {
-        console.error('Download error:', err);
+        logger.error('Download error:', { error: err });
         if (!res.headersSent) {
           res.status(500).json({ message: 'Download failed', error: err.message });
         }
       }
     });
   } catch (error) {
-    console.error('Download error:', error);
+    logger.error('Download error:', { error: error });
     res.status(500).json({ message: 'Download failed', error: error.message });
   }
 });

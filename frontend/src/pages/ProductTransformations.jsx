@@ -7,7 +7,7 @@ import {
   ArrowRight,
   Calendar,
   User,
-  DollarSign,
+  TrendingUp,
   X,
   AlertCircle,
   CheckCircle

@@ -1,6 +1,13 @@
 const mongoose = require('mongoose');
 
 const cashPaymentSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
+  
   // Payment Information
   date: {
     type: Date,
@@ -98,8 +105,9 @@ cashPaymentSchema.pre('save', async function(next) {
 });
 
 // Index for better query performance
-cashPaymentSchema.index({ date: -1 });
-cashPaymentSchema.index({ voucherCode: 1 }, { unique: true, sparse: true }); // Sparse allows multiple null values
-cashPaymentSchema.index({ createdBy: 1 });
+// Compound indexes for multi-tenant performance
+cashPaymentSchema.index({ tenantId: 1, date: -1 });
+cashPaymentSchema.index({ tenantId: 1, voucherCode: 1 }, { unique: true, sparse: true });
+cashPaymentSchema.index({ tenantId: 1, createdBy: 1, date: -1 });
 
 module.exports = mongoose.model('CashPayment', cashPaymentSchema);

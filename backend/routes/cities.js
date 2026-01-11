@@ -2,13 +2,16 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const cityService = require('../services/cityService');
+const logger = require('../utils/logger');
 
 // @route   GET /api/cities
 // @desc    Get all cities with filtering and pagination
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
@@ -22,8 +25,9 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
     // Call service to get cities
-    const result = await cityService.getCities(req.query);
+    const result = await cityService.getCities(req.query, tenantId);
     
     res.json({
       success: true,
@@ -33,7 +37,7 @@ router.get('/', [
       }
     });
   } catch (error) {
-    console.error('Get cities error:', error);
+    logger.error('Get cities error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -47,16 +51,18 @@ router.get('/', [
 // @access  Private
 router.get('/active', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    const cities = await cityService.getActiveCities();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const cities = await cityService.getActiveCities(tenantId);
     res.json({
       success: true,
       data: cities
     });
   } catch (error) {
-    console.error('Get active cities error:', error);
+    logger.error('Get active cities error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -70,16 +76,18 @@ router.get('/active', [
 // @access  Private
 router.get('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    const city = await cityService.getCityById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const city = await cityService.getCityById(req.params.id, tenantId);
     res.json({
       success: true,
       data: city
     });
   } catch (error) {
-    console.error('Get city error:', error);
+    logger.error('Get city error:', { error: error });
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -93,6 +101,7 @@ router.get('/:id', [
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_users'),
   body('name').trim().isLength({ min: 1, max: 100 }).withMessage('City name is required and must be less than 100 characters'),
   body('state').optional().trim().isLength({ max: 100 }).withMessage('State must be less than 100 characters'),
@@ -106,8 +115,9 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
     // Call service to create city
-    const result = await cityService.createCity(req.body, req.user._id);
+    const result = await cityService.createCity(req.body, req.user._id, { tenantId });
     
     res.status(201).json({
       success: true,
@@ -115,7 +125,7 @@ router.post('/', [
       data: result.city
     });
   } catch (error) {
-    console.error('Create city error:', error);
+    logger.error('Create city error:', { error: error });
     if (error.message === 'City with this name already exists') {
       return res.status(400).json({
         success: false,
@@ -135,6 +145,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_users'),
   body('name').optional().trim().isLength({ min: 1, max: 100 }).withMessage('City name must be less than 100 characters'),
   body('state').optional().trim().isLength({ max: 100 }).withMessage('State must be less than 100 characters'),
@@ -148,8 +159,9 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
     // Call service to update city
-    const result = await cityService.updateCity(req.params.id, req.body, req.user._id);
+    const result = await cityService.updateCity(req.params.id, req.body, req.user._id, { tenantId });
     
     res.json({
       success: true,
@@ -157,7 +169,7 @@ router.put('/:id', [
       data: result.city
     });
   } catch (error) {
-    console.error('Update city error:', error);
+    logger.error('Update city error:', { error: error });
     if (error.message === 'City not found') {
       return res.status(404).json({
         success: false,
@@ -183,18 +195,20 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_users')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
     // Call service to delete city
-    const result = await cityService.deleteCity(req.params.id);
+    const result = await cityService.deleteCity(req.params.id, { tenantId });
     
     res.json({
       success: true,
       message: result.message
     });
   } catch (error) {
-    console.error('Delete city error:', error);
+    logger.error('Delete city error:', { error: error });
     if (error.message === 'City not found') {
       return res.status(404).json({
         success: false,

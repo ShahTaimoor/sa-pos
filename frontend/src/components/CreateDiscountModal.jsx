@@ -3,7 +3,7 @@ import {
   X, 
   Tag, 
   Percent, 
-  DollarSign, 
+  TrendingUp, 
   Calendar, 
   Users, 
   Package, 
@@ -505,7 +505,7 @@ const CreateDiscountModal = ({ isOpen, onClose, onSuccess }) => {
                     ) : (
                       <>
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                          <DollarSign className="h-4 w-4 text-gray-400" />
+                          <TrendingUp className="h-4 w-4 text-gray-400" />
                         </div>
                         <input
                           type="number"
@@ -539,7 +539,7 @@ const CreateDiscountModal = ({ isOpen, onClose, onSuccess }) => {
                   </label>
                   <div className="relative">
                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <DollarSign className="h-4 w-4 text-gray-400" />
+                      <TrendingUp className="h-4 w-4 text-gray-400" />
                     </div>
                     <input
                       type="number"
@@ -553,7 +553,7 @@ const CreateDiscountModal = ({ isOpen, onClose, onSuccess }) => {
                     />
                   </div>
                   <p className="mt-1 text-xs text-gray-500">
-                    Maximum amount that can be discounted (e.g., $50 max for 20% discount)
+                    Maximum amount that can be discounted (e.g., 50 max for 20% discount)
                   </p>
                 </div>
               )}
@@ -565,7 +565,7 @@ const CreateDiscountModal = ({ isOpen, onClose, onSuccess }) => {
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <DollarSign className="h-4 w-4 text-gray-400" />
+                    <TrendingUp className="h-4 w-4 text-gray-400" />
                   </div>
                   <input
                     type="number"

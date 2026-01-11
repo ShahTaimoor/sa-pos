@@ -17,6 +17,8 @@ const productRepository = require('../repositories/ProductRepository');
 const customerRepository = require('../repositories/CustomerRepository');
 const { auth, requirePermission } = require('../middleware/auth');
 const { preventPOSDuplicates } = require('../middleware/duplicatePrevention');
+const { tenantMiddleware, validateDateRange } = require('../middleware/tenantMiddleware');
+const journalEntryService = require('../services/journalEntryService');
 
 const router = express.Router();
 
@@ -44,6 +46,7 @@ const transformProductToUppercase = (product) => {
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 999999 }),
   query('all').optional({ checkFalsy: true }).isBoolean(),
@@ -61,15 +64,15 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    // Call service to get sales orders
-    const result = await salesService.getSalesOrders(req.query);
+    // Call service to get sales orders (tenantId automatically included from middleware)
+    const result = await salesService.getSalesOrders(req.query, req.tenantId);
     
     res.json({
       orders: result.orders,
       pagination: result.pagination
     });
   } catch (error) {
-    console.error('Get orders error:', error);
+    logger.error('Get orders error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -79,6 +82,8 @@ router.get('/', [
 // @access  Private
 router.get('/period-summary', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
+  validateDateRange, // Validate date range (max 2 years)
   query('dateFrom').isISO8601().withMessage('Invalid start date'),
   query('dateTo').isISO8601().withMessage('Invalid end date')
 ], async (req, res) => {
@@ -94,46 +99,12 @@ router.get('/period-summary', [
     dateTo.setDate(dateTo.getDate() + 1);
     dateTo.setHours(0, 0, 0, 0);
     
-    const orders = await Sales.find({
-      createdAt: { $gte: dateFrom, $lt: dateTo }
-    });
-    
-    const totalRevenue = orders.reduce((sum, order) => sum + (order.pricing?.total || 0), 0);
-    const totalOrders = orders.length;
-    const totalItems = orders.reduce((sum, order) => 
-      sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0);
-    const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-    
-    // Calculate discounts
-    const totalDiscounts = orders.reduce((sum, order) => 
-      sum + (order.pricing?.discountAmount || 0), 0);
-    
-    // Calculate by order type
-    const revenueByType = {
-      retail: orders.filter(o => o.orderType === 'retail')
-        .reduce((sum, order) => sum + (order.pricing?.total || 0), 0),
-      wholesale: orders.filter(o => o.orderType === 'wholesale')
-        .reduce((sum, order) => sum + (order.pricing?.total || 0), 0)
-    };
-    
-    const summary = {
-      total: totalRevenue,
-      totalRevenue,
-      totalOrders,
-      totalItems,
-      averageOrderValue,
-      totalDiscounts,
-      netRevenue: totalRevenue - totalDiscounts,
-      revenueByType,
-      period: {
-        start: req.query.dateFrom,
-        end: req.query.dateTo
-      }
-    };
+    // Use service method with tenantId for proper isolation
+    const summary = await salesService.getPeriodSummary(dateFrom, dateTo, req.tenantId);
     
     res.json({ data: summary });
   } catch (error) {
-    console.error('Get period summary error:', error);
+    logger.error('Get period summary error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -141,9 +112,9 @@ router.get('/period-summary', [
 // @route   GET /api/orders/:id
 // @desc    Get single order
 // @access  Private
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', auth, tenantMiddleware, async (req, res) => {
   try {
-    const order = await salesService.getSalesOrderById(req.params.id);
+    const order = await salesService.getSalesOrderById(req.params.id, req.tenantId);
     
     // Transform names to uppercase
     if (order.customer) {
@@ -159,7 +130,7 @@ router.get('/:id', auth, async (req, res) => {
     
     res.json({ order });
   } catch (error) {
-    console.error('Get order error:', error);
+    logger.error('Get order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -209,7 +180,7 @@ router.get('/customer/:customerId/last-prices', auth, async (req, res) => {
       prices: prices
     });
   } catch (error) {
-    console.error('Get last prices error:', error);
+    logger.error('Get last prices error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -219,6 +190,7 @@ router.get('/customer/:customerId/last-prices', auth, async (req, res) => {
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('create_orders'),
   preventPOSDuplicates, // Backend safety net for duplicate prevention
   body('orderType').isIn(['retail', 'wholesale', 'return', 'exchange']).withMessage('Invalid order type'),
@@ -237,8 +209,8 @@ router.post('/', [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      console.error('Validation failed for sales order creation:', errors.array());
-      console.error('Request body:', JSON.stringify(req.body, null, 2));
+      logger.error('Validation failed for sales order creation:', errors.array());
+      logger.error('Request body:', JSON.stringify(req.body, null, 2));
       return res.status(400).json({ 
         message: 'Validation failed',
         errors: errors.array().map(error => ({
@@ -275,21 +247,46 @@ router.post('/', [
       // Check actual inventory from Inventory model (source of truth) instead of Product model cache
       let inventoryRecord = await Inventory.findOne({ product: item.product });
       let availableStock = 0;
+      const productStock = Number(product.inventory?.currentStock || 0);
       
-      // If Inventory record doesn't exist, use Product's stock (will be synced when inventory is updated)
+      // If Inventory record doesn't exist, create it from Product's stock
       if (!inventoryRecord) {
-        availableStock = Number(product.inventory?.currentStock || 0);
-      } else {
-        // Check if Inventory is out of sync with Product
-        const productStock = Number(product.inventory?.currentStock || 0);
-        const inventoryStock = Number(inventoryRecord.currentStock || 0);
-        
-        // If Product has more stock than Inventory, use Product stock (Inventory might be outdated)
-        // This handles cases where stock was updated directly on Product but Inventory wasn't synced
-        if (productStock > inventoryStock) {
+        // Create Inventory record with Product's stock value
+        try {
+          inventoryRecord = await Inventory.create({
+            product: item.product,
+            productModel: 'Product',
+            currentStock: productStock,
+            reorderPoint: product.inventory?.reorderPoint || 10,
+            reorderQuantity: product.inventory?.reorderQuantity || 50,
+            reservedStock: 0,
+            availableStock: productStock,
+            status: productStock > 0 ? 'active' : 'out_of_stock'
+          });
           availableStock = productStock;
-        } else {
-          availableStock = inventoryStock;
+        } catch (inventoryError) {
+          // If creation fails, use Product stock as fallback
+          logger.error('Error creating inventory record:', inventoryError);
+          availableStock = productStock;
+        }
+      } else {
+        // Use availableStock from Inventory model (currentStock - reservedStock)
+        // This is the actual available stock accounting for reservations
+        const inventoryAvailableStock = Number(inventoryRecord.availableStock || 0);
+        const inventoryCurrentStock = Number(inventoryRecord.currentStock || 0);
+        const inventoryReservedStock = Number(inventoryRecord.reservedStock || 0);
+        
+        // Calculate available stock: currentStock - reservedStock
+        const calculatedAvailableStock = Math.max(0, inventoryCurrentStock - inventoryReservedStock);
+        
+        // Use the calculated value or the stored availableStock field
+        availableStock = inventoryAvailableStock > 0 ? inventoryAvailableStock : calculatedAvailableStock;
+        
+        // Check if Product has more stock than Inventory (sync issue)
+        if (productStock > inventoryCurrentStock) {
+          // Product has more stock, use Product stock as available (Inventory might be outdated)
+          // But still account for reserved stock
+          availableStock = Math.max(0, productStock - inventoryReservedStock);
         }
       }
       
@@ -324,7 +321,26 @@ router.post('/', [
       const itemTaxable = itemSubtotal - itemDiscount;
       const itemTax = isTaxExempt ? 0 : itemTaxable * (product.taxSettings.taxRate || 0);
       
-      const unitCost = product.pricing?.cost ?? 0;
+      // Get unit cost from multiple sources (priority: Inventory > Product)
+      let unitCost = 0;
+      
+      // First try to get from Inventory (most accurate - reflects actual purchase cost)
+      try {
+        const Inventory = require('../models/Inventory');
+        const inventory = await Inventory.findOne({ product: product._id });
+        if (inventory && inventory.cost) {
+          // Use average cost if available, otherwise last purchase cost
+          unitCost = inventory.cost.average || inventory.cost.lastPurchase || 0;
+        }
+      } catch (inventoryError) {
+        // If inventory lookup fails, continue with product cost
+        logger.warn('Could not fetch inventory cost:', inventoryError.message);
+      }
+      
+      // Fallback to product pricing.cost if inventory cost not available
+      if (unitCost === 0) {
+        unitCost = product.pricing?.cost || 0;
+      }
 
       orderItems.push({
         product: product._id,
@@ -420,12 +436,19 @@ router.post('/', [
           });
           availableStock = productStock;
         } else {
-          // Check if Inventory is out of sync with Product
-          const inventoryStock = Number(inventoryRecord.currentStock || 0);
+          // Use availableStock from Inventory model (currentStock - reservedStock)
+          const inventoryCurrentStock = Number(inventoryRecord.currentStock || 0);
+          const inventoryReservedStock = Number(inventoryRecord.reservedStock || 0);
+          const inventoryAvailableStock = Number(inventoryRecord.availableStock || 0);
           
-          // If Product has more stock than Inventory, sync Inventory to match Product
-          // This handles cases where stock was updated directly on Product but Inventory wasn't synced
-          if (productStock > inventoryStock) {
+          // Calculate available stock: currentStock - reservedStock
+          const calculatedAvailableStock = Math.max(0, inventoryCurrentStock - inventoryReservedStock);
+          
+          // Use the calculated value or the stored availableStock field
+          availableStock = inventoryAvailableStock > 0 ? inventoryAvailableStock : calculatedAvailableStock;
+          
+          // Check if Product has more stock than Inventory (sync issue)
+          if (productStock > inventoryCurrentStock) {
             // Sync Inventory to match Product stock
             await inventoryService.updateStock({
               productId: item.product,
@@ -436,13 +459,13 @@ router.post('/', [
               referenceId: null,
               referenceModel: 'StockAdjustment',
               performedBy: req.user._id,
-              notes: `Syncing Inventory model to match Product model stock (${inventoryStock} -> ${productStock})`
+              notes: `Syncing Inventory model to match Product model stock (${inventoryCurrentStock} -> ${productStock})`
             });
             // Refresh inventory record
             inventoryRecord = await Inventory.findOne({ product: item.product });
-            availableStock = productStock;
-          } else {
-            availableStock = inventoryStock;
+            // Recalculate available stock after sync
+            const refreshedReservedStock = Number(inventoryRecord.reservedStock || 0);
+            availableStock = Math.max(0, productStock - refreshedReservedStock);
           }
         }
         
@@ -479,7 +502,7 @@ router.post('/', [
         });
         
       } catch (error) {
-        console.error(`Error updating inventory for product ${item.product}:`, error);
+        logger.error(`Error updating inventory for product ${item.product}:`, error);
         
         // Get product name and actual stock for better error message
         let productName = 'Unknown Product';
@@ -493,7 +516,7 @@ router.post('/', [
             availableStock = Number(inventoryRecord ? inventoryRecord.currentStock : (productForError.inventory?.currentStock || 0));
           }
         } catch (productError) {
-          console.error('Error fetching product for error message:', productError);
+          logger.error('Error fetching product for error message:', productError);
         }
         
         // Check if this is an insufficient stock error
@@ -515,7 +538,7 @@ router.post('/', [
               notes: `Rollback: Sales order creation failed`
             });
           } catch (rollbackError) {
-            console.error(`Failed to rollback inventory for product ${successUpdate.productId}:`, rollbackError);
+            logger.error(`Failed to rollback inventory for product ${successUpdate.productId}:`, rollbackError);
           }
         }
         
@@ -536,6 +559,7 @@ router.post('/', [
     // Note: orderNumber will be auto-generated by Order model's pre-save hook with SI- prefix
     // Sales page orders are automatically confirmed since they directly impact stock
     const orderData = {
+      tenantId: req.tenantId, // Add tenantId from middleware
       orderType,
       customer: customer || null,
       customerInfo: customerData ? {
@@ -568,95 +592,140 @@ router.post('/', [
     };
     
     
-    const order = new Sales(orderData);
-    await order.save();
+    // Use MongoDB transaction for atomicity across Sales, CustomerTransaction, and Customer
+    const mongoose = require('mongoose');
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
     try {
-      await StockMovementService.trackSalesOrder(order, req.user);
-    } catch (movementError) {
-      console.error('Error recording stock movements for sales order:', movementError);
-      console.error('Movement error details:', {
-        message: movementError.message,
-        stack: movementError.stack,
-        orderId: order._id,
-        orderNumber: order.orderNumber,
-        itemsCount: order.items?.length
-      });
-      // Note: Don't fail the order creation if stock movement tracking fails
-      // The error is logged for investigation but doesn't block the order
-    }
+      // 1. Create sales order
+      const order = new Sales(orderData);
+      await order.save({ session });
 
-    // Distribute profit for investor-linked products (only if order is confirmed/paid)
-    if (order.status === 'confirmed' || order.payment?.status === 'paid') {
+      // 2. Track stock movements
       try {
-        const profitDistributionService = require('../services/profitDistributionService');
-        await profitDistributionService.distributeProfitForOrder(order, req.user);
-      } catch (profitError) {
-        // Log error but don't fail the order creation
-        console.error('Error distributing profit for order:', profitError);
+        await StockMovementService.trackSalesOrder(order, req.user);
+      } catch (movementError) {
+        logger.error('Error recording stock movements for sales order:', movementError);
+        // Log but don't fail - stock movements are tracked separately
       }
-    }
-    
-    
-    // Update customer balance for sales invoices
-    // Logic: 
-    // 1. Add invoice total to pendingBalance (customer owes this amount)
-    // 2. Record payment which will reduce pendingBalance and handle overpayments (add to advanceBalance)
-    if (customer && orderData.pricing.total > 0) {
-      try {
-        const CustomerBalanceService = require('../services/customerBalanceService');
+
+      // 3. Distribute profit for investor-linked products
+      if (order.status === 'confirmed' || order.payment?.status === 'paid') {
+        try {
+          const profitDistributionService = require('../services/profitDistributionService');
+          await profitDistributionService.distributeProfitForOrder(order, req.user);
+        } catch (profitError) {
+          logger.error('Error distributing profit for order:', profitError);
+        }
+      }
+
+      // 4. Create CustomerTransaction invoice and update balance (if customer account payment)
+      if (customer && orderData.pricing.total > 0) {
+        const customerTransactionService = require('../services/customerTransactionService');
         const Customer = require('../models/Customer');
-        const customerExists = await Customer.findById(customer);
+        const customerExists = await Customer.findById(customer).session(session);
         
         if (customerExists) {
-          // Step 1: Add invoice total to pendingBalance (customer owes this amount)
-          // Only add if payment is not fully paid upfront
           const amountPaid = payment.amount || 0;
-          if (amountPaid < orderData.pricing.total || payment.method === 'account') {
-            await Customer.findByIdAndUpdate(
+          const isAccountPayment = payment.method === 'account' || amountPaid < orderData.pricing.total;
+
+          // Create invoice transaction if account payment or partial payment
+          if (isAccountPayment) {
+            // Fetch product names for line items
+            const productIds = orderItems.map(item => item.product);
+            const products = await Product.find({ _id: { $in: productIds } }).select('name').lean();
+            const productMap = new Map(products.map(p => [p._id.toString(), p.name]));
+            
+            // Prepare line items for invoice
+            const lineItems = orderItems.map(item => ({
+              product: item.product,
+              description: productMap.get(item.product.toString()) || 'Product',
+              quantity: item.quantity,
+              unitPrice: item.unitPrice || 0, // Use unitPrice, not price
+              discountAmount: item.discountAmount || 0,
+              taxAmount: item.taxAmount || 0,
+              totalPrice: item.total || 0
+            }));
+
+            // Create CustomerTransaction invoice
+            await customerTransactionService.createTransaction({
+              customerId: customer,
+              transactionType: 'invoice',
+              netAmount: orderData.pricing.total,
+              grossAmount: subtotal,
+              discountAmount: totalDiscount,
+              taxAmount: totalTax,
+              referenceType: 'sales_order',
+              referenceId: order._id,
+              referenceNumber: order.orderNumber,
+              lineItems: lineItems,
+              notes: `Invoice for sales order ${order.orderNumber}`
+            }, req.user);
+          }
+
+          // Record payment if any amount paid
+          if (amountPaid > 0) {
+            const CustomerBalanceService = require('../services/customerBalanceService');
+            await CustomerBalanceService.recordPayment(
               customer,
-              { $inc: { pendingBalance: orderData.pricing.total } },
-              { new: true }
+              amountPaid,
+              order._id,
+              req.user,
+              {
+                paymentMethod: payment.method,
+                paymentReference: order.orderNumber
+              }
             );
           }
-          
-          // Step 2: Record payment (this will reduce pendingBalance and handle overpayments)
-          if (amountPaid > 0) {
-            await CustomerBalanceService.recordPayment(customer, amountPaid, order._id);
-          }
-        } else {
         }
-      } catch (error) {
-        console.error('Error updating customer balance on sales order creation:', error);
-        // Don't fail the order creation if customer update fails
       }
-    }
-    
-    // Inventory already updated above before order save
-    
-    // Create accounting entries
-    try {
-      const AccountingService = require('../services/accountingService');
-      await AccountingService.recordSale(order);
+
+      // 5. Create journal entries (double-entry accounting - single source of truth)
+      try {
+        await journalEntryService.createSaleEntries(order, {
+          session,
+          tenantId: req.tenantId,
+          createdBy: req.user._id
+        });
+      } catch (error) {
+        logger.error('Error creating journal entries for sales order:', error);
+        // This is critical - journal entries must be created, so we should fail the transaction
+        throw new Error(`Failed to create journal entries: ${error.message}`);
+      }
+
+      // Commit transaction
+      await session.commitTransaction();
+      
+      // Order is now saved and all related records created atomically
+      // Store order ID for later retrieval
+      const orderId = order._id;
+      
+      // Reload order after transaction (since it was saved in session)
+      const savedOrder = await Sales.findById(orderId);
+      
+      // Populate order for response
+      await savedOrder.populate([
+        { path: 'customer', select: 'firstName lastName businessName email' },
+        { path: 'items.product', select: 'name description' },
+        { path: 'createdBy', select: 'firstName lastName' }
+      ]);
+
+      res.status(201).json({
+        success: true,
+        message: 'Order created successfully',
+        order: savedOrder
+      });
     } catch (error) {
-      console.error('Error creating accounting entries for sales order:', error);
-      // Don't fail the order creation if accounting fails
+      // Rollback transaction on error
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
     }
-    
-    // Populate order for response
-    await order.populate([
-      { path: 'customer', select: 'firstName lastName businessName email' },
-      { path: 'items.product', select: 'name description' },
-      { path: 'createdBy', select: 'firstName lastName' }
-    ]);
-    
-    res.status(201).json({
-      message: 'Order created successfully',
-      order
-    });
   } catch (error) {
-    console.error('Create order error:', error);
-    console.error('Error details:', {
+    logger.error('Create order error:', { error: error });
+    logger.error('Error details:', {
       name: error.name,
       message: error.message,
       stack: error.stack
@@ -721,7 +790,7 @@ router.put('/:id/status', [
         } else {
         }
       } catch (error) {
-        console.error('Error updating customer balance on order confirmation:', error);
+        logger.error('Error updating customer balance on order confirmation:', error);
         // Don't fail the status update if customer update fails
       }
     }
@@ -765,7 +834,7 @@ router.put('/:id/status', [
           } else {
           }
         } catch (error) {
-          console.error('Error reversing customer balance on cancellation:', error);
+          logger.error('Error reversing customer balance on cancellation:', error);
           // Don't fail the cancellation if customer update fails
         }
       }
@@ -778,7 +847,7 @@ router.put('/:id/status', [
       order
     });
   } catch (error) {
-    console.error('Update order status error:', error);
+    logger.error('Update order status error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -807,6 +876,21 @@ router.put('/:id', [
     const order = await Sales.findById(req.params.id);
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
+    }
+    
+    // CRITICAL: Block edits if journal entries are posted
+    const JournalEntry = require('../models/JournalEntry');
+    const hasJournalEntries = await JournalEntry.exists({
+      referenceType: 'sale',
+      referenceId: order._id,
+      status: 'posted'
+    });
+
+    if (hasJournalEntries) {
+      return res.status(403).json({
+        message: 'Cannot edit sale with posted journal entries. Use return/adjustment to correct errors.',
+        error: 'JOURNAL_ENTRIES_POSTED'
+      });
     }
     
     // Get customer data if customer is being updated
@@ -1032,7 +1116,7 @@ router.put('/:id', [
           }
         }
       } catch (error) {
-        console.error('Error adjusting inventory on order update:', error);
+        logger.error('Error adjusting inventory on order update:', error);
         // Don't fail update if inventory adjustment fails
       }
     }
@@ -1108,7 +1192,7 @@ router.put('/:id', [
           }
         }
       } catch (error) {
-        console.error('Error adjusting customer balance on order update:', error);
+        logger.error('Error adjusting customer balance on order update:', error);
         // Don't fail update if balance adjustment fails
       }
     }
@@ -1125,7 +1209,7 @@ router.put('/:id', [
       order
     });
   } catch (error) {
-    console.error('Update order error:', error);
+    logger.error('Update order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -1188,7 +1272,7 @@ router.post('/:id/payment', [
         const Customer = require('../models/Customer');
         const updatedCustomer = await Customer.findById(order.customer);
       } catch (error) {
-        console.error('Error updating customer balance on payment:', error);
+        logger.error('Error updating customer balance on payment:', error);
         // Don't fail the payment if customer update fails
       }
     }
@@ -1202,7 +1286,7 @@ router.post('/:id/payment', [
       }
     });
   } catch (error) {
-    console.error('Process payment error:', error);
+    logger.error('Process payment error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -1220,6 +1304,23 @@ router.delete('/:id', [
       return res.status(404).json({ message: 'Order not found' });
     }
     
+    // CRITICAL: Check if journal entries exist - if posted, block deletion
+    const JournalEntry = require('../models/JournalEntry');
+    const journalEntry = await JournalEntry.findOne({
+      referenceType: 'sale',
+      referenceId: order._id,
+      status: 'posted'
+    });
+
+    if (journalEntry) {
+      return res.status(403).json({
+        message: 'Cannot delete sale with posted journal entries. Use return/adjustment instead.',
+        error: 'JOURNAL_ENTRIES_EXIST',
+        journalEntryId: journalEntry._id,
+        journalEntryNumber: journalEntry.entryNumber
+      });
+    }
+
     // Check if order can be deleted (allow deletion of orders that haven't been delivered)
     // Business rule: Can delete orders until they're shipped/delivered
     const nonDeletableStatuses = ['shipped', 'delivered'];
@@ -1266,14 +1367,39 @@ router.delete('/:id', [
         } else {
         }
       } catch (error) {
-        console.error('Error rolling back customer balance:', error);
+        logger.error('Error rolling back customer balance:', error);
         // Continue with deletion even if customer update fails
       }
     }
     
+    // CRITICAL: Reverse journal entries if they exist (draft or reversed status)
+    const journalEntryService = require('../services/journalEntryService');
+    const existingJournalEntry = await JournalEntry.findOne({
+      referenceType: 'sale',
+      referenceId: order._id,
+      status: { $in: ['posted', 'draft'] }
+    });
+
+    if (existingJournalEntry && existingJournalEntry.status === 'posted') {
+      try {
+        await journalEntryService.reverseJournalEntry(existingJournalEntry._id, {
+          reason: `Sale deletion: ${order.orderNumber || order._id}`,
+          createdBy: req.user._id,
+          tenantId: req.tenantId || order.tenantId
+        });
+      } catch (error) {
+        logger.error('Error reversing journal entry on sale deletion:', error);
+        return res.status(500).json({
+          message: 'Failed to reverse journal entries. Cannot delete sale.',
+          error: error.message
+        });
+      }
+    }
+
     // Restore inventory for items in the order using inventoryService for audit trail
     try {
       const inventoryService = require('../services/inventoryService');
+const logger = require('../utils/logger');
       for (const item of order.items) {
         try {
           await inventoryService.updateStock({
@@ -1288,12 +1414,12 @@ router.delete('/:id', [
             notes: `Inventory restored due to deletion of order ${order.orderNumber}`
           });
         } catch (error) {
-          console.error(`Failed to restore inventory for product ${item.product}:`, error);
+          logger.error(`Failed to restore inventory for product ${item.product}:`, error);
           // Continue with other items
         }
       }
     } catch (error) {
-      console.error('Error restoring inventory on order deletion:', error);
+      logger.error('Error restoring inventory on order deletion:', error);
       // Don't fail deletion if inventory update fails
     }
     
@@ -1301,7 +1427,7 @@ router.delete('/:id', [
     
     res.json({ message: 'Order deleted successfully' });
   } catch (error) {
-    console.error('Delete order error:', error);
+    logger.error('Delete order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -1310,22 +1436,43 @@ router.delete('/:id', [
 // @desc    Get today's order summary
 // @access  Private
 router.get('/today/summary', [
-  auth
+  auth,
+  tenantMiddleware // Enforce tenant isolation
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ 
+        message: 'Tenant ID is required',
+        summary: {
+          totalOrders: 0,
+          totalRevenue: 0,
+          totalItems: 0,
+          averageOrderValue: 0,
+          orderTypes: {},
+          paymentMethods: {}
+        }
+      });
+    }
+
     const today = new Date();
     const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    endOfDay.setHours(0, 0, 0, 0);
     
-    const orders = await salesRepository.findByDateRange(startOfDay, endOfDay, { lean: true });
+    const orders = await salesRepository.findByDateRange(startOfDay, endOfDay, { 
+      lean: true,
+      filter: { tenantId: tenantId }
+    });
     
     const summary = {
       totalOrders: orders.length,
-      totalRevenue: orders.reduce((sum, order) => sum + order.pricing.total, 0),
+      totalRevenue: orders.reduce((sum, order) => sum + (order.pricing?.total || 0), 0),
       totalItems: orders.reduce((sum, order) => 
-        sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0),
+        sum + (order.items || []).reduce((itemSum, item) => itemSum + (item.quantity || 0), 0), 0),
       averageOrderValue: orders.length > 0 ? 
-        orders.reduce((sum, order) => sum + order.pricing.total, 0) / orders.length : 0,
+        orders.reduce((sum, order) => sum + (order.pricing?.total || 0), 0) / orders.length : 0,
       orderTypes: {
         retail: orders.filter(o => o.orderType === 'retail').length,
         wholesale: orders.filter(o => o.orderType === 'wholesale').length,
@@ -1333,15 +1480,27 @@ router.get('/today/summary', [
         exchange: orders.filter(o => o.orderType === 'exchange').length
       },
       paymentMethods: orders.reduce((acc, order) => {
-        acc[order.payment.method] = (acc[order.payment.method] || 0) + 1;
+        const method = order.payment?.method || 'unknown';
+        acc[method] = (acc[method] || 0) + 1;
         return acc;
       }, {})
     };
     
-    res.json({ summary });
+    res.json({ data: { summary } });
   } catch (error) {
-    console.error('Get today summary error:', error);
-    res.status(500).json({ message: 'Server error' });
+    logger.error('Get today summary error:', { error: error });
+    res.status(500).json({ 
+      message: 'Server error',
+      error: error.message,
+      summary: {
+        totalOrders: 0,
+        totalRevenue: 0,
+        totalItems: 0,
+        averageOrderValue: 0,
+        orderTypes: {},
+        paymentMethods: {}
+      }
+    });
   }
 });
 
@@ -1404,7 +1563,7 @@ router.get('/period/summary', [
     
     res.json({ data: summary });
   } catch (error) {
-    console.error('Get period summary error:', error);
+    logger.error('Get period summary error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -1552,8 +1711,8 @@ router.post('/export/excel', [auth, requirePermission('view_orders')], async (re
     });
     
   } catch (error) {
-    console.error('Excel export error:', error);
-    console.error('Error stack:', error.stack);
+    logger.error('Excel export error:', { error: error });
+    logger.error('Error stack:', error.stack);
     res.status(500).json({ 
       message: 'Export failed', 
       error: error.message,
@@ -1679,7 +1838,7 @@ router.post('/export/csv', [auth, requirePermission('view_orders')], async (req,
     });
     
   } catch (error) {
-    console.error('CSV export error:', error);
+    logger.error('CSV export error:', { error: error });
     res.status(500).json({ message: 'Export failed', error: error.message });
   }
 });
@@ -2280,7 +2439,7 @@ router.post('/export/pdf', [auth, requirePermission('view_orders')], async (req,
     });
     
   } catch (error) {
-    console.error('PDF export error:', error);
+    logger.error('PDF export error:', { error: error });
     res.status(500).json({ message: 'Export failed', error: error.message });
   }
 });
@@ -2361,7 +2520,7 @@ router.post('/export/json', [auth, requirePermission('view_orders')], async (req
     });
     
   } catch (error) {
-    console.error('JSON export error:', error);
+    logger.error('JSON export error:', { error: error });
     res.status(500).json({ message: 'Export failed', error: error.message });
   }
 });
@@ -2413,7 +2572,7 @@ router.get('/download/:filename', [auth, requirePermission('view_orders')], asyn
     stream.pipe(res);
     
   } catch (error) {
-    console.error('Download error:', error);
+    logger.error('Download error:', { error: error });
     res.status(500).json({ message: 'Download failed', error: error.message });
   }
 });

@@ -12,7 +12,7 @@ import {
   Building,
   User,
   Calendar,
-  DollarSign,
+  TrendingUp,
   Filter,
   X,
   Eye,
@@ -119,7 +119,7 @@ const PurchaseOrderCard = ({ po, onEdit, onDelete, onConfirm, onCancel, onClose,
             )}
             
             <div className="flex items-center text-sm text-gray-600">
-              <DollarSign className="h-4 w-4 mr-2" />
+              <TrendingUp className="h-4 w-4 mr-2" />
               {Math.round(po.subtotal)} ({po.items.length} items)
             </div>
           </div>

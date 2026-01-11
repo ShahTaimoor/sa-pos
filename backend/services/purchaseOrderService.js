@@ -1,6 +1,7 @@
 const purchaseOrderRepository = require('../repositories/PurchaseOrderRepository');
 const supplierRepository = require('../repositories/SupplierRepository');
-const PurchaseOrder = require('../models/PurchaseOrder'); // Still needed for generatePONumber static method
+const PurchaseOrder = require('../models/PurchaseOrder');
+const logger = require('../utils/logger'); // Still needed for generatePONumber static method
 
 class PurchaseOrderService {
   /**
@@ -182,7 +183,7 @@ class PurchaseOrderService {
         }
       } catch (error) {
         // Don't fail the purchase order creation if supplier update fails
-        console.error('Error updating supplier pending balance:', error);
+        logger.error('Error updating supplier pending balance:', error);
       }
     }
 
@@ -236,7 +237,7 @@ class PurchaseOrderService {
           $inc: { pendingBalance: -oldTotal }
         });
       } catch (error) {
-        console.error('Error reducing old supplier balance:', error);
+        logger.error('Error reducing old supplier balance:', error);
       }
     }
 
@@ -247,7 +248,7 @@ class PurchaseOrderService {
           $inc: { pendingBalance: updatedPO.total }
         });
       } catch (error) {
-        console.error('Error updating new supplier balance:', error);
+        logger.error('Error updating new supplier balance:', error);
       }
     }
 
@@ -307,7 +308,7 @@ class PurchaseOrderService {
           $inc: { pendingBalance: -purchaseOrder.total }
         });
       } catch (error) {
-        console.error('Error reducing supplier balance on cancellation:', error);
+        logger.error('Error reducing supplier balance on cancellation:', error);
       }
     }
 
@@ -365,7 +366,7 @@ class PurchaseOrderService {
           $inc: { pendingBalance: -purchaseOrder.total }
         });
       } catch (error) {
-        console.error('Error reducing supplier balance on deletion:', error);
+        logger.error('Error reducing supplier balance on deletion:', error);
       }
     }
 

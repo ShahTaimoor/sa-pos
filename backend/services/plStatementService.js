@@ -6,10 +6,14 @@ class PLStatementService {
    * Check if statement exists for period
    * @param {Date} startDate - Start date
    * @param {Date} endDate - End date
+   * @param {string} tenantId - Tenant ID
    * @returns {Promise<object|null>}
    */
-  async findExistingStatement(startDate, endDate) {
-    return await financialStatementRepository.findExistingStatement(startDate, endDate, 'profit_loss');
+  async findExistingStatement(startDate, endDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to find existing statement');
+    }
+    return await financialStatementRepository.findExistingStatement(startDate, endDate, 'profit_loss', tenantId);
   }
 
   /**
@@ -30,8 +34,13 @@ class PLStatementService {
   async getStatements(queryParams) {
     const page = parseInt(queryParams.page) || 1;
     const limit = parseInt(queryParams.limit) || 10;
+    const tenantId = queryParams.tenantId;
 
-    const filter = { type: 'profit_loss' };
+    if (!tenantId) {
+      throw new Error('tenantId is required to get statements');
+    }
+
+    const filter = { type: 'profit_loss', tenantId: tenantId };
 
     if (queryParams.startDate || queryParams.endDate) {
       filter['period.startDate'] = {};

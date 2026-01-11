@@ -466,6 +466,7 @@ Collections: ${backup.collections.length}`;
   // Send webhook notification
   async sendWebhookNotification(webhookUrl, backup) {
     const axios = require('axios');
+const logger = require('../utils/logger');
     await axios.post(webhookUrl, {
       event: 'backup.completed',
       backup: backup.toObject(),
@@ -500,7 +501,7 @@ Collections: ${backup.collections.length}`;
         }
       }
     } catch (error) {
-      console.error('Error cleaning up backup files:', error);
+      logger.error('Error cleaning up backup files:', error);
     }
 
     return deletedCount;
@@ -526,7 +527,7 @@ Collections: ${backup.collections.length}`;
           schedule: backup.schedule,
         });
       } catch (error) {
-        console.error(`Failed to retry backup ${backup.backupId}:`, error);
+        logger.error(`Failed to retry backup ${backup.backupId}:`, error);
       }
     }
   }

@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
+const logger = require('../utils/logger');
 const bankReceiptService = require('../services/bankReceiptService');
 const BankReceipt = require('../models/BankReceipt'); // Still needed for create/update operations
 const Bank = require('../models/Bank');
@@ -13,6 +15,7 @@ const Customer = require('../models/Customer');
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
@@ -111,7 +114,7 @@ router.get('/', [
       }
     });
   } catch (error) {
-    console.error('Get bank receipts error:', error);
+    logger.error('Get bank receipts error', { error: error.message });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -125,6 +128,7 @@ router.get('/', [
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('create_orders'),
   body('date').optional().isISO8601().withMessage('Date must be a valid date'),
   body('amount').isFloat({ min: 0 }).withMessage('Amount must be a positive number'),
@@ -209,6 +213,7 @@ router.post('/', [
 
     // Create bank receipt
     const bankReceiptData = {
+      tenantId: req.tenantId || req.user.tenantId,
       date: date ? new Date(date) : new Date(),
       amount: parseFloat(amount),
       particular: particular ? particular.trim() : 'Bank Receipt',
@@ -230,7 +235,7 @@ router.post('/', [
         const CustomerBalanceService = require('../services/customerBalanceService');
         await CustomerBalanceService.recordPayment(customer, amount, order);
       } catch (error) {
-        console.error('Error updating customer balance for bank receipt:', error);
+        logger.error('Error updating customer balance for bank receipt:', error);
         // Don't fail the bank receipt creation if balance update fails
       }
     }
@@ -242,7 +247,7 @@ router.post('/', [
         const SupplierBalanceService = require('../services/supplierBalanceService');
         await SupplierBalanceService.recordPayment(supplier, amount, order);
       } catch (error) {
-        console.error('Error updating supplier balance for bank receipt:', error);
+        logger.error('Error updating supplier balance for bank receipt', { error: error.message });
         // Don't fail the bank receipt creation if balance update fails
       }
     }
@@ -252,7 +257,7 @@ router.post('/', [
       const AccountingService = require('../services/accountingService');
       await AccountingService.recordBankReceipt(bankReceipt);
     } catch (error) {
-      console.error('Error creating accounting entries for bank receipt:', error);
+      logger.error('Error creating accounting entries for bank receipt:', error);
       // Don't fail the bank receipt creation if accounting fails
     }
 
@@ -271,7 +276,7 @@ router.post('/', [
       data: bankReceipt
     });
   } catch (error) {
-    console.error('Create bank receipt error:', error);
+    logger.error('Create bank receipt error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -285,6 +290,7 @@ router.post('/', [
 // @access  Private
 router.get('/summary/date-range', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('fromDate').isISO8601().withMessage('From date is required and must be a valid date'),
   query('toDate').isISO8601().withMessage('To date is required and must be a valid date')
@@ -310,7 +316,7 @@ router.get('/summary/date-range', [
       }
     });
   } catch (error) {
-    console.error('Get bank receipts summary error:', error);
+    logger.error('Get bank receipts summary error', { error: error.message });
     res.status(500).json({ 
       success: false,
       message: 'Server error',

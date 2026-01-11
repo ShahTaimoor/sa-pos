@@ -8,7 +8,13 @@ const fs = require('fs');
 const path = require('path');
 const { auth, requirePermission } = require('../middleware/auth');
 const { sanitizeRequest, handleValidationErrors } = require('../middleware/validation');
+const { blockDirectProductStockEdit } = require('../middleware/dataIntegrityMiddleware');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
+const logger = require('../utils/logger');
 const productService = require('../services/productService');
+const auditLogService = require('../services/auditLogService');
+const expiryManagementService = require('../services/expiryManagementService');
+const costingService = require('../services/costingService');
 
 const router = express.Router();
 
@@ -49,6 +55,7 @@ const upload = multer({
 router.get('/', [
   sanitizeRequest,
   auth,
+  tenantMiddleware,
   query('page').optional({ checkFalsy: true }).isInt({ min: 1 }),
   query('limit').optional({ checkFalsy: true }).isInt({ min: 1, max: 999999 }),
   query('all').optional({ checkFalsy: true }).isBoolean(),
@@ -111,15 +118,21 @@ router.get('/', [
       });
     }
     
-    // Call service to get products
-    const result = await productService.getProducts(req.query);
+    // Get tenantId from request (set by tenantMiddleware)
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
+    // Call service to get products with tenantId
+    const result = await productService.getProducts({ ...req.query, tenantId });
     
     res.json({
       products: result.products,
       pagination: result.pagination
     });
   } catch (error) {
-    console.error('Get products error:', error);
+    logger.error('Get products error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -148,7 +161,7 @@ router.get('/:id/last-purchase-price', auth, async (req, res) => {
       purchaseDate: priceInfo.purchaseDate
     });
   } catch (error) {
-    console.error('Get last purchase price error:', error);
+    logger.error('Get last purchase price error:', { error: error });
     res.status(500).json({ 
       message: 'Server error', 
       error: process.env.NODE_ENV === 'development' ? error.message : undefined 
@@ -159,15 +172,19 @@ router.get('/:id/last-purchase-price', auth, async (req, res) => {
 // @route   GET /api/products/:id
 // @desc    Get single product
 // @access  Private
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const product = await productService.getProductById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    const product = await productService.getProductById(req.params.id, tenantId);
     res.json({ product });
   } catch (error) {
     if (error.message === 'Product not found') {
       return res.status(404).json({ message: 'Product not found' });
     }
-    console.error('Get product error:', error);
+    logger.error('Get product error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -178,6 +195,7 @@ router.get('/:id', auth, async (req, res) => {
 router.post('/', [
   sanitizeRequest,
   auth,
+  tenantMiddleware,
   requirePermission('create_products'),
   body('name').trim().isLength({ min: 1 }).withMessage('Product name is required'),
   body('pricing.cost').isFloat({ min: 0 }).withMessage('Cost must be a positive number'),
@@ -187,17 +205,23 @@ router.post('/', [
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      console.error('Validation errors:', errors.array());
+      logger.error('Validation errors:', errors.array());
       return res.status(400).json({ errors: errors.array() });
     }
     
-    // Call service to create product
-    const result = await productService.createProduct(req.body, req.user._id);
+    // Get tenantId from request (set by tenantMiddleware)
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
+    // Call service to create product (pass req for audit logging)
+    const result = await productService.createProduct(req.body, req.user._id, req, tenantId);
     
     res.status(201).json(result);
   } catch (error) {
-    console.error('Create product error:', error);
-    console.error('Error details:', {
+    logger.error('Create product error:', { error: error });
+    logger.error('Error details:', {
       name: error.name,
       message: error.message,
       code: error.code,
@@ -225,9 +249,12 @@ router.post('/', [
 // @route   PUT /api/products/:id
 // @desc    Update product
 // @access  Private
+// @note    Direct stock edits are blocked. Use /api/inventory/update-stock instead.
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('edit_products'),
+  blockDirectProductStockEdit, // BLOCK direct stock edits
   body('name').optional().trim().isLength({ min: 1 }),
   body('pricing.cost').optional().isFloat({ min: 0 }),
   body('pricing.retail').optional().isFloat({ min: 0 }),
@@ -239,12 +266,18 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    // Call service to update product
-    const result = await productService.updateProduct(req.params.id, req.body, req.user._id);
+    // Get tenantId from request (set by tenantMiddleware)
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
+    // Call service to update product (pass req for audit logging and optimistic locking)
+    const result = await productService.updateProduct(req.params.id, req.body, req.user._id, req, tenantId);
     
     res.json(result);
   } catch (error) {
-    console.error('Update product error:', error);
+    logger.error('Update product error:', { error: error });
     if (error.code === 11000) {
       return res.status(400).json({ 
         message: 'A product with this name already exists. Please choose a different name.',
@@ -263,11 +296,11 @@ router.delete('/:id', [
   requirePermission('delete_products')
 ], async (req, res) => {
   try {
-    // Call service to delete product (soft delete)
-    const result = await productService.deleteProduct(req.params.id);
+    // Call service to delete product (soft delete, pass req for audit logging)
+    const result = await productService.deleteProduct(req.params.id, req);
     res.json(result);
   } catch (error) {
-    console.error('Delete product error:', error);
+    logger.error('Delete product error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -289,7 +322,7 @@ router.post('/:id/restore', [
     await productRepository.restore(req.params.id);
     res.json({ message: 'Product restored successfully' });
   } catch (error) {
-    console.error('Restore product error:', error);
+    logger.error('Restore product error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -309,7 +342,7 @@ router.get('/deleted', [
     });
     res.json(deletedProducts);
   } catch (error) {
-    console.error('Get deleted products error:', error);
+    logger.error('Get deleted products error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -323,7 +356,7 @@ router.get('/search/:query', auth, async (req, res) => {
     const products = await productService.searchProducts(query, 10);
     res.json({ products });
   } catch (error) {
-    console.error('Search products error:', error);
+    logger.error('Search products error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -345,7 +378,7 @@ router.put('/bulk', [
     
     res.json(result);
   } catch (error) {
-    console.error('Bulk update products error:', error);
+    logger.error('Bulk update products error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -366,7 +399,7 @@ router.delete('/bulk', [
     
     res.json(result);
   } catch (error) {
-    console.error('Bulk delete products error:', error);
+    logger.error('Bulk delete products error:', { error: error });
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -374,13 +407,27 @@ router.delete('/bulk', [
 // @route   GET /api/products/low-stock
 // @desc    Get products with low stock
 // @access  Private
-router.get('/low-stock', auth, async (req, res) => {
+router.get('/low-stock', [
+  auth,
+  tenantMiddleware
+], async (req, res) => {
   try {
-    const products = await productService.getLowStockProducts();
-    res.json({ products });
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ 
+        message: 'Tenant ID is required',
+        products: []
+      });
+    }
+    const products = await productService.getLowStockProducts(tenantId);
+    res.json({ data: { products } });
   } catch (error) {
-    console.error('Get low stock products error:', error);
-    res.status(500).json({ message: 'Server error' });
+    logger.error('Get low stock products error:', { error: error });
+    res.status(500).json({ 
+      message: 'Server error',
+      error: error.message,
+      products: []
+    });
   }
 });
 
@@ -402,7 +449,7 @@ router.post('/:id/price-check', [
     const result = await productService.getPriceForCustomerType(req.params.id, customerType, quantity);
     res.json(result);
   } catch (error) {
-    console.error('Price check error:', error);
+    logger.error('Price check error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -485,7 +532,7 @@ router.post('/export/csv', [auth, requirePermission('view_products')], async (re
     });
     
   } catch (error) {
-    console.error('CSV export error:', error);
+    logger.error('CSV export error:', { error: error });
     res.status(500).json({ message: 'Export failed' });
   }
 });
@@ -610,7 +657,7 @@ router.post('/export/excel', [auth, requirePermission('view_products')], async (
       
       
     } catch (xlsxError) {
-      console.error('XLSX write error:', xlsxError);
+      logger.error('XLSX write error:', { error: xlsxError });
       
       // Fallback: Create a simple CSV file instead
       const csvFilename = filename.replace('.xlsx', '.csv');
@@ -650,7 +697,7 @@ router.post('/export/excel', [auth, requirePermission('view_products')], async (
     });
     
   } catch (error) {
-    console.error('Excel export error:', error);
+    logger.error('Excel export error:', { error: error });
     res.status(500).json({ 
       message: 'Export failed', 
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
@@ -687,14 +734,14 @@ router.get('/download/:filename', [auth, requirePermission('view_products')], (r
     fileStream.pipe(res);
     
     fileStream.on('error', (err) => {
-      console.error('File stream error:', err);
+      logger.error('File stream error:', { error: err });
       if (!res.headersSent) {
         res.status(500).json({ message: 'Download failed' });
       }
     });
     
   } catch (error) {
-    console.error('Download error:', error);
+    logger.error('Download error:', { error: error });
     res.status(500).json({ message: 'Download failed' });
   }
 });
@@ -794,12 +841,12 @@ router.post('/import/csv', [
         });
       })
       .on('error', (error) => {
-        console.error('CSV parsing error:', error);
+        logger.error('CSV parsing error:', { error: error });
         res.status(500).json({ message: 'Failed to parse CSV file' });
       });
       
   } catch (error) {
-    console.error('Import error:', error);
+    logger.error('Import error:', { error: error });
     res.status(500).json({ message: 'Import failed' });
   }
 });
@@ -913,7 +960,7 @@ router.post('/import/excel', [
     });
     
   } catch (error) {
-    console.error('Excel import error:', error);
+    logger.error('Excel import error:', { error: error });
     res.status(500).json({ message: 'Import failed' });
   }
 });
@@ -979,7 +1026,7 @@ router.get('/template/csv', [auth, requirePermission('create_products')], async 
     res.download('exports/product_template.csv', 'product_template.csv');
     
   } catch (error) {
-    console.error('Template error:', error);
+    logger.error('Template error:', { error: error });
     res.status(500).json({ message: 'Failed to generate template' });
   }
 });
@@ -1001,7 +1048,7 @@ router.post('/:id/investors', [
       data: product
     });
   } catch (error) {
-    console.error('Error linking investors:', error);
+    logger.error('Error linking investors:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -1027,7 +1074,7 @@ router.delete('/:id/investors/:investorId', [
     if (error.message === 'Product not found') {
       return res.status(404).json({ message: error.message });
     }
-    console.error('Error removing investor:', error);
+    logger.error('Error removing investor:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -1055,10 +1102,140 @@ router.post('/get-last-purchase-prices', auth, async (req, res) => {
       prices: prices
     });
   } catch (error) {
-    console.error('Get last purchase prices error:', error);
+    logger.error('Get last purchase prices error:', { error: error });
     res.status(500).json({ 
       message: 'Server error', 
       error: process.env.NODE_ENV === 'development' ? error.message : undefined 
+    });
+  }
+});
+
+// @route   GET /api/products/:id/audit-logs
+// @desc    Get audit logs for a product
+// @access  Private
+router.get('/:id/audit-logs', [
+  auth,
+  requirePermission('view_products')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit = 50, skip = 0, action, startDate, endDate } = req.query;
+    
+    const logs = await auditLogService.getProductAuditLogs(id, {
+      limit: parseInt(limit),
+      skip: parseInt(skip),
+      action,
+      startDate,
+      endDate
+    });
+    
+    res.json({
+      success: true,
+      logs,
+      count: logs.length
+    });
+  } catch (error) {
+    logger.error('Get audit logs error:', { error: error });
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/products/expiring-soon
+// @desc    Get products expiring soon
+// @access  Private
+router.get('/expiring-soon', [
+  auth,
+  requirePermission('view_products')
+], async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 30;
+    const result = await expiryManagementService.getExpiringSoon(days);
+    
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    logger.error('Get expiring products error:', { error: error });
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   GET /api/products/expired
+// @desc    Get expired products
+// @access  Private
+router.get('/expired', [
+  auth,
+  requirePermission('view_products')
+], async (req, res) => {
+  try {
+    const result = await expiryManagementService.getExpired();
+    
+    res.json({
+      success: true,
+      ...result
+    });
+  } catch (error) {
+    logger.error('Get expired products error:', { error: error });
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// @route   POST /api/products/:id/write-off-expired
+// @desc    Write off expired inventory
+// @access  Private
+router.post('/:id/write-off-expired', [
+  auth,
+  requirePermission('edit_products')
+], async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await expiryManagementService.writeOffExpired(id, req.user._id, req);
+    
+    res.json({
+      success: true,
+      message: 'Expired inventory written off successfully',
+      ...result
+    });
+  } catch (error) {
+    logger.error('Write off expired error:', { error: error });
+    res.status(500).json({ 
+      message: 'Server error',
+      error: error.message 
+    });
+  }
+});
+
+// @route   POST /api/products/:id/calculate-cost
+// @desc    Calculate product cost using costing method
+// @access  Private
+router.post('/:id/calculate-cost', [
+  auth,
+  requirePermission('view_products'),
+  body('quantity').isInt({ min: 1 }).withMessage('Quantity must be at least 1')
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+    
+    const { id } = req.params;
+    const { quantity } = req.body;
+    
+    const costInfo = await costingService.calculateCost(id, quantity);
+    
+    res.json({
+      success: true,
+      productId: id,
+      quantity,
+      ...costInfo
+    });
+  } catch (error) {
+    logger.error('Calculate cost error:', { error: error });
+    res.status(500).json({ 
+      message: 'Server error',
+      error: error.message 
     });
   }
 });

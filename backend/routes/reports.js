@@ -1,7 +1,9 @@
 const express = require('express');
 const { query, validationResult } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const reportsService = require('../services/reportsService');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -10,6 +12,7 @@ const router = express.Router();
 // @access  Private
 router.get('/sales', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('dateFrom').optional().isISO8601(),
   query('dateTo').optional().isISO8601(),
@@ -26,7 +29,7 @@ router.get('/sales', [
     
     res.json(report);
   } catch (error) {
-    console.error('Sales report error:', error);
+    logger.error('Sales report error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -36,6 +39,7 @@ router.get('/sales', [
 // @access  Private
 router.get('/products', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('dateFrom').optional().isISO8601(),
   query('dateTo').optional().isISO8601(),
@@ -51,7 +55,7 @@ router.get('/products', [
     
     res.json(report);
   } catch (error) {
-    console.error('Product report error:', error);
+    logger.error('Product report error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -61,6 +65,7 @@ router.get('/products', [
 // @access  Private
 router.get('/customers', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('dateFrom').optional().isISO8601(),
   query('dateTo').optional().isISO8601(),
@@ -77,7 +82,7 @@ router.get('/customers', [
     
     res.json(report);
   } catch (error) {
-    console.error('Customer report error:', error);
+    logger.error('Customer report error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -87,6 +92,7 @@ router.get('/customers', [
 // @access  Private
 router.get('/inventory', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('lowStock').optional().isBoolean(),
   query('category').optional().isMongoId()
@@ -101,7 +107,7 @@ router.get('/inventory', [
     
     res.json(report);
   } catch (error) {
-    console.error('Inventory report error:', error);
+    logger.error('Inventory report error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });

@@ -9,7 +9,7 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  DollarSign,
+  TrendingUp,
   Printer,
   Filter,
   Calendar
@@ -75,7 +75,7 @@ const PurchaseInvoiceCard = ({ invoice, onEdit, onDelete, onConfirm, onView, onP
             </div>
             
             <div className="flex items-center text-sm text-gray-600">
-              <DollarSign className="h-4 w-4 mr-2" />
+              <TrendingUp className="h-4 w-4 mr-2" />
               {Math.round(invoice.pricing?.total || 0)} ({invoice.items?.length || 0} items)
             </div>
             

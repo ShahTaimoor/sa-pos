@@ -5,15 +5,18 @@ const ProductVariant = require('../models/ProductVariant'); // Still needed for 
 const Product = require('../models/Product'); // Still needed for model reference
 const Inventory = require('../models/Inventory'); // Still needed for new Inventory() and findOneAndDelete
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const productVariantRepository = require('../repositories/ProductVariantRepository');
 const productRepository = require('../repositories/ProductRepository');
 const inventoryRepository = require('../repositories/InventoryRepository');
+const logger = require('../utils/logger');
 
 // @route   GET /api/product-variants
 // @desc    Get all product variants with filters
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_products'),
   query('baseProduct').optional().isMongoId(),
   query('variantType').optional().isIn(['color', 'warranty', 'size', 'finish', 'custom']),
@@ -55,7 +58,7 @@ router.get('/', [
       variants
     });
   } catch (error) {
-    console.error('Error fetching product variants:', error);
+    logger.error('Error fetching product variants:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -65,6 +68,7 @@ router.get('/', [
 // @access  Private
 router.get('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('view_products'),
   param('id').isMongoId()
 ], async (req, res) => {
@@ -91,7 +95,7 @@ router.get('/:id', [
       variant
     });
   } catch (error) {
-    console.error('Error fetching product variant:', error);
+    logger.error('Error fetching product variant:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -191,7 +195,7 @@ router.post('/', [
       variant: populatedVariant
     });
   } catch (error) {
-    console.error('Error creating product variant:', error);
+    logger.error('Error creating product variant:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -201,6 +205,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('edit_products'),
   param('id').isMongoId(),
   body('variantName').optional().trim().isLength({ min: 1, max: 200 }),
@@ -245,7 +250,7 @@ router.put('/:id', [
       variant: updatedVariant
     });
   } catch (error) {
-    console.error('Error updating product variant:', error);
+    logger.error('Error updating product variant:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -289,7 +294,7 @@ router.delete('/:id', [
       message: 'Product variant deleted successfully'
     });
   } catch (error) {
-    console.error('Error deleting product variant:', error);
+    logger.error('Error deleting product variant:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -299,6 +304,7 @@ router.delete('/:id', [
 // @access  Private
 router.get('/base-product/:productId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_products'),
   param('productId').isMongoId()
 ], async (req, res) => {
@@ -321,7 +327,7 @@ router.get('/base-product/:productId', [
       variants
     });
   } catch (error) {
-    console.error('Error fetching product variants:', error);
+    logger.error('Error fetching product variants:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

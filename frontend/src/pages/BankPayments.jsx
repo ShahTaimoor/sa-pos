@@ -134,6 +134,14 @@ const BankPayments = () => {
     { refetchOnMountOrArgChange: true }
   );
 
+  // Extract expense accounts array from response
+  const expenseAccounts = React.useMemo(() => {
+    if (Array.isArray(expenseAccountsData)) return expenseAccountsData;
+    if (Array.isArray(expenseAccountsData?.data)) return expenseAccountsData.data; // Backend returns { success: true, data: accounts[] }
+    if (Array.isArray(expenseAccountsData?.accounts)) return expenseAccountsData.accounts;
+    return [];
+  }, [expenseAccountsData]);
+
   // Update selected supplier when suppliers data changes
   useEffect(() => {
     if (selectedSupplier && suppliers.length > 0) {
@@ -230,9 +238,12 @@ const BankPayments = () => {
   };
 
   const handleExpenseAccountSelect = (accountId) => {
-    const account = expenseAccountsData?.find(a => a._id === accountId);
-    setSelectedExpenseAccount(account);
-    setFormData(prev => ({ ...prev, particular: account?.accountName || '' }));
+    const account = expenseAccounts?.find(a => a._id === accountId);
+    if (account) {
+      setSelectedExpenseAccount(account);
+      setExpenseSearchTerm(account.accountName || '');
+      setFormData(prev => ({ ...prev, particular: account.accountName || '' }));
+    }
   };
 
   const handleExpenseSearch = (searchTerm) => {
@@ -245,7 +256,7 @@ const BankPayments = () => {
   };
 
   const handleExpenseKeyDown = (e) => {
-    const filteredAccounts = expenseAccountsData?.filter(account => 
+    const filteredAccounts = expenseAccounts?.filter(account => 
       (account.accountName || '').toLowerCase().includes(expenseSearchTerm.toLowerCase()) ||
       (account.accountCode || '').includes(expenseSearchTerm)
     ) || [];
@@ -605,8 +616,10 @@ const BankPayments = () => {
                       onChange={(e) => {
                         setPaymentType(e.target.value);
                         setSelectedCustomer(null);
+                        setSelectedExpenseAccount(null);
                         setCustomerSearchTerm('');
-                        setFormData(prev => ({ ...prev, customer: '' }));
+                        setExpenseSearchTerm('');
+                        setFormData(prev => ({ ...prev, customer: '', particular: '' }));
                       }}
                       className="mr-2"
                     />
@@ -620,12 +633,31 @@ const BankPayments = () => {
                       onChange={(e) => {
                         setPaymentType(e.target.value);
                         setSelectedSupplier(null);
+                        setSelectedExpenseAccount(null);
                         setSupplierSearchTerm('');
-                        setFormData(prev => ({ ...prev, supplier: '' }));
+                        setExpenseSearchTerm('');
+                        setFormData(prev => ({ ...prev, supplier: '', particular: '' }));
                       }}
                       className="mr-2"
                     />
                     <span className="text-sm text-gray-700">Customer</span>
+                  </label>
+                  <label className="flex items-center">
+                    <input
+                      type="radio"
+                      value="expense"
+                      checked={paymentType === 'expense'}
+                      onChange={(e) => {
+                        setPaymentType(e.target.value);
+                        setSelectedSupplier(null);
+                        setSelectedCustomer(null);
+                        setSupplierSearchTerm('');
+                        setCustomerSearchTerm('');
+                        setFormData(prev => ({ ...prev, supplier: '', customer: '', particular: '' }));
+                      }}
+                      className="mr-2"
+                    />
+                    <span className="text-sm text-gray-700">Expense</span>
                   </label>
                 </div>
               </div>
@@ -875,23 +907,28 @@ const BankPayments = () => {
               {paymentType === 'expense' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Expense Description *
+                    Expense Account *
                   </label>
                   <div className="relative">
                     <input
                       type="text"
-                      value={expenseSearchTerm}
+                      value={selectedExpenseAccount ? selectedExpenseAccount.accountName : expenseSearchTerm}
                       onChange={(e) => handleExpenseSearch(e.target.value)}
                       onKeyDown={handleExpenseKeyDown}
+                      onFocus={() => {
+                        if (selectedExpenseAccount) {
+                          setExpenseSearchTerm(selectedExpenseAccount.accountName || '');
+                        }
+                      }}
                       className="input w-full pr-10"
                       placeholder="Search expense account (e.g., Rent Expense, Utilities Expense, etc.)"
                       required
                     />
                     <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   </div>
-                  {expenseSearchTerm && (
+                  {expenseSearchTerm && !selectedExpenseAccount && (
                     <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
-                      {expenseAccountsData?.filter(account => 
+                      {expenseAccounts?.filter(account => 
                         (account.accountName || '').toLowerCase().includes(expenseSearchTerm.toLowerCase()) ||
                         (account.accountCode || '').includes(expenseSearchTerm)
                       ).map((account, index) => (
@@ -914,6 +951,21 @@ const BankPayments = () => {
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Selected Expense Account Display */}
+              {paymentType === 'expense' && selectedExpenseAccount && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Selected Expense Account
+                  </label>
+                  <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded">
+                    <div className="font-medium text-blue-900">{selectedExpenseAccount.accountName || 'Unknown'}</div>
+                    {selectedExpenseAccount.accountCode && (
+                      <div className="text-sm text-blue-700">Code: {selectedExpenseAccount.accountCode}</div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1426,8 +1478,10 @@ const BankPayments = () => {
                         onChange={(e) => {
                           setPaymentType(e.target.value);
                           setSelectedCustomer(null);
+                          setSelectedExpenseAccount(null);
                           setCustomerSearchTerm('');
-                          setFormData(prev => ({ ...prev, customer: '' }));
+                          setExpenseSearchTerm('');
+                          setFormData(prev => ({ ...prev, customer: '', particular: '' }));
                         }}
                         className="mr-2"
                       />
@@ -1441,12 +1495,31 @@ const BankPayments = () => {
                         onChange={(e) => {
                           setPaymentType(e.target.value);
                           setSelectedSupplier(null);
+                          setSelectedExpenseAccount(null);
                           setSupplierSearchTerm('');
-                          setFormData(prev => ({ ...prev, supplier: '' }));
+                          setExpenseSearchTerm('');
+                          setFormData(prev => ({ ...prev, supplier: '', particular: '' }));
                         }}
                         className="mr-2"
                       />
                       <span className="text-sm text-gray-700">Customer</span>
+                    </label>
+                    <label className="flex items-center">
+                      <input
+                        type="radio"
+                        value="expense"
+                        checked={paymentType === 'expense'}
+                        onChange={(e) => {
+                          setPaymentType(e.target.value);
+                          setSelectedSupplier(null);
+                          setSelectedCustomer(null);
+                          setSupplierSearchTerm('');
+                          setCustomerSearchTerm('');
+                          setFormData(prev => ({ ...prev, supplier: '', customer: '', particular: '' }));
+                        }}
+                        className="mr-2"
+                      />
+                      <span className="text-sm text-gray-700">Expense</span>
                     </label>
                   </div>
                 </div>
@@ -1537,23 +1610,28 @@ const BankPayments = () => {
                 {paymentType === 'expense' && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Expense Description *
+                      Expense Account *
                     </label>
                     <div className="relative">
                       <input
                         type="text"
-                        value={expenseSearchTerm}
+                        value={selectedExpenseAccount ? selectedExpenseAccount.accountName : expenseSearchTerm}
                         onChange={(e) => handleExpenseSearch(e.target.value)}
                         onKeyDown={handleExpenseKeyDown}
+                        onFocus={() => {
+                          if (selectedExpenseAccount) {
+                            setExpenseSearchTerm(selectedExpenseAccount.accountName || '');
+                          }
+                        }}
                         className="input w-full pr-10"
                         placeholder="Search expense account (e.g., Rent Expense, Utilities Expense, etc.)"
                         required
                       />
                       <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     </div>
-                    {expenseSearchTerm && (
+                    {expenseSearchTerm && !selectedExpenseAccount && (
                       <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white shadow-lg">
-                        {expenseAccountsData?.filter(account => 
+                        {expenseAccounts?.filter(account => 
                           (account.accountName || '').toLowerCase().includes(expenseSearchTerm.toLowerCase()) ||
                           (account.accountCode || '').includes(expenseSearchTerm)
                         ).map((account, index) => (
@@ -1576,6 +1654,34 @@ const BankPayments = () => {
                         ))}
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Selected Expense Account Display */}
+                {paymentType === 'expense' && selectedExpenseAccount && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Selected Expense Account
+                    </label>
+                    <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded">
+                      <div className="font-medium text-blue-900">{selectedExpenseAccount.accountName || 'Unknown'}</div>
+                      {selectedExpenseAccount.accountCode && (
+                        <div className="text-sm text-blue-700">Code: {selectedExpenseAccount.accountCode}</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {paymentType === 'expense' && selectedExpenseAccount && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Selected Expense Account
+                    </label>
+                    <div className="px-3 py-2 bg-blue-50 border border-blue-200 rounded">
+                      <div className="font-medium text-blue-900">{selectedExpenseAccount.accountName || 'Unknown'}</div>
+                      {selectedExpenseAccount.accountCode && (
+                        <div className="text-sm text-blue-700">Code: {selectedExpenseAccount.accountCode}</div>
+                      )}
+                    </div>
                   </div>
                 )}
 

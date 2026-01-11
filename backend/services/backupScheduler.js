@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const backupService = require('./backupService');
 const Backup = require('../models/Backup');
+const logger = require('../utils/logger');
 
 class BackupScheduler {
   constructor() {
@@ -11,11 +12,11 @@ class BackupScheduler {
   // Start the scheduler
   start() {
     if (this.isRunning) {
-      console.log('Backup scheduler is already running');
+      logger.info('Backup scheduler is already running');
       return;
     }
 
-    console.log('Starting backup scheduler...');
+    logger.info('Starting backup scheduler...');
     this.isRunning = true;
 
     // Schedule hourly backups (during business hours)
@@ -56,42 +57,42 @@ class BackupScheduler {
       await this.runRetryFailedBackups();
     });
 
-    console.log('Backup scheduler started successfully');
+    logger.info('Backup scheduler started successfully');
   }
 
   // Stop the scheduler
   stop() {
     if (!this.isRunning) {
-      console.log('Backup scheduler is not running');
+      logger.info('Backup scheduler is not running');
       return;
     }
 
-    console.log('Stopping backup scheduler...');
+    logger.info('Stopping backup scheduler...');
     
     for (const [name, job] of this.jobs) {
       job.stop();
-      console.log(`Stopped job: ${name}`);
+      logger.info(`Stopped job: ${name}`);
     }
     
     this.jobs.clear();
     this.isRunning = false;
-    console.log('Backup scheduler stopped');
+    logger.info('Backup scheduler stopped');
   }
 
   // Schedule a cron job
   scheduleJob(name, cronExpression, task) {
     if (this.jobs.has(name)) {
-      console.log(`Job ${name} already exists, stopping previous instance`);
+      logger.info(`Job ${name} already exists, stopping previous instance`);
       this.jobs.get(name).stop();
     }
 
     const job = cron.schedule(cronExpression, async () => {
       try {
-        console.log(`Running scheduled job: ${name}`);
+        logger.info(`Running scheduled job: ${name}`);
         await task();
-        console.log(`Completed scheduled job: ${name}`);
+        logger.info(`Completed scheduled job: ${name}`);
       } catch (error) {
-        console.error(`Error in scheduled job ${name}:`, error);
+        logger.error(`Error in scheduled job ${name}:`, error);
       }
     }, {
       scheduled: false,
@@ -100,17 +101,17 @@ class BackupScheduler {
 
     job.start();
     this.jobs.set(name, job);
-    console.log(`Scheduled job ${name} with expression: ${cronExpression}`);
+    logger.info(`Scheduled job ${name} with expression: ${cronExpression}`);
   }
 
   // Run a scheduled backup
   async runScheduledBackup(schedule, type) {
     try {
-      console.log(`Starting ${schedule} ${type} backup...`);
+      logger.info(`Starting ${schedule} ${type} backup...`);
       
       // Check if we should skip this backup
       if (await this.shouldSkipBackup(schedule, type)) {
-        console.log(`Skipping ${schedule} ${type} backup`);
+        logger.info(`Skipping ${schedule} ${type} backup`);
         return;
       }
 
@@ -123,9 +124,9 @@ class BackupScheduler {
         triggerReason: 'scheduled',
       });
 
-      console.log(`Completed ${schedule} ${type} backup: ${backup.backupId}`);
+      logger.info(`Completed ${schedule} ${type} backup: ${backup.backupId}`);
     } catch (error) {
-      console.error(`Failed ${schedule} ${type} backup:`, error);
+      logger.error(`Failed ${schedule} ${type} backup:`, error);
       
       // Create a failed backup record
       try {
@@ -141,7 +142,7 @@ class BackupScheduler {
           triggerReason: 'scheduled',
         });
       } catch (createError) {
-        console.error('Failed to create failed backup record:', createError);
+        logger.error('Failed to create failed backup record:', createError);
       }
     }
   }
@@ -156,7 +157,7 @@ class BackupScheduler {
     });
 
     if (inProgressBackup) {
-      console.log(`Backup already in progress for ${schedule} ${type}`);
+      logger.info(`Backup already in progress for ${schedule} ${type}`);
       return true;
     }
 
@@ -169,7 +170,7 @@ class BackupScheduler {
     });
 
     if (recentBackup) {
-      console.log(`Recent backup found for ${schedule} ${type}, skipping`);
+      logger.info(`Recent backup found for ${schedule} ${type}, skipping`);
       return true;
     }
 
@@ -191,21 +192,21 @@ class BackupScheduler {
   // Run cleanup
   async runCleanup() {
     try {
-      console.log('Running backup cleanup...');
+      logger.info('Running backup cleanup...');
       const deletedCount = await backupService.cleanupOldBackups();
-      console.log(`Cleaned up ${deletedCount} old backups`);
+      logger.info(`Cleaned up ${deletedCount} old backups`);
     } catch (error) {
-      console.error('Error during cleanup:', error);
+      logger.error('Error during cleanup:', error);
     }
   }
 
   // Retry failed backups
   async runRetryFailedBackups() {
     try {
-      console.log('Checking for failed backups to retry...');
+      logger.info('Checking for failed backups to retry...');
       await backupService.retryFailedBackups();
     } catch (error) {
-      console.error('Error retrying failed backups:', error);
+      logger.error('Error retrying failed backups:', error);
     }
   }
 
@@ -229,7 +230,7 @@ class BackupScheduler {
   // Manually trigger a backup
   async triggerBackup(schedule, type, userId = null) {
     try {
-      console.log(`Manually triggering ${schedule} ${type} backup...`);
+      logger.info(`Manually triggering ${schedule} ${type} backup...`);
       
       const backup = await backupService.createFullBackup({
         userId,
@@ -242,7 +243,7 @@ class BackupScheduler {
 
       return backup;
     } catch (error) {
-      console.error(`Failed to trigger ${schedule} ${type} backup:`, error);
+      logger.error(`Failed to trigger ${schedule} ${type} backup:`, error);
       throw error;
     }
   }
@@ -253,7 +254,7 @@ class BackupScheduler {
       throw new Error(`Job ${name} not found`);
     }
 
-    console.log(`Updating schedule for job ${name} to: ${cronExpression}`);
+    logger.info(`Updating schedule for job ${name} to: ${cronExpression}`);
     
     // Stop current job
     this.jobs.get(name).stop();
@@ -292,10 +293,10 @@ class BackupScheduler {
     
     if (enabled) {
       job.start();
-      console.log(`Enabled job: ${name}`);
+      logger.info(`Enabled job: ${name}`);
     } else {
       job.stop();
-      console.log(`Disabled job: ${name}`);
+      logger.info(`Disabled job: ${name}`);
     }
   }
 }

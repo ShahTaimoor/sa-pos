@@ -4,10 +4,14 @@ class BankService {
   /**
    * Get banks with filters
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID to scope the query (optional but recommended)
    * @returns {Promise<Array>}
    */
-  async getBanks(queryParams) {
+  async getBanks(queryParams, tenantId = null) {
     const filter = {};
+    if (tenantId) {
+      filter.tenantId = tenantId; // Always include tenantId for isolation
+    }
 
     if (queryParams.isActive !== undefined) {
       filter.isActive = queryParams.isActive === 'true';
@@ -21,10 +25,15 @@ class BankService {
   /**
    * Get single bank by ID
    * @param {string} id - Bank ID
+   * @param {string} tenantId - Tenant ID to scope the query (optional but recommended)
    * @returns {Promise<object>}
    */
-  async getBankById(id) {
-    const bank = await BankRepository.findById(id);
+  async getBankById(id, tenantId = null) {
+    const query = { _id: id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    const bank = await BankRepository.findOne(query);
     if (!bank) {
       throw new Error('Bank not found');
     }
@@ -35,9 +44,15 @@ class BankService {
    * Create bank
    * @param {object} bankData - Bank data
    * @param {string} userId - User ID
+   * @param {object} options - Options including tenantId
    * @returns {Promise<object>}
    */
-  async createBank(bankData, userId) {
+  async createBank(bankData, userId, options = {}) {
+    const tenantId = options.tenantId;
+    if (!tenantId) {
+      throw new Error('tenantId is required for bank creation');
+    }
+    
     const processedData = {
       accountName: bankData.accountName.trim(),
       accountNumber: bankData.accountNumber.trim(),
@@ -52,6 +67,7 @@ class BankService {
       currentBalance: parseFloat(bankData.openingBalance || 0),
       isActive: bankData.isActive !== undefined ? bankData.isActive : true,
       notes: bankData.notes ? bankData.notes.trim() : null,
+      tenantId: tenantId, // Ensure tenantId is set
       createdBy: userId
     };
 
@@ -63,10 +79,16 @@ class BankService {
    * @param {string} id - Bank ID
    * @param {object} updateData - Update data
    * @param {string} userId - User ID
+   * @param {object} options - Options including tenantId
    * @returns {Promise<object>}
    */
-  async updateBank(id, updateData, userId) {
-    const bank = await BankRepository.findById(id);
+  async updateBank(id, updateData, userId, options = {}) {
+    const tenantId = options.tenantId;
+    const query = { _id: id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    const bank = await BankRepository.findOne(query);
     if (!bank) {
       throw new Error('Bank not found');
     }
@@ -119,10 +141,16 @@ class BankService {
   /**
    * Delete bank
    * @param {string} id - Bank ID
+   * @param {object} options - Options including tenantId
    * @returns {Promise<object>}
    */
-  async deleteBank(id) {
-    const bank = await BankRepository.findById(id);
+  async deleteBank(id, options = {}) {
+    const tenantId = options.tenantId;
+    const query = { _id: id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    const bank = await BankRepository.findOne(query);
     if (!bank) {
       throw new Error('Bank not found');
     }

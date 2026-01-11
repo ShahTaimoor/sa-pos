@@ -9,34 +9,49 @@ class CustomerRepository extends BaseRepository {
   /**
    * Find customer by email
    * @param {string} email - Customer email
-   * @param {object} options - Query options
+   * @param {object} options - Query options (can include tenantId)
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Customer|null>}
    */
-  async findByEmail(email, options = {}) {
+  async findByEmail(email, options = {}, tenantId = null) {
     if (!email) return null;
-    return await this.findOne({ email: email.toLowerCase().trim() }, options);
+    const query = { email: email.toLowerCase().trim() };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    return await this.findOne(query, options);
   }
 
   /**
    * Find customer by phone
    * @param {string} phone - Customer phone
-   * @param {object} options - Query options
+   * @param {object} options - Query options (can include tenantId)
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Customer|null>}
    */
-  async findByPhone(phone, options = {}) {
+  async findByPhone(phone, options = {}, tenantId = null) {
     if (!phone) return null;
-    return await this.findOne({ phone: phone.trim() }, options);
+    const query = { phone: phone.trim() };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    return await this.findOne(query, options);
   }
 
   /**
    * Find customer by business name
    * @param {string} businessName - Business name
-   * @param {object} options - Query options
+   * @param {object} options - Query options (can include tenantId)
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Customer|null>}
    */
-  async findByBusinessName(businessName, options = {}) {
+  async findByBusinessName(businessName, options = {}, tenantId = null) {
     if (!businessName) return null;
-    return await this.findOne({ businessName: { $regex: `^${businessName}$`, $options: 'i' } }, options);
+    const query = { businessName: { $regex: `^${businessName}$`, $options: 'i' } };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    return await this.findOne(query, options);
   }
 
   /**
@@ -104,30 +119,45 @@ class CustomerRepository extends BaseRepository {
    * Find customers by business type
    * @param {string} businessType - Business type
    * @param {object} options - Query options
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Array>}
    */
-  async findByBusinessType(businessType, options = {}) {
-    return await this.findAll({ businessType }, options);
+  async findByBusinessType(businessType, options = {}, tenantId = null) {
+    const filter = { businessType };
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
+    return await this.findAll(filter, options);
   }
 
   /**
    * Find customers by status
    * @param {string} status - Customer status
    * @param {object} options - Query options
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Array>}
    */
-  async findByStatus(status, options = {}) {
-    return await this.findAll({ status }, options);
+  async findByStatus(status, options = {}, tenantId = null) {
+    const filter = { status };
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
+    return await this.findAll(filter, options);
   }
 
   /**
    * Find customers by tier
    * @param {string} tier - Customer tier
    * @param {object} options - Query options
+   * @param {string} tenantId - Tenant ID to scope the search (optional but recommended)
    * @returns {Promise<Array>}
    */
-  async findByTier(tier, options = {}) {
-    return await this.findAll({ customerTier: tier }, options);
+  async findByTier(tier, options = {}, tenantId = null) {
+    const filter = { customerTier: tier };
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
+    return await this.findAll(filter, options);
   }
 
   /**
@@ -175,11 +205,15 @@ class CustomerRepository extends BaseRepository {
    * Check if email exists
    * @param {string} email - Email to check
    * @param {string} excludeId - Customer ID to exclude from check
+   * @param {string} tenantId - Tenant ID to scope the check
    * @returns {Promise<boolean>}
    */
-  async emailExists(email, excludeId = null) {
+  async emailExists(email, excludeId = null, tenantId = null) {
     if (!email) return false;
     const query = { email: email.toLowerCase().trim() };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     if (excludeId) {
       query._id = { $ne: excludeId };
     }
@@ -190,11 +224,15 @@ class CustomerRepository extends BaseRepository {
    * Check if phone exists
    * @param {string} phone - Phone to check
    * @param {string} excludeId - Customer ID to exclude from check
+   * @param {string} tenantId - Tenant ID to scope the check
    * @returns {Promise<boolean>}
    */
-  async phoneExists(phone, excludeId = null) {
+  async phoneExists(phone, excludeId = null, tenantId = null) {
     if (!phone) return false;
     const query = { phone: phone.trim() };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     if (excludeId) {
       query._id = { $ne: excludeId };
     }
@@ -205,11 +243,34 @@ class CustomerRepository extends BaseRepository {
    * Check if business name exists
    * @param {string} businessName - Business name to check
    * @param {string} excludeId - Customer ID to exclude from check
+   * @param {string} tenantId - Tenant ID to scope the check
    * @returns {Promise<boolean>}
    */
-  async businessNameExists(businessName, excludeId = null) {
+  async businessNameExists(businessName, excludeId = null, tenantId = null) {
     if (!businessName) return false;
     const query = { businessName: { $regex: `^${businessName}$`, $options: 'i' } };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    if (excludeId) {
+      query._id = { $ne: excludeId };
+    }
+    return await this.exists(query);
+  }
+
+  /**
+   * Check if name exists
+   * @param {string} name - Name to check
+   * @param {string} excludeId - Customer ID to exclude from check
+   * @param {string} tenantId - Tenant ID to scope the check
+   * @returns {Promise<boolean>}
+   */
+  async nameExists(name, excludeId = null, tenantId = null) {
+    if (!name) return false;
+    const query = { name: { $regex: `^${name}$`, $options: 'i' } };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     if (excludeId) {
       query._id = { $ne: excludeId };
     }

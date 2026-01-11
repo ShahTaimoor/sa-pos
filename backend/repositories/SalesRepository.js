@@ -131,11 +131,13 @@ class SalesRepository extends BaseRepository {
    * Find sales by date range
    * @param {Date} dateFrom - Start date
    * @param {Date} dateTo - End date
-   * @param {object} options - Query options
+   * @param {object} options - Query options (can include filter with tenantId)
    * @returns {Promise<Array>}
    */
   async findByDateRange(dateFrom, dateTo, options = {}) {
+    const { filter: additionalFilter = {} } = options;
     const filter = {
+      ...additionalFilter,
       createdAt: {
         $gte: dateFrom,
         $lt: dateTo

@@ -1,6 +1,7 @@
 const Inventory = require('../models/Inventory');
 const StockAdjustment = require('../models/StockAdjustment');
 const Product = require('../models/Product');
+const logger = require('../utils/logger');
 
 // Update stock levels
 const updateStock = async ({ productId, type, quantity, reason, reference, referenceId, referenceModel, cost, performedBy, notes }) => {
@@ -21,14 +22,26 @@ const updateStock = async ({ productId, type, quantity, reason, reference, refer
     const updatedInventory = await Inventory.updateStock(productId, movement);
     
     // Update product's current stock field for quick access
-    await Product.findByIdAndUpdate(productId, {
+    const productUpdate = {
       'inventory.currentStock': updatedInventory.currentStock,
       'inventory.lastUpdated': new Date(),
-    });
-
+    };
+    
+    // If cost is provided and inventory cost was updated, sync to product pricing.cost
+    if (cost !== undefined && cost !== null && (type === 'in' || type === 'return')) {
+      // Get updated inventory to check if cost was set
+      const inventory = await Inventory.findOne({ product: productId });
+      if (inventory && inventory.cost && inventory.cost.average) {
+        // Sync average cost to product pricing.cost
+        productUpdate['pricing.cost'] = inventory.cost.average;
+      }
+    }
+    
+    await Product.findByIdAndUpdate(productId, productUpdate);
+    
     return updatedInventory;
   } catch (error) {
-    console.error('Error updating stock:', error);
+    logger.error('Error updating stock:', error);
     throw error;
   }
 };
@@ -39,7 +52,7 @@ const reserveStock = async ({ productId, quantity }) => {
     const inventory = await Inventory.reserveStock(productId, quantity);
     return inventory;
   } catch (error) {
-    console.error('Error reserving stock:', error);
+    logger.error('Error reserving stock:', error);
     throw error;
   }
 };
@@ -50,7 +63,7 @@ const releaseStock = async ({ productId, quantity }) => {
     const inventory = await Inventory.releaseStock(productId, quantity);
     return inventory;
   } catch (error) {
-    console.error('Error releasing stock:', error);
+    logger.error('Error releasing stock:', error);
     throw error;
   }
 };
@@ -70,7 +83,7 @@ const processStockAdjustment = async ({ adjustments, type, reason, requestedBy, 
     await adjustment.save();
     return adjustment;
   } catch (error) {
-    console.error('Error processing stock adjustment:', error);
+    logger.error('Error processing stock adjustment:', error);
     throw error;
   }
 };
@@ -103,7 +116,7 @@ const getInventoryStatus = async (productId) => {
 
     return inventory;
   } catch (error) {
-    console.error('Error getting inventory status:', error);
+    logger.error('Error getting inventory status:', error);
     throw error;
   }
 };
@@ -114,7 +127,7 @@ const getLowStockItems = async () => {
     const lowStockItems = await Inventory.getLowStockItems();
     return lowStockItems;
   } catch (error) {
-    console.error('Error getting low stock items:', error);
+    logger.error('Error getting low stock items:', error);
     throw error;
   }
 };
@@ -157,25 +170,36 @@ const getInventoryHistory = async ({ productId, limit = 50, offset = 0, type, st
       hasMore: offset + limit < movements.length,
     };
   } catch (error) {
-    console.error('Error getting inventory history:', error);
+    logger.error('Error getting inventory history:', error);
     throw error;
   }
 };
 
 // Get inventory summary
-const getInventorySummary = async () => {
+const getInventorySummary = async (tenantId) => {
+  if (!tenantId) {
+    throw new Error('tenantId is required to get inventory summary');
+  }
   try {
-    const totalProducts = await Inventory.countDocuments({ status: 'active' });
-    const outOfStock = await Inventory.countDocuments({ status: 'out_of_stock' });
-    const lowStock = await Inventory.countDocuments({
-      $expr: { $lte: ['$currentStock', '$reorderPoint'] },
+    const matchFilter = { 
       status: 'active',
+      tenantId: tenantId
+    };
+    const totalProducts = await Inventory.countDocuments(matchFilter);
+    const outOfStock = await Inventory.countDocuments({ 
+      ...matchFilter,
+      status: 'out_of_stock' 
+    });
+    const lowStock = await Inventory.countDocuments({
+      ...matchFilter,
+      $expr: { $lte: ['$currentStock', '$reorderPoint'] }
     });
 
     const totalValue = await Inventory.aggregate([
-      { $match: { status: 'active' } },
+      { $match: matchFilter },
       { $lookup: { from: 'products', localField: 'product', foreignField: '_id', as: 'product' } },
       { $unwind: '$product' },
+      { $match: { 'product.tenantId': tenantId } },
       {
         $group: {
           _id: null,
@@ -191,7 +215,7 @@ const getInventorySummary = async () => {
       totalValue: totalValue.length > 0 ? totalValue[0].totalValue : 0,
     };
   } catch (error) {
-    console.error('Error getting inventory summary:', error);
+    logger.error('Error getting inventory summary:', error);
     throw error;
   }
 };
@@ -199,25 +223,25 @@ const getInventorySummary = async () => {
 // Bulk update stock levels
 const bulkUpdateStock = async (updates) => {
   try {
-    console.log('Bulk update stock called with:', updates);
+    logger.info('Bulk update stock called with:', updates);
     const results = [];
     
     for (const update of updates) {
       try {
-        console.log('Processing update for product:', update.productId, 'type:', update.type, 'quantity:', update.quantity);
+        logger.info('Processing update for product:', update.productId, 'type:', update.type, 'quantity:', update.quantity);
         const result = await updateStock(update);
-        console.log('Update successful, new stock:', result.currentStock);
+        logger.info('Update successful, new stock:', result.currentStock);
         results.push({ success: true, productId: update.productId, inventory: result });
       } catch (error) {
-        console.error('Update failed for product:', update.productId, 'error:', error.message);
+        logger.error('Update failed for product:', { productId: update.productId, error: error.message });
         results.push({ success: false, productId: update.productId, error: error.message });
       }
     }
     
-    console.log('Bulk update results:', results);
+    logger.info('Bulk update results:', results);
     return results;
   } catch (error) {
-    console.error('Error in bulk update stock:', error);
+    logger.error('Error in bulk update stock:', error);
     throw error;
   }
 };
@@ -244,7 +268,7 @@ const createInventoryRecord = async (productId, initialStock = 0) => {
     await inventory.save();
     return inventory;
   } catch (error) {
-    console.error('Error creating inventory record:', error);
+    logger.error('Error creating inventory record:', error);
     throw error;
   }
 };

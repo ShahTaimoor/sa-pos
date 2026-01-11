@@ -9,7 +9,18 @@ export const chartOfAccountsApi = api.injectEndpoints({
         params,
       }),
       providesTags: (result) => {
-        const accounts = Array.isArray(result) ? result : (result?.data?.accounts || result?.accounts || []);
+        // Handle different response structures
+        let accounts = [];
+        if (Array.isArray(result)) {
+          accounts = result;
+        } else if (Array.isArray(result?.data)) {
+          accounts = result.data; // Backend returns { success: true, data: accounts[] }
+        } else if (Array.isArray(result?.data?.accounts)) {
+          accounts = result.data.accounts;
+        } else if (Array.isArray(result?.accounts)) {
+          accounts = result.accounts;
+        }
+        
         return accounts.length
           ? [
               ...accounts.map(({ _id, id }) => ({ type: 'ChartOfAccounts', id: _id || id })),

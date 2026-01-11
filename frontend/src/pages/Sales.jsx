@@ -7,7 +7,7 @@ import {
   Trash2, 
   User, 
   CreditCard, 
-  DollarSign, 
+  TrendingUp, 
   Calculator, 
   Receipt, 
   Printer,
@@ -194,9 +194,9 @@ const ProductSearch = ({ onAddProduct, selectedCustomer, showCostPrice, onLastPu
         const loss = lastPurchasePrice - unitPrice;
         const lossPercent = ((loss / lastPurchasePrice) * 100).toFixed(1);
         const shouldProceed = window.confirm(
-          `⚠️ WARNING: Sale price ($${unitPrice}) is below cost price ($${Math.round(lastPurchasePrice)}).\n\n` +
-          `Loss per unit: $${Math.round(loss)} (${lossPercent}%)\n` +
-          `Total loss for ${quantity} unit(s): $${Math.round(loss * quantity)}\n\n` +
+          `⚠️ WARNING: Sale price (${unitPrice}) is below cost price (${Math.round(lastPurchasePrice)}).\n\n` +
+          `Loss per unit: ${Math.round(loss)} (${lossPercent}%)\n` +
+          `Total loss for ${quantity} unit(s): ${Math.round(loss * quantity)}\n\n` +
           `Do you want to proceed?`
         );
         if (!shouldProceed) {
@@ -204,7 +204,7 @@ const ProductSearch = ({ onAddProduct, selectedCustomer, showCostPrice, onLastPu
         }
         // Show warning toast even if proceeding
         toast.warning(
-          `Product added with loss: $${Math.round(loss)} per unit (${lossPercent}%)`,
+          `Product added with loss: ${Math.round(loss)} per unit (${lossPercent}%)`,
           { duration: 6000 }
         );
       }
@@ -281,8 +281,8 @@ const ProductSearch = ({ onAddProduct, selectedCustomer, showCostPrice, onLastPu
         <div className="font-medium">{product.name}</div>
           <div className="flex items-center space-x-4">
           <div className="text-sm text-gray-600">Stock: {product.inventory.currentStock}</div>
-          {showCostPrice && hasCostPricePermission && <div className="text-sm text-red-600 font-medium">Cost: ${Math.round(purchasePrice)}</div>}
-          <div className="text-sm text-gray-600">Price: ${Math.round(unitPrice)}</div>
+          {showCostPrice && hasCostPricePermission && <div className="text-sm text-red-600 font-medium">Cost: {Math.round(purchasePrice)}</div>}
+          <div className="text-sm text-gray-600">Price: {Math.round(unitPrice)}</div>
         </div>
       </div>
     );
@@ -364,7 +364,7 @@ const ProductSearch = ({ onAddProduct, selectedCustomer, showCostPrice, onLastPu
                 Cost
               </label>
               <span className="text-sm font-semibold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 block text-center h-10 flex items-center justify-center" title="Last Purchase Price">
-                {lastPurchasePrice !== null ? `$${Math.round(lastPurchasePrice)}` : selectedProduct ? 'N/A' : '$0'}
+                {lastPurchasePrice !== null ? `${Math.round(lastPurchasePrice)}` : selectedProduct ? 'N/A' : '0'}
               </span>
             </div>
           )}
@@ -842,7 +842,7 @@ export const Sales = ({ tabId, editData }) => {
         const loss = costPrice - newPrice;
         const lossPercent = ((loss / costPrice) * 100).toFixed(1);
         toast.error(
-          `Warning: Sale price ($${newPrice}) is below cost price ($${Math.round(costPrice)}). Loss: $${Math.round(loss)} (${lossPercent}%)`,
+          `Warning: Sale price (${newPrice}) is below cost price (${Math.round(costPrice)}). Loss: ${Math.round(loss)} (${lossPercent}%)`,
           {
             duration: 5000,
             position: 'top-center',
@@ -1730,7 +1730,7 @@ export const Sales = ({ tabId, editData }) => {
                     <div className="font-medium">{customer.displayName}</div>
                     {hasBalance ? (
                       <div className={`text-sm ${isPayable ? 'text-red-600' : 'text-green-600'}`}>
-                        {isPayable ? 'Advance:' : 'Receivables:'} ${Math.abs(netBalance).toFixed(2)}
+                        {isPayable ? 'Advance:' : 'Receivables:'} {Math.abs(netBalance).toFixed(2)}
                       </div>
                     ) : null}
                   </div>
@@ -1767,7 +1767,7 @@ export const Sales = ({ tabId, editData }) => {
                             <span className={`text-sm font-medium ${
                               isPayable ? 'text-red-600' : isReceivable ? 'text-green-600' : 'text-gray-600'
                             }`}>
-                              ${Math.abs(netBalance).toFixed(2)}
+                              {Math.abs(netBalance).toFixed(2)}
                             </span>
                           </div>
                         ) : null;
@@ -1783,7 +1783,7 @@ export const Sales = ({ tabId, editData }) => {
                               : 'text-blue-600'
                           ) : 'text-gray-600'
                         }`}>
-                          ${(selectedCustomer.creditLimit || 0).toFixed(2)}
+                          {(selectedCustomer.creditLimit || 0).toFixed(2)}
                         </span>
                         {selectedCustomer.creditLimit > 0 && 
                          ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0)) >= selectedCustomer.creditLimit * 0.9 && (
@@ -1801,7 +1801,7 @@ export const Sales = ({ tabId, editData }) => {
                               : 'text-green-600'
                           ) : 'text-gray-600'
                         }`}>
-                          ${(selectedCustomer.creditLimit - ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0))).toFixed(2)}
+                          {(selectedCustomer.creditLimit - ((selectedCustomer.currentBalance || 0) + (selectedCustomer.pendingBalance || 0))).toFixed(2)}
                         </span>
                       </div>
                     </div>
@@ -2006,7 +2006,7 @@ export const Sales = ({ tabId, editData }) => {
                             {/* Warning if sale price is below cost price (always show, regardless of showCostPrice) */}
                             {lastPurchasePrices[item.product._id] !== undefined && 
                              item.unitPrice < lastPurchasePrices[item.product._id] && (
-                              <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold" title={`Sale price below cost! Loss: $${Math.round(lastPurchasePrices[item.product._id] - item.unitPrice)} per unit`}>
+                              <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold" title={`Sale price below cost! Loss: ${Math.round(lastPurchasePrices[item.product._id] - item.unitPrice)} per unit`}>
                                 ⚠️ Loss
                               </span>
                             )}
@@ -2059,7 +2059,7 @@ export const Sales = ({ tabId, editData }) => {
                           <div className="col-span-1">
                             <span className="text-sm font-semibold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 block text-center h-8 flex items-center justify-center" title="Last Purchase Price">
                               {lastPurchasePrices[item.product._id] !== undefined 
-                                ? `$${Math.round(lastPurchasePrices[item.product._id])}` 
+                                ? `${Math.round(lastPurchasePrices[item.product._id])}` 
                                 : 'N/A'}
                             </span>
                           </div>
@@ -2089,7 +2089,7 @@ export const Sales = ({ tabId, editData }) => {
                             title={
                               (lastPurchasePrices[item.product._id] !== undefined && 
                                item.unitPrice < lastPurchasePrices[item.product._id])
-                                ? `⚠️ WARNING: Sale price ($${Math.round(item.unitPrice)}) is below cost price ($${Math.round(lastPurchasePrices[item.product._id])})`
+                                ? `⚠️ WARNING: Sale price (${Math.round(item.unitPrice)}) is below cost price (${Math.round(lastPurchasePrices[item.product._id])})`
                                 : ''
                             }
                           />

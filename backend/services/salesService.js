@@ -34,10 +34,15 @@ class SalesService {
   /**
    * Build filter query from request parameters
    * @param {object} queryParams - Request query parameters
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>} - MongoDB filter object
    */
-  async buildFilter(queryParams) {
-    const filter = {};
+  async buildFilter(queryParams, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required for query filtering');
+    }
+    
+    const filter = { tenantId }; // Always include tenantId for isolation
 
     // Product search - find orders containing products with matching names
     if (queryParams.productSearch) {
@@ -64,8 +69,8 @@ class SalesService {
         { notes: { $regex: searchTerm, $options: 'i' } }
       ];
 
-      // Search in Customer collection and match by customer ID
-      const customerMatches = await customerRepository.search(searchTerm, { limit: 1000 });
+      // Search in Customer collection and match by customer ID (scoped to tenant)
+      const customerMatches = await customerRepository.search(searchTerm, { limit: 1000 }, tenantId);
       
       if (customerMatches.length > 0) {
         const customerIds = customerMatches.map(c => c._id);
@@ -122,16 +127,21 @@ class SalesService {
   /**
    * Get sales orders with filtering and pagination
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getSalesOrders(queryParams) {
+  async getSalesOrders(queryParams, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
     const getAllOrders = queryParams.all === 'true' || queryParams.all === true ||
                         (queryParams.limit && parseInt(queryParams.limit) >= 999999);
 
     const page = getAllOrders ? 1 : (parseInt(queryParams.page) || 1);
     const limit = getAllOrders ? 999999 : (parseInt(queryParams.limit) || 20);
 
-    const filter = await this.buildFilter(queryParams);
+    const filter = await this.buildFilter(queryParams, tenantId);
 
     const result = await salesRepository.findWithPagination(filter, {
       page,
@@ -165,10 +175,15 @@ class SalesService {
   /**
    * Get single sales order by ID
    * @param {string} id - Order ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getSalesOrderById(id) {
-    const order = await salesRepository.findById(id);
+  async getSalesOrderById(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
+    const order = await salesRepository.findOne({ _id: id, tenantId });
     
     if (!order) {
       throw new Error('Order not found');
@@ -200,11 +215,17 @@ class SalesService {
    * Get period summary
    * @param {Date} dateFrom - Start date
    * @param {Date} dateTo - End date
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getPeriodSummary(dateFrom, dateTo) {
+  async getPeriodSummary(dateFrom, dateTo, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
     const orders = await salesRepository.findByDateRange(dateFrom, dateTo, {
-      lean: true
+      lean: true,
+      filter: { tenantId }
     });
 
     const totalRevenue = orders.reduce((sum, order) => sum + (order.pricing?.total || 0), 0);
@@ -253,12 +274,17 @@ class SalesService {
   }
 
   /**
-   * Get single sales order by ID
+   * Get single sales order by ID (duplicate method - keeping for compatibility)
    * @param {string} id - Sales order ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<Sales>}
    */
-  async getSalesOrderById(id) {
-    const order = await salesRepository.findById(id, {
+  async getSalesOrderByIdWithPopulate(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
+    const order = await salesRepository.findOne({ _id: id, tenantId }, {
       populate: [
         { path: 'customer' },
         { path: 'items.product', select: 'name description pricing' },

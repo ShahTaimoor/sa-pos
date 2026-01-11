@@ -133,6 +133,11 @@ app.use('/api/products', require('./routes/products'));
 app.use('/api/product-variants', require('./routes/productVariants'));
 app.use('/api/product-transformations', require('./routes/productTransformations'));
 app.use('/api/customers', require('./routes/customers'));
+app.use('/api/customer-transactions', require('./routes/customerTransactions'));
+app.use('/api/customer-merges', require('./routes/customerMerges'));
+app.use('/api/reconciliation', require('./routes/reconciliation'));
+app.use('/api/accounting-periods', require('./routes/accountingPeriods'));
+app.use('/api/disputes', require('./routes/disputes'));
 app.use('/api/customer-analytics', require('./routes/customerAnalytics'));
 app.use('/api/anomaly-detection', require('./routes/anomalyDetection'));
 app.use('/api/suppliers', require('./routes/suppliers'));
@@ -165,8 +170,10 @@ app.use('/api/bank-payments', require('./routes/bankPayments'));
 app.use('/api/banks', require('./routes/banks'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/chart-of-accounts', require('./routes/chartOfAccounts'));
+app.use('/api/opening-balances', require('./routes/openingBalances')); // Opening balance journal entries
 app.use('/api/account-categories', require('./routes/accountCategories'));
 app.use('/api/account-ledger', require('./routes/accountLedger'));
+app.use('/api/fiscal-years', require('./routes/fiscalYears')); // Fiscal year and period management
 app.use('/api/images', require('./routes/images'));
 app.use('/api/backdate-report', require('./routes/backdateReport'));
 app.use('/api/stock-movements', require('./routes/stockMovements'));
@@ -180,6 +187,12 @@ app.use('/api/journal-vouchers', require('./routes/journalVouchers'));
 app.use('/api/customer-balances', require('./routes/customerBalances'));
 app.use('/api/supplier-balances', require('./routes/supplierBalances'));
 app.use('/api/accounting', require('./routes/accounting'));
+app.use('/api/trial-balance', require('./routes/trialBalance')); // Trial balance routes
+app.use('/api/audit-reporting', require('./routes/auditReporting')); // Audit reporting routes
+app.use('/api/data-integrity', require('./routes/dataIntegrity')); // Data integrity routes
+app.use('/api/financial-validation', require('./routes/financialValidation')); // Financial validation routes
+app.use('/api/audit-forensics', require('./routes/auditForensics')); // Audit forensics routes
+app.use('/api/financial-reports', require('./routes/financialReports')); // Financial reports (P&L, Balance Sheet from journal entries)
 
 // Health check endpoint (API version)
 app.get('/api/health', (req, res) => {
@@ -203,6 +216,24 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Security middleware for financial operations
+const securityMiddleware = require('./middleware/securityMiddleware');
+app.use(securityMiddleware.sanitizeInput);
+app.use(securityMiddleware.auditFinancialOperation());
+
+// Performance monitoring middleware
+const performanceMonitoringService = require('./services/performanceMonitoringService');
+app.use(performanceMonitoringService.trackAPIMetrics());
+
+// Initialize event handlers for async processing
+try {
+  const { initializeEventHandlers } = require('./services/eventHandlers');
+  initializeEventHandlers();
+  logger.info('Event handlers initialized');
+} catch (error) {
+  logger.error('Error initializing event handlers:', error);
+}
+
 // Global error handling middleware (must be after all routes)
 const { errorHandler } = require('./middleware/errorHandler');
 app.use(errorHandler);
@@ -221,6 +252,65 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   const server = app.listen(PORT, () => {
     logger.info(`POS Server running on port ${PORT}`);
     logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    
+    // Initialize scheduled jobs
+    try {
+      // Data integrity validation (daily at 2 AM)
+      const dataIntegrityService = require('./services/dataIntegrityService');
+      const cron = require('node-cron');
+      cron.schedule('0 2 * * *', async () => {
+        try {
+          logger.info('Running scheduled data integrity validation...');
+          const results = await dataIntegrityService.runAllValidations();
+          if (results.hasIssues) {
+            logger.warn(`Data integrity issues detected: ${results.totalIssues} total issues`);
+          } else {
+            logger.info('Data integrity validation passed');
+          }
+        } catch (error) {
+          logger.error('Error in scheduled data integrity validation:', error);
+        }
+      });
+      
+      // Financial validation (hourly)
+      const financialValidationService = require('./services/financialValidationService');
+      financialValidationService.scheduleValidation();
+      logger.info('Financial validation scheduler started');
+      
+      // Backup verification (daily at 3 AM)
+      const backupVerificationService = require('./services/backupVerificationService');
+      backupVerificationService.scheduleVerification();
+      logger.info('Backup verification scheduler started');
+      
+      // Performance monitoring
+      const perfMonitoringService = require('./services/performanceMonitoringService');
+      perfMonitoringService.scheduleMonitoring();
+      logger.info('Performance monitoring scheduler started');
+      
+      // Reconciliation jobs (if exists)
+      try {
+        const reconciliationJobs = require('./jobs/reconciliationJobs');
+        if (reconciliationJobs && typeof reconciliationJobs.start === 'function') {
+          reconciliationJobs.start();
+          logger.info('Reconciliation jobs started');
+        }
+      } catch (error) {
+        logger.warn('Reconciliation jobs not available:', error.message);
+      }
+      
+      // Maintenance jobs (if exists)
+      try {
+        const maintenanceJobs = require('./jobs/maintenanceJobs');
+        if (maintenanceJobs && typeof maintenanceJobs.start === 'function') {
+          maintenanceJobs.start();
+          logger.info('Maintenance jobs started');
+        }
+      } catch (error) {
+        logger.warn('Maintenance jobs not available:', error.message);
+      }
+    } catch (error) {
+      logger.error('Error initializing scheduled jobs:', error);
+    }
   });
 
   // Handle port already in use error
@@ -261,4 +351,45 @@ if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   // Start backup scheduler (only in non-serverless environments)
   const backupScheduler = require('./services/backupScheduler');
   backupScheduler.start();
+
+  // Start reconciliation jobs
+  const { startReconciliationJobs } = require('./jobs/reconciliationJobs');
+  startReconciliationJobs();
+  
+  // Initialize production critical features scheduled jobs
+  try {
+    // Data integrity validation (daily at 2 AM)
+    const dataIntegrityService = require('./services/dataIntegrityService');
+    const cron = require('node-cron');
+    cron.schedule('0 2 * * *', async () => {
+      try {
+        logger.info('Running scheduled data integrity validation...');
+        const results = await dataIntegrityService.runAllValidations();
+        if (results.hasIssues) {
+          logger.warn(`Data integrity issues detected: ${results.totalIssues} total issues`);
+        } else {
+          logger.info('Data integrity validation passed');
+        }
+      } catch (error) {
+        logger.error('Error in scheduled data integrity validation:', error);
+      }
+    });
+    
+    // Financial validation (hourly)
+    const financialValidationService = require('./services/financialValidationService');
+    financialValidationService.scheduleValidation();
+    logger.info('Financial validation scheduler started');
+    
+    // Backup verification (daily at 3 AM)
+    const backupVerificationService = require('./services/backupVerificationService');
+    backupVerificationService.scheduleVerification();
+    logger.info('Backup verification scheduler started');
+    
+    // Performance monitoring
+    const performanceMonitoringService = require('./services/performanceMonitoringService');
+    performanceMonitoringService.scheduleMonitoring();
+    logger.info('Performance monitoring scheduler started');
+  } catch (error) {
+    logger.error('Error initializing production critical features:', error);
+  }
 }

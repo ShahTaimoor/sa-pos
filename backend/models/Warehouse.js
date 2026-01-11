@@ -23,6 +23,12 @@ const ContactSchema = new mongoose.Schema(
 
 const WarehouseSchema = new mongoose.Schema(
   {
+    // Multi-tenant support
+    tenantId: {
+      type: mongoose.Schema.Types.ObjectId,
+      required: true,
+      index: true
+    },
     name: {
       type: String,
       required: true,
@@ -34,8 +40,9 @@ const WarehouseSchema = new mongoose.Schema(
       required: true,
       trim: true,
       maxlength: 50,
-      uppercase: true,
-      unique: true,
+      uppercase: true
+      // Note: unique constraint is enforced via compound index { tenantId: 1, code: 1 }
+      // DO NOT add unique: true here - it creates a global index
     },
     description: {
       type: String,
@@ -86,15 +93,16 @@ const WarehouseSchema = new mongoose.Schema(
   }
 );
 
-WarehouseSchema.index({ name: 1 });
-// code index removed - already has unique: true in field definition
-WarehouseSchema.index({ isActive: 1 });
-WarehouseSchema.index({ isPrimary: 1 });
+// Compound unique index for tenant-scoped warehouse codes
+WarehouseSchema.index({ tenantId: 1, code: 1 }, { unique: true });
+WarehouseSchema.index({ tenantId: 1, name: 1 });
+WarehouseSchema.index({ tenantId: 1, isActive: 1 });
+WarehouseSchema.index({ tenantId: 1, isPrimary: 1 });
 
 WarehouseSchema.pre('save', async function ensureSinglePrimary(next) {
-  if (this.isPrimary && this.isModified('isPrimary')) {
+  if (this.isPrimary && this.isModified('isPrimary') && this.tenantId) {
     await this.constructor.updateMany(
-      { _id: { $ne: this._id } },
+      { tenantId: this.tenantId, _id: { $ne: this._id } },
       { $set: { isPrimary: false } }
     );
   }

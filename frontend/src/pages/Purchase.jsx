@@ -144,7 +144,7 @@ const SupplierSearch = ({ selectedSupplier, onSupplierSelect }) => {
         {supplier.contactPerson.firstName} {supplier.contactPerson.lastName}
       </div>
       <div className="text-sm text-gray-600">
-        Outstanding Balance: ${(supplier.pendingBalance || 0).toFixed(2)}
+        Outstanding Balance: {(supplier.pendingBalance || 0).toFixed(2)}
       </div>
     </div>
   );
@@ -260,7 +260,7 @@ const ProductSearch = ({ onAddProduct, onRefetchReady }) => {
       <div className="font-medium">{product.name}</div>
       <div className="flex items-center space-x-4">
         <div className="text-sm text-gray-600">Stock: {product.inventory.currentStock}</div>
-        <div className="text-sm text-gray-600">Cost: ${Math.round(product.pricing.cost)}</div>
+        <div className="text-sm text-gray-600">Cost: {Math.round(product.pricing.cost)}</div>
       </div>
     </div>
   );
@@ -1232,7 +1232,7 @@ export const Purchase = ({ tabId, editData }) => {
               <div>
                 <div className="font-medium">{supplier.displayName}</div>
                 <div className="text-sm text-gray-600">
-                  Outstanding Balance: ${(supplier.pendingBalance || 0).toFixed(2)}
+                  Outstanding Balance: {(supplier.pendingBalance || 0).toFixed(2)}
                 </div>
               </div>
             )}
@@ -1260,7 +1260,7 @@ export const Purchase = ({ tabId, editData }) => {
                     <div className="flex items-center space-x-1">
                       <span className="text-xs text-gray-500">Outstanding Balance:</span>
                       <span className={`text-sm font-medium ${(selectedSupplier.pendingBalance || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                        ${Math.round(selectedSupplier.pendingBalance || 0)}
+                        {Math.round(selectedSupplier.pendingBalance || 0)}
                       </span>
                     </div>
                     {selectedSupplier.phone && (

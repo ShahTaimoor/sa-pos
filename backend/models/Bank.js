@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
 const bankSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
   // Bank Account Information
   accountName: {
     type: String,
@@ -114,8 +120,9 @@ bankSchema.virtual('displayName').get(function() {
 });
 
 // Index for better query performance
-bankSchema.index({ bankName: 1, accountNumber: 1 });
-bankSchema.index({ isActive: 1 });
+// Compound indexes for multi-tenant performance
+bankSchema.index({ tenantId: 1, bankName: 1, accountNumber: 1 }, { unique: true });
+bankSchema.index({ tenantId: 1, isActive: 1 });
 
 module.exports = mongoose.model('Bank', bankSchema);
 

@@ -5,12 +5,15 @@ const Sales = require('../models/Sales'); // Still needed for model reference
 const CustomerBalanceService = require('../services/customerBalanceService');
 const customerRepository = require('../repositories/CustomerRepository');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
 // Get customer balance summary
 router.get('/:customerId', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('view_customers'),
   param('customerId').isMongoId().withMessage('Invalid customer ID')
 ], async (req, res) => {
@@ -23,7 +26,7 @@ router.get('/:customerId', [
       data: summary
     });
   } catch (error) {
-    console.error('Error getting customer balance summary:', error);
+    logger.error('Error getting customer balance summary:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -34,7 +37,8 @@ router.get('/:customerId', [
 
 // Record payment for customer
 router.post('/:customerId/payment', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('manage_payments'),
   param('customerId').isMongoId().withMessage('Invalid customer ID'),
   body('amount').isFloat({ min: 0.01 }).withMessage('Payment amount must be greater than 0'),
@@ -56,7 +60,7 @@ router.post('/:customerId/payment', [
       }
     });
   } catch (error) {
-    console.error('Error recording payment:', error);
+    logger.error('Error recording payment:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Server error',
@@ -67,7 +71,8 @@ router.post('/:customerId/payment', [
 
 // Record refund for customer
 router.post('/:customerId/refund', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('manage_payments'),
   param('customerId').isMongoId().withMessage('Invalid customer ID'),
   body('amount').isFloat({ min: 0.01 }).withMessage('Refund amount must be greater than 0'),
@@ -89,7 +94,7 @@ router.post('/:customerId/refund', [
       }
     });
   } catch (error) {
-    console.error('Error recording refund:', error);
+    logger.error('Error recording refund:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Server error',
@@ -114,7 +119,7 @@ router.post('/:customerId/recalculate', [
       data: updatedCustomer
     });
   } catch (error) {
-    console.error('Error recalculating balance:', error);
+    logger.error('Error recalculating balance:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Server error',
@@ -125,7 +130,8 @@ router.post('/:customerId/recalculate', [
 
 // Check if customer can make purchase
 router.get('/:customerId/can-purchase', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('view_customers'),
   param('customerId').isMongoId().withMessage('Invalid customer ID'),
   query('amount').isFloat({ min: 0.01 }).withMessage('Amount must be greater than 0')
@@ -141,7 +147,7 @@ router.get('/:customerId/can-purchase', [
       data: eligibility
     });
   } catch (error) {
-    console.error('Error checking purchase eligibility:', error);
+    logger.error('Error checking purchase eligibility:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Server error',
@@ -152,7 +158,8 @@ router.get('/:customerId/can-purchase', [
 
 // Get all customers with balance issues
 router.get('/reports/balance-issues', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
@@ -193,7 +200,7 @@ router.get('/reports/balance-issues', [
       }
     });
   } catch (error) {
-    console.error('Error getting balance issues report:', error);
+    logger.error('Error getting balance issues report:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -247,7 +254,7 @@ router.post('/fix-all-balances', [
       }
     });
   } catch (error) {
-    console.error('Error fixing all balances:', error);
+    logger.error('Error fixing all balances:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',

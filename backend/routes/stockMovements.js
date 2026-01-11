@@ -3,8 +3,10 @@ const { body, query, param } = require('express-validator');
 const StockMovement = require('../models/StockMovement'); // Still needed for new StockMovement() and static methods
 const Product = require('../models/Product'); // Still needed for model reference
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const stockMovementRepository = require('../repositories/StockMovementRepository');
 const productRepository = require('../repositories/ProductRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -40,7 +42,8 @@ const decodeHtmlEntities = (str) => {
 
 // Get all stock movements with filtering and pagination
 router.get('/', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   query('page').optional({ checkFalsy: true }).isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional({ checkFalsy: true }).isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
@@ -117,7 +120,7 @@ router.get('/', [
           });
         }
       } catch (productLookupError) {
-        console.error('Error matching products for stock movement search:', productLookupError);
+        logger.error('Error matching products for stock movement search:', productLookupError);
       }
 
       if (orConditions.length > 0) {
@@ -191,7 +194,7 @@ router.get('/', [
       }
     });
   } catch (error) {
-    console.error('Error fetching stock movements:', error);
+    logger.error('Error fetching stock movements:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -202,7 +205,8 @@ router.get('/', [
 
 // Get stock movements for a specific product
 router.get('/product/:productId', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   param('productId').isMongoId().withMessage('Invalid product ID'),
   query('dateFrom').optional({ checkFalsy: true }).isISO8601().withMessage('Invalid date format'),
@@ -245,7 +249,7 @@ router.get('/product/:productId', [
       }
     });
   } catch (error) {
-    console.error('Error fetching product stock movements:', error);
+    logger.error('Error fetching product stock movements:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -284,7 +288,7 @@ router.get('/:id', [
       data: movement
     });
   } catch (error) {
-    console.error('Error fetching stock movement:', error);
+    logger.error('Error fetching stock movement:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -295,7 +299,8 @@ router.get('/:id', [
 
 // Create manual stock adjustment
 router.post('/adjustment', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('update_inventory'),
   body('productId').isMongoId().withMessage('Invalid product ID'),
   body('movementType').isIn(['adjustment_in', 'adjustment_out']).withMessage('Invalid adjustment type'),
@@ -377,7 +382,7 @@ router.post('/adjustment', [
       data: movement
     });
   } catch (error) {
-    console.error('Error creating stock adjustment:', error);
+    logger.error('Error creating stock adjustment:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -388,7 +393,8 @@ router.post('/adjustment', [
 
 // Reverse a stock movement
 router.post('/:id/reverse', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('update_inventory'),
   param('id').isMongoId().withMessage('Invalid movement ID'),
   body('reason').optional().isString().trim().isLength({ max: 500 }).withMessage('Reason too long')
@@ -422,7 +428,7 @@ router.post('/:id/reverse', [
       data: reversedMovement
     });
   } catch (error) {
-    console.error('Error reversing stock movement:', error);
+    logger.error('Error reversing stock movement:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Server error',
@@ -433,7 +439,8 @@ router.post('/:id/reverse', [
 
 // Get stock movement statistics
 router.get('/stats/overview', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   query('dateFrom').optional({ checkFalsy: true }).isISO8601().withMessage('Invalid date format'),
   query('dateTo').optional({ checkFalsy: true }).isISO8601().withMessage('Invalid date format')
@@ -504,7 +511,7 @@ router.get('/stats/overview', [
       }
     });
   } catch (error) {
-    console.error('Error fetching stock movement stats:', error);
+    logger.error('Error fetching stock movement stats:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',

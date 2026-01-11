@@ -1,11 +1,17 @@
 const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
+  
   // Basic Information
   name: {
     type: String,
     required: true,
-    unique: true,
     trim: true,
     maxlength: 200
   },
@@ -206,20 +212,37 @@ const productSchema = new mongoose.Schema({
   deletedAt: {
     type: Date,
     default: null
+  },
+  
+  // Costing Method
+  costingMethod: {
+    type: String,
+    enum: ['fifo', 'lifo', 'average', 'standard'],
+    default: 'standard' // Uses pricing.cost directly
+  },
+  
+  // Version for optimistic locking
+  version: {
+    type: Number,
+    default: 0
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  versionKey: '__v', // Enable Mongoose versioning
+  optimisticConcurrency: true // Enable optimistic concurrency control
 });
 
 // Indexes for better performance
-productSchema.index({ name: 'text', description: 'text' });
-productSchema.index({ category: 1, status: 1 });
-productSchema.index({ status: 1, createdAt: -1 }); // For active products listing
-productSchema.index({ 'inventory.currentStock': 1 }); // For stock level queries
-productSchema.index({ 'inventory.reorderPoint': 1, 'inventory.currentStock': 1 }); // For low stock queries
-productSchema.index({ brand: 1, status: 1 }); // For brand filtering
-productSchema.index({ createdAt: -1 }); // For recent products
-productSchema.index({ hasInvestors: 1, status: 1 }); // For investor-linked products
+// Compound indexes for multi-tenant performance
+productSchema.index({ tenantId: 1, name: 1 }, { unique: true });
+productSchema.index({ tenantId: 1, name: 'text', description: 'text' });
+productSchema.index({ tenantId: 1, category: 1, status: 1 });
+productSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
+productSchema.index({ tenantId: 1, 'inventory.currentStock': 1 });
+productSchema.index({ tenantId: 1, 'inventory.reorderPoint': 1, 'inventory.currentStock': 1 });
+productSchema.index({ tenantId: 1, brand: 1, status: 1 });
+productSchema.index({ tenantId: 1, createdAt: -1 });
+productSchema.index({ tenantId: 1, hasInvestors: 1, status: 1 });
 
 // Virtual for profit margin
 productSchema.virtual('profitMargin').get(function() {

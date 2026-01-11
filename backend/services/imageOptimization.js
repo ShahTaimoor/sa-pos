@@ -6,6 +6,7 @@
 const sharp = require('sharp');
 const fs = require('fs');
 const path = require('path');
+const logger = require('../utils/logger');
 
 // Image size configurations
 const IMAGE_SIZES = {
@@ -128,7 +129,7 @@ const optimizeImage = async (inputPath, outputDir, options = {}) => {
 
     return results;
   } catch (error) {
-    console.error('Image optimization error:', error);
+    logger.error('Image optimization error:', { error: error });
     throw error;
   }
 };
@@ -154,7 +155,7 @@ const compressImage = async (inputPath, outputPath) => {
 
     return outputPath;
   } catch (error) {
-    console.error('Image compression error:', error);
+    logger.error('Image compression error:', { error: error });
     throw error;
   }
 };
@@ -173,7 +174,7 @@ const convertToWebP = async (inputPath, outputPath) => {
 
     return outputPath;
   } catch (error) {
-    console.error('WebP conversion error:', error);
+    logger.error('WebP conversion error:', { error: error });
     throw error;
   }
 };
@@ -196,7 +197,7 @@ const getImageInfo = async (imagePath) => {
       sizeKB: (stats.size / 1024).toFixed(2)
     };
   } catch (error) {
-    console.error('Get image info error:', error);
+    logger.error('Get image info error:', { error: error });
     throw error;
   }
 };

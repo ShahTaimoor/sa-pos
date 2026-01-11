@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const inventoryService = require('../services/inventoryService');
 const purchaseOrderService = require('../services/purchaseOrderService');
 const supplierRepository = require('../repositories/SupplierRepository');
@@ -32,6 +33,7 @@ const transformProductToUppercase = (product) => {
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 999999 }),
   query('all').optional({ checkFalsy: true }).isBoolean(),
@@ -55,7 +57,7 @@ router.get('/', [
       pagination: result.pagination
     });
   } catch (error) {
-    console.error('Get purchase orders error:', error);
+    logger.error('Get purchase orders error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -63,7 +65,7 @@ router.get('/', [
 // @route   GET /api/purchase-orders/:id
 // @desc    Get single purchase order
 // @access  Private
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
     const purchaseOrder = await purchaseOrderService.getPurchaseOrderById(req.params.id);
     res.json({ purchaseOrder });
@@ -71,7 +73,7 @@ router.get('/:id', auth, async (req, res) => {
     if (error.message === 'Purchase order not found') {
       return res.status(404).json({ message: 'Purchase order not found' });
     }
-    console.error('Get purchase order error:', error);
+    logger.error('Get purchase order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -116,8 +118,8 @@ router.post('/', [
       purchaseOrder
     });
   } catch (error) {
-    console.error('Create purchase order error:', error);
-    console.error('Error details:', {
+    logger.error('Create purchase order error:', { error: error });
+    logger.error('Error details:', {
       name: error.name,
       message: error.message,
       stack: error.stack
@@ -134,6 +136,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('edit_purchase_orders'),
   body('supplier').optional().isMongoId().withMessage('Valid supplier is required'),
   body('items').optional().isArray({ min: 1 }).withMessage('At least one item is required'),
@@ -181,6 +184,7 @@ router.put('/:id', [
                 productId: newItem.product,
                 type: 'in',
                 quantity: quantityChange,
+                cost: newItem.costPerUnit, // Pass cost price
                 reason: 'Purchase Order Update - Quantity Increased',
                 reference: 'Purchase Order',
                 referenceId: updatedPO._id,
@@ -229,7 +233,7 @@ router.put('/:id', [
           }
         }
       } catch (error) {
-        console.error('Error adjusting inventory on purchase order update:', error);
+        logger.error('Error adjusting inventory on purchase order update:', error);
         // Don't fail update if inventory adjustment fails
       }
     }
@@ -241,7 +245,7 @@ router.put('/:id', [
       purchaseOrder: updatedPO
     });
   } catch (error) {
-    console.error('Update purchase order error:', error);
+    logger.error('Update purchase order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -251,6 +255,7 @@ router.put('/:id', [
 // @access  Private
 router.put('/:id/confirm', [
   auth,
+  tenantMiddleware,
   requirePermission('confirm_purchase_orders')
 ], async (req, res) => {
   try {
@@ -264,6 +269,7 @@ router.put('/:id/confirm', [
           productId: item.product,
           type: 'in',
           quantity: item.quantity,
+          cost: item.costPerUnit, // Pass cost price from purchase order
           reason: 'Purchase Order Confirmation',
           reference: 'Purchase Order',
           referenceId: purchaseOrder._id,
@@ -280,7 +286,7 @@ router.put('/:id/confirm', [
         });
         
       } catch (inventoryError) {
-        console.error(`Failed to update inventory for product ${item.product}:`, inventoryError.message);
+        logger.error(`Failed to update inventory for product ${item.product}:`, inventoryError.message);
         inventoryUpdates.push({
           productId: item.product,
           quantity: item.quantity,
@@ -311,7 +317,7 @@ router.put('/:id/confirm', [
           });
         }
       } catch (error) {
-        console.error('Error updating supplier balance on PO confirmation:', error);
+        logger.error('Error updating supplier balance on PO confirmation:', error);
         // Don't fail the confirmation if supplier update fails
       }
     }
@@ -328,7 +334,7 @@ router.put('/:id/confirm', [
       const AccountingService = require('../services/accountingService');
       await AccountingService.recordPurchase(purchaseOrder);
     } catch (error) {
-      console.error('Error creating accounting entries for purchase order:', error);
+      logger.error('Error creating accounting entries for purchase order:', error);
       // Don't fail the confirmation if accounting fails
     }
     
@@ -357,7 +363,7 @@ router.put('/:id/confirm', [
       inventoryUpdates: inventoryUpdates
     });
   } catch (error) {
-    console.error('Confirm purchase order error:', error);
+    logger.error('Confirm purchase order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -401,7 +407,7 @@ router.put('/:id/cancel', [
           });
           
         } catch (inventoryError) {
-          console.error(`Failed to reduce inventory for product ${item.product}:`, inventoryError.message);
+          logger.error(`Failed to reduce inventory for product ${item.product}:`, inventoryError.message);
           inventoryUpdates.push({
             productId: item.product,
             quantity: item.quantity,
@@ -419,7 +425,7 @@ router.put('/:id/cancel', [
           }
           
           // Continue with cancellation for other errors
-          console.warn(`Continuing with purchase order cancellation despite inventory reduction failure for product ${item.product}`);
+          logger.warn(`Continuing with purchase order cancellation despite inventory reduction failure for product ${item.product}`);
         }
       }
       
@@ -437,7 +443,7 @@ router.put('/:id/cancel', [
             });
           }
         } catch (error) {
-          console.error('Error reversing supplier balance on PO cancellation:', error);
+          logger.error('Error reversing supplier balance on PO cancellation:', error);
           // Don't fail the cancellation if supplier update fails
         }
       }
@@ -456,7 +462,7 @@ router.put('/:id/cancel', [
       inventoryUpdates: inventoryUpdates.length > 0 ? inventoryUpdates : undefined
     });
   } catch (error) {
-    console.error('Cancel purchase order error:', error);
+    logger.error('Cancel purchase order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -466,6 +472,7 @@ router.put('/:id/cancel', [
 // @access  Private
 router.put('/:id/close', [
   auth,
+  tenantMiddleware,
   requirePermission('close_purchase_orders')
 ], async (req, res) => {
   try {
@@ -476,7 +483,7 @@ router.put('/:id/close', [
       purchaseOrder
     });
   } catch (error) {
-    console.error('Close purchase order error:', error);
+    logger.error('Close purchase order error:', { error: error });
     if (error.message === 'Only fully received purchase orders can be closed') {
       return res.status(400).json({ message: error.message });
     }
@@ -489,6 +496,7 @@ router.put('/:id/close', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('delete_purchase_orders')
 ], async (req, res) => {
   try {
@@ -518,11 +526,11 @@ router.delete('/:id', [
               notes: `Inventory rolled back due to deletion of purchase order ${purchaseOrder.poNumber}`
             });
           } catch (error) {
-            console.error(`Failed to restore inventory for product ${item.product}:`, error);
+            logger.error(`Failed to restore inventory for product ${item.product}:`, error);
           }
         }
       } catch (error) {
-        console.error('Error restoring inventory on purchase order deletion:', error);
+        logger.error('Error restoring inventory on purchase order deletion:', error);
         // Don't fail deletion if inventory update fails
       }
     }
@@ -531,7 +539,7 @@ router.delete('/:id', [
     
     res.json({ message: 'Purchase order deleted successfully' });
   } catch (error) {
-    console.error('Delete purchase order error:', error);
+    logger.error('Delete purchase order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -544,7 +552,7 @@ router.get('/:id/convert', auth, async (req, res) => {
     const result = await purchaseOrderService.getPurchaseOrderForConversion(req.params.id);
     res.json(result);
   } catch (error) {
-    console.error('Get conversion data error:', error);
+    logger.error('Get conversion data error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -554,6 +562,7 @@ router.get('/:id/convert', auth, async (req, res) => {
 // @access  Private
 router.post('/:id/convert', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_inventory'),
   body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
   body('items.*.product').isMongoId().withMessage('Valid product is required'),
@@ -573,22 +582,26 @@ router.post('/:id/convert', [
     }
 
     const Inventory = require('../models/Inventory');
+const logger = require('../utils/logger');
     const { items } = req.body;
     const conversionResults = [];
 
     // Process each item
     for (const item of items) {
       try {
-        // Update inventory stock
+        // Update inventory stock with cost
         await Inventory.updateStock(
           item.product,
-          item.quantity,
-          'in', // Stock in
-          req.user._id,
-          `Purchase from PO: ${purchaseOrder.poNumber}`,
           {
-            costPerUnit: item.costPerUnit,
-            purchaseOrder: purchaseOrder._id
+            type: 'in',
+            quantity: item.quantity,
+            cost: item.costPerUnit, // Pass cost price from purchase order
+            reason: `Purchase from PO: ${purchaseOrder.poNumber}`,
+            reference: 'Purchase Order',
+            referenceId: purchaseOrder._id,
+            referenceModel: 'PurchaseOrder',
+            performedBy: req.user._id,
+            notes: `Stock increased from purchase order: ${purchaseOrder.poNumber}`
           }
         );
 
@@ -610,7 +623,7 @@ router.post('/:id/convert', [
         });
 
       } catch (itemError) {
-        console.error(`Error processing item ${item.product}:`, itemError);
+        logger.error(`Error processing item ${item.product}:`, itemError);
         conversionResults.push({
           product: item.product,
           quantity: item.quantity,
@@ -653,8 +666,8 @@ router.post('/:id/convert', [
     });
 
   } catch (error) {
-    console.error('Convert purchase order error:', error);
-    console.error('Error details:', {
+    logger.error('Convert purchase order error:', { error: error });
+    logger.error('Error details:', {
       name: error.name,
       message: error.message,
       stack: error.stack

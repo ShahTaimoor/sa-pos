@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const cashReceiptService = require('../services/cashReceiptService');
 const CashReceipt = require('../models/CashReceipt'); // Still needed for create/update operations
 const Sales = require('../models/Sales');
@@ -13,6 +14,7 @@ const Supplier = require('../models/Supplier');
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
@@ -111,7 +113,7 @@ router.get('/', [
       }
     });
   } catch (error) {
-    console.error('Get cash receipts error:', error);
+    logger.error('Get cash receipts error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -125,6 +127,7 @@ router.get('/', [
 // @access  Private
 router.get('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
@@ -141,7 +144,7 @@ router.get('/:id', [
         message: 'Cash receipt not found' 
       });
     }
-    console.error('Get cash receipt error:', error);
+    logger.error('Get cash receipt error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -225,6 +228,7 @@ router.post('/', [
 
     // Create cash receipt (voucher code auto-generated in model pre-save)
     const cashReceiptData = {
+      tenantId: req.tenantId || req.user.tenantId,
       date: date ? new Date(date) : new Date(),
       amount: parseFloat(amount),
       particular: particular ? particular.trim() : 'Cash Receipt',
@@ -245,7 +249,7 @@ router.post('/', [
         const CustomerBalanceService = require('../services/customerBalanceService');
         await CustomerBalanceService.recordPayment(customer, amount, order);
       } catch (error) {
-        console.error('Error updating customer balance for cash receipt:', error);
+        logger.error('Error updating customer balance for cash receipt:', error);
         // Don't fail the cash receipt creation if balance update fails
       }
     }
@@ -257,7 +261,7 @@ router.post('/', [
         const SupplierBalanceService = require('../services/supplierBalanceService');
         await SupplierBalanceService.recordPayment(supplier, amount, order);
       } catch (error) {
-        console.error('Error updating supplier balance for cash receipt:', error);
+        logger.error('Error updating supplier balance for cash receipt:', error);
         // Don't fail the cash receipt creation if balance update fails
       }
     }
@@ -267,7 +271,7 @@ router.post('/', [
       const AccountingService = require('../services/accountingService');
       await AccountingService.recordCashReceipt(cashReceipt);
     } catch (error) {
-      console.error('Error creating accounting entries for cash receipt:', error);
+      logger.error('Error creating accounting entries for cash receipt:', error);
       // Don't fail the cash receipt creation if accounting fails
     }
 
@@ -285,7 +289,7 @@ router.post('/', [
       data: cashReceipt
     });
   } catch (error) {
-    console.error('Create cash receipt error:', error);
+    logger.error('Create cash receipt error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -299,6 +303,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('edit_orders'),
   body('date').optional().isISO8601().withMessage('Date must be a valid date'),
   body('amount').optional().isFloat({ min: 0 }).withMessage('Amount must be a positive number'),
@@ -370,7 +375,7 @@ router.put('/:id', [
       data: cashReceipt
     });
   } catch (error) {
-    console.error('Update cash receipt error:', error);
+    logger.error('Update cash receipt error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -402,7 +407,7 @@ router.delete('/:id', [
       message: 'Cash receipt deleted successfully'
     });
   } catch (error) {
-    console.error('Delete cash receipt error:', error);
+    logger.error('Delete cash receipt error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -416,6 +421,7 @@ router.delete('/:id', [
 // @access  Private
 router.get('/summary/date-range', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('fromDate').isISO8601().withMessage('From date is required and must be a valid date'),
   query('toDate').isISO8601().withMessage('To date is required and must be a valid date')
@@ -441,7 +447,7 @@ router.get('/summary/date-range', [
       }
     });
   } catch (error) {
-    console.error('Get cash receipts summary error:', error);
+    logger.error('Get cash receipts summary error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -455,6 +461,7 @@ router.get('/summary/date-range', [
 // @access  Private
 router.post('/batch', [
   auth,
+  tenantMiddleware,
   requirePermission('create_orders'),
   body('voucherDate').isISO8601().withMessage('Voucher date must be a valid date'),
   body('cashAccount').optional().isString().trim().withMessage('Cash account must be a string'),
@@ -508,6 +515,7 @@ router.post('/batch', [
     const createdReceipts = [];
     const CustomerBalanceService = require('../services/customerBalanceService');
     const AccountingService = require('../services/accountingService');
+const logger = require('../utils/logger');
 
     for (const receiptData of receipts) {
       if (!receiptData.amount || receiptData.amount <= 0) {
@@ -515,6 +523,7 @@ router.post('/batch', [
       }
 
       const cashReceiptData = {
+        tenantId: req.tenantId || req.user.tenantId,
         date: new Date(voucherDate),
         amount: parseFloat(receiptData.amount),
         particular: receiptData.particular ? receiptData.particular.trim() : 'Cash Receipt',
@@ -532,7 +541,7 @@ router.post('/batch', [
         try {
           await CustomerBalanceService.recordPayment(receiptData.customer, receiptData.amount, null);
         } catch (error) {
-          console.error(`Error updating customer ${receiptData.customer} balance:`, error);
+          logger.error(`Error updating customer ${receiptData.customer} balance:`, error);
         }
       }
 
@@ -540,7 +549,7 @@ router.post('/batch', [
       try {
         await AccountingService.recordCashReceipt(cashReceipt);
       } catch (error) {
-        console.error(`Error creating accounting entries for cash receipt ${cashReceipt._id}:`, error);
+        logger.error(`Error creating accounting entries for cash receipt ${cashReceipt._id}:`, error);
       }
 
       await cashReceipt.populate([
@@ -563,7 +572,7 @@ router.post('/batch', [
       }
     });
   } catch (error) {
-    console.error('Batch create cash receipts error:', error);
+    logger.error('Batch create cash receipts error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',

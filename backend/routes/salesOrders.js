@@ -6,9 +6,11 @@ const path = require('path');
 const PDFDocument = require('pdfkit');
 const SalesOrder = require('../models/SalesOrder'); // Still needed for new SalesOrder() and static methods
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const inventoryService = require('../services/inventoryService');
 const salesOrderRepository = require('../repositories/SalesOrderRepository');
 const customerRepository = require('../repositories/CustomerRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -36,6 +38,7 @@ const transformProductToUppercase = (product) => {
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 999999 }),
   query('all').optional({ checkFalsy: true }).isBoolean(),
@@ -61,7 +64,8 @@ router.get('/', [
     const skip = getAllSalesOrders ? 0 : ((page - 1) * limit);
 
     // Build filter
-    const filter = {};
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const filter = { tenantId }; // Always include tenantId for isolation
     
     if (req.query.search) {
       const searchTerm = req.query.search.trim();
@@ -70,12 +74,12 @@ router.get('/', [
         { notes: { $regex: searchTerm, $options: 'i' } }
       ];
       
-      // Search in Customer collection and match by customer ID
+      // Search in Customer collection and match by customer ID (scoped to tenant)
       const customerMatches = await customerRepository.search(searchTerm, { 
         limit: 1000,
         select: '_id',
         lean: true
-      });
+      }, tenantId);
       
       if (customerMatches.length > 0) {
         const customerIds = customerMatches.map(c => c._id);
@@ -154,7 +158,7 @@ router.get('/', [
       pagination: result.pagination
     });
   } catch (error) {
-    console.error('Get sales orders error:', error);
+    logger.error('Get sales orders error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -162,7 +166,7 @@ router.get('/', [
 // @route   GET /api/sales-orders/:id
 // @desc    Get single sales order
 // @access  Private
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
     const salesOrder = await salesOrderRepository.findById(req.params.id, {
       populate: [
@@ -193,7 +197,7 @@ router.get('/:id', auth, async (req, res) => {
     
     res.json({ salesOrder });
   } catch (error) {
-    console.error('Get sales order error:', error);
+    logger.error('Get sales order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -203,6 +207,7 @@ router.get('/:id', auth, async (req, res) => {
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('create_sales_orders'),
   body('customer').isMongoId().withMessage('Valid customer is required'),
   body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
@@ -256,7 +261,7 @@ router.post('/', [
       salesOrder
     });
   } catch (error) {
-    console.error('Create sales order error:', error);
+    logger.error('Create sales order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -266,6 +271,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('edit_sales_orders'),
   body('customer').optional().isMongoId().withMessage('Valid customer is required'),
   body('orderType').optional().isIn(['retail', 'wholesale', 'return', 'exchange']).withMessage('Invalid order type'),
@@ -330,7 +336,7 @@ router.put('/:id', [
       salesOrder: updatedSO
     });
   } catch (error) {
-    console.error('Update sales order error:', error);
+    logger.error('Update sales order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -340,6 +346,7 @@ router.put('/:id', [
 // @access  Private
 router.put('/:id/confirm', [
   auth,
+  tenantMiddleware,
   requirePermission('confirm_sales_orders')
 ], async (req, res) => {
   try {
@@ -378,7 +385,7 @@ router.put('/:id/confirm', [
         });
         
       } catch (inventoryError) {
-        console.error(`Failed to update inventory for product ${item.product}:`, inventoryError.message);
+        logger.error(`Failed to update inventory for product ${item.product}:`, inventoryError.message);
         inventoryUpdates.push({
           productId: item.product,
           quantity: item.quantity,
@@ -427,7 +434,7 @@ router.put('/:id/confirm', [
       inventoryUpdates: inventoryUpdates
     });
   } catch (error) {
-    console.error('Confirm sales order error:', error);
+    logger.error('Confirm sales order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -437,6 +444,7 @@ router.put('/:id/confirm', [
 // @access  Private
 router.put('/:id/cancel', [
   auth,
+  tenantMiddleware,
   requirePermission('cancel_sales_orders')
 ], async (req, res) => {
   try {
@@ -476,7 +484,7 @@ router.put('/:id/cancel', [
           });
           
         } catch (inventoryError) {
-          console.error(`Failed to restore inventory for product ${item.product}:`, inventoryError.message);
+          logger.error(`Failed to restore inventory for product ${item.product}:`, inventoryError.message);
           inventoryUpdates.push({
             productId: item.product,
             quantity: item.quantity,
@@ -485,7 +493,7 @@ router.put('/:id/cancel', [
           });
           
           // Continue with cancellation even if inventory restoration fails
-          console.warn(`Continuing with sales order cancellation despite inventory restoration failure for product ${item.product}`);
+          logger.warn(`Continuing with sales order cancellation despite inventory restoration failure for product ${item.product}`);
         }
       }
     }
@@ -503,7 +511,7 @@ router.put('/:id/cancel', [
       inventoryUpdates: inventoryUpdates.length > 0 ? inventoryUpdates : undefined
     });
   } catch (error) {
-    console.error('Cancel sales order error:', error);
+    logger.error('Cancel sales order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -537,7 +545,7 @@ router.put('/:id/close', [
       });
     }
   } catch (error) {
-    console.error('Close sales order error:', error);
+    logger.error('Close sales order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -547,6 +555,7 @@ router.put('/:id/close', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('delete_sales_orders')
 ], async (req, res) => {
   try {
@@ -566,7 +575,7 @@ router.delete('/:id', [
     
     res.json({ message: 'Sales order deleted successfully' });
   } catch (error) {
-    console.error('Delete sales order error:', error);
+    logger.error('Delete sales order error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -574,7 +583,7 @@ router.delete('/:id', [
 // @route   GET /api/sales-orders/:id/convert
 // @desc    Get sales order items available for conversion
 // @access  Private
-router.get('/:id/convert', auth, async (req, res) => {
+router.get('/:id/convert', [auth, tenantMiddleware], async (req, res) => {
   try {
     const salesOrder = await salesOrderRepository.findById(req.params.id, {
       populate: [
@@ -600,7 +609,7 @@ router.get('/:id/convert', auth, async (req, res) => {
       availableItems
     });
   } catch (error) {
-    console.error('Get conversion data error:', error);
+    logger.error('Get conversion data error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -608,12 +617,13 @@ router.get('/:id/convert', auth, async (req, res) => {
 // @route   POST /api/sales-orders/export/excel
 // @desc    Export sales orders to Excel
 // @access  Private
-router.post('/export/excel', [auth, requirePermission('view_sales_orders')], async (req, res) => {
+router.post('/export/excel', [auth, tenantMiddleware, requirePermission('view_sales_orders')], async (req, res) => {
   try {
     const { filters = {} } = req.body;
+    const tenantId = req.tenantId || req.user?.tenantId;
     
     // Build query based on filters (similar to GET endpoint)
-    const filter = {};
+    const filter = { tenantId }; // Always include tenantId for isolation
     
     if (filters.search) {
       filter.$or = [
@@ -736,8 +746,8 @@ router.post('/export/excel', [auth, requirePermission('view_sales_orders')], asy
     });
     
   } catch (error) {
-    console.error('Excel export error:', error);
-    console.error('Error stack:', error.stack);
+    logger.error('Excel export error:', { error: error });
+    logger.error('Error stack:', error.stack);
     res.status(500).json({ 
       message: 'Export failed', 
       error: error.message,
@@ -749,12 +759,13 @@ router.post('/export/excel', [auth, requirePermission('view_sales_orders')], asy
 // @route   POST /api/sales-orders/export/csv
 // @desc    Export sales orders to CSV
 // @access  Private
-router.post('/export/csv', [auth, requirePermission('view_sales_orders')], async (req, res) => {
+router.post('/export/csv', [auth, tenantMiddleware, requirePermission('view_sales_orders')], async (req, res) => {
   try {
     const { filters = {} } = req.body;
+    const tenantId = req.tenantId || req.user?.tenantId;
     
     // Build query based on filters (same as Excel export)
-    const filter = {};
+    const filter = { tenantId }; // Always include tenantId for isolation
     
     if (filters.search) {
       filter.$or = [
@@ -874,7 +885,7 @@ router.post('/export/csv', [auth, requirePermission('view_sales_orders')], async
     });
     
   } catch (error) {
-    console.error('CSV export error:', error);
+    logger.error('CSV export error:', { error: error });
     res.status(500).json({ message: 'Export failed', error: error.message });
   }
 });
@@ -882,12 +893,13 @@ router.post('/export/csv', [auth, requirePermission('view_sales_orders')], async
 // @route   POST /api/sales-orders/export/pdf
 // @desc    Export sales orders to PDF
 // @access  Private
-router.post('/export/pdf', [auth, requirePermission('view_sales_orders')], async (req, res) => {
+router.post('/export/pdf', [auth, tenantMiddleware, requirePermission('view_sales_orders')], async (req, res) => {
   try {
     const { filters = {} } = req.body;
+    const tenantId = req.tenantId || req.user?.tenantId;
     
     // Build query based on filters (same as Excel export)
-    const filter = {};
+    const filter = { tenantId }; // Always include tenantId for isolation
     
     if (filters.search) {
       filter.$or = [
@@ -1122,7 +1134,7 @@ router.post('/export/pdf', [auth, requirePermission('view_sales_orders')], async
     });
     
   } catch (error) {
-    console.error('PDF export error:', error);
+    logger.error('PDF export error:', { error: error });
     res.status(500).json({ message: 'Export failed', error: error.message });
   }
 });
@@ -1130,12 +1142,13 @@ router.post('/export/pdf', [auth, requirePermission('view_sales_orders')], async
 // @route   POST /api/sales-orders/export/json
 // @desc    Export sales orders to JSON
 // @access  Private
-router.post('/export/json', [auth, requirePermission('view_sales_orders')], async (req, res) => {
+router.post('/export/json', [auth, tenantMiddleware, requirePermission('view_sales_orders')], async (req, res) => {
   try {
     const { filters = {} } = req.body;
+    const tenantId = req.tenantId || req.user?.tenantId;
     
     // Build query based on filters (same as Excel export)
-    const filter = {};
+    const filter = { tenantId }; // Always include tenantId for isolation
     
     if (filters.search) {
       filter.$or = [
@@ -1198,7 +1211,7 @@ router.post('/export/json', [auth, requirePermission('view_sales_orders')], asyn
     });
     
   } catch (error) {
-    console.error('JSON export error:', error);
+    logger.error('JSON export error:', { error: error });
     res.status(500).json({ message: 'Export failed', error: error.message });
   }
 });
@@ -1206,7 +1219,7 @@ router.post('/export/json', [auth, requirePermission('view_sales_orders')], asyn
 // @route   GET /api/sales-orders/download/:filename
 // @desc    Download exported file
 // @access  Private
-router.get('/download/:filename', [auth, requirePermission('view_sales_orders')], (req, res) => {
+router.get('/download/:filename', [auth, tenantMiddleware, requirePermission('view_sales_orders')], (req, res) => {
   try {
     const filename = req.params.filename;
     const exportsDir = path.join(__dirname, '../exports');
@@ -1214,7 +1227,7 @@ router.get('/download/:filename', [auth, requirePermission('view_sales_orders')]
     
     
     if (!fs.existsSync(filepath)) {
-      console.error('File not found:', filepath);
+      logger.error('File not found:', filepath);
       return res.status(404).json({ message: 'File not found', filename, filepath });
     }
     
@@ -1249,13 +1262,13 @@ router.get('/download/:filename', [auth, requirePermission('view_sales_orders')]
     fileStream.pipe(res);
     
     fileStream.on('error', (err) => {
-      console.error('File stream error:', err);
+      logger.error('File stream error:', { error: err });
       if (!res.headersSent) {
         res.status(500).json({ message: 'Download failed' });
       }
     });
   } catch (error) {
-    console.error('Download error:', error);
+    logger.error('Download error:', { error: error });
     if (!res.headersSent) {
       res.status(500).json({ message: 'Download failed' });
     }

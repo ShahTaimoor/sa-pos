@@ -22,8 +22,6 @@ import {
   AlertCircle,
   CheckCircle,
   Clock,
-  TrendingUp as TrendingUpIcon,
-  DollarSign,
   ShoppingCart,
   Target
 } from 'lucide-react';
@@ -314,7 +312,7 @@ const SalesPerformanceReports = () => {
             <div className="card-content">
               <div className="flex items-center">
                 <div className="flex-shrink-0">
-                  <DollarSign className="h-8 w-8 text-green-600" />
+                  <TrendingUp className="h-8 w-8 text-green-600" />
                 </div>
                 <div className="ml-4">
                   <p className="text-sm font-medium text-gray-500">Total Revenue (30d)</p>

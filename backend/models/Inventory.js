@@ -1,6 +1,13 @@
 const mongoose = require('mongoose');
 
 const InventorySchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
+  
   product: {
     type: mongoose.Schema.Types.ObjectId,
     refPath: 'productModel',
@@ -15,8 +22,15 @@ const InventorySchema = new mongoose.Schema({
   currentStock: {
     type: Number,
     required: true,
-    min: 0,
+    min: 0, // Database-level constraint: prevents negative stock
     default: 0,
+    validate: {
+      validator: function(v) {
+        // Additional validation: ensure stock is never negative
+        return v >= 0;
+      },
+      message: 'Current stock cannot be negative. Inventory is the single source of truth.'
+    }
   },
   reservedStock: {
     type: Number,
@@ -28,6 +42,40 @@ const InventorySchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+  // Stock Reservations with expiration
+  reservations: [{
+    reservationId: {
+      type: String,
+      required: true,
+      index: true
+    },
+    quantity: {
+      type: Number,
+      required: true,
+      min: 0
+    },
+    expiresAt: {
+      type: Date,
+      required: true,
+      index: true
+    },
+    reservedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    referenceType: {
+      type: String,
+      enum: ['cart', 'sales_order', 'manual', 'system'],
+      default: 'cart'
+    },
+    referenceId: {
+      type: mongoose.Schema.Types.ObjectId
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   reorderPoint: {
     type: Number,
     required: true,
@@ -92,6 +140,10 @@ const InventorySchema = new mongoose.Schema({
   lastUpdated: {
     type: Date,
     default: Date.now,
+  },
+  lastCleanupAt: {
+    type: Date,
+    index: true
   },
   lastCount: {
     date: Date,
@@ -169,15 +221,16 @@ const InventorySchema = new mongoose.Schema({
 // This prevents duplicate inventory tracking regardless of productModel value.
 // Note: If separate inventory tracking is needed for Product vs ProductVariant
 // of the same underlying product, use compound unique index: { product: 1, productModel: 1 }
-InventorySchema.index({ product: 1 }, { unique: true });
-InventorySchema.index({ currentStock: 1 });
-InventorySchema.index({ status: 1 });
-InventorySchema.index({ 'location.warehouse': 1 });
-InventorySchema.index({ 'movements.date': -1 });
-InventorySchema.index({ status: 1, currentStock: 1 }); // For low stock queries
-InventorySchema.index({ reorderPoint: 1, currentStock: 1 }); // For reorder point queries
-InventorySchema.index({ lastUpdated: -1 }); // For recently updated inventory
-InventorySchema.index({ 'location.warehouse': 1, status: 1 }); // For warehouse-specific queries
+// Compound indexes for multi-tenant performance
+InventorySchema.index({ tenantId: 1, product: 1 }, { unique: true });
+InventorySchema.index({ tenantId: 1, currentStock: 1 });
+InventorySchema.index({ tenantId: 1, status: 1 });
+InventorySchema.index({ tenantId: 1, 'location.warehouse': 1 });
+InventorySchema.index({ tenantId: 1, 'movements.date': -1 });
+InventorySchema.index({ tenantId: 1, status: 1, currentStock: 1 });
+InventorySchema.index({ tenantId: 1, reorderPoint: 1, currentStock: 1 });
+InventorySchema.index({ tenantId: 1, lastUpdated: -1 });
+InventorySchema.index({ tenantId: 1, 'location.warehouse': 1, status: 1 });
 
 // Virtual for available stock calculation
 InventorySchema.virtual('calculatedAvailableStock').get(function() {
@@ -262,14 +315,31 @@ InventorySchema.statics.updateStock = async function(productId, movement) {
       };
     }
 
-    // Check stock availability before updating (for out movements)
+    // HARD RULE: Check stock availability before updating (for out movements)
+    // Database-level + service-level validation prevents negative stock
     if (movement.type !== 'adjustment' && quantityChange < 0) {
       const current = await this.findOne(filter);
       if (!current) {
-        throw new Error('Inventory record not found and cannot create with negative stock');
+        throw new Error('Inventory record not found and cannot create with negative stock. Inventory is the single source of truth.');
       }
+      
+      // Calculate available stock (current - reserved)
+      const availableStock = current.currentStock - (current.reservedStock || 0);
+      const requestedQuantity = Math.abs(quantityChange);
+      
       if (current.currentStock + quantityChange < 0) {
-        throw new Error(`Insufficient stock. Available: ${current.currentStock}, Requested: ${Math.abs(quantityChange)}`);
+        throw new Error(
+          `NEGATIVE_STOCK_PREVENTED: Insufficient stock. ` +
+          `Current: ${current.currentStock}, Reserved: ${current.reservedStock || 0}, ` +
+          `Available: ${availableStock}, Requested: ${requestedQuantity}`
+        );
+      }
+      
+      if (availableStock < requestedQuantity) {
+        throw new Error(
+          `INSUFFICIENT_AVAILABLE_STOCK: Available stock (${availableStock}) is less than requested (${requestedQuantity}). ` +
+          `Current stock: ${current.currentStock}, Reserved: ${current.reservedStock || 0}`
+        );
       }
     }
 
@@ -283,6 +353,39 @@ InventorySchema.statics.updateStock = async function(productId, movement) {
       updated.status = 'out_of_stock';
     } else if (updated.status === 'out_of_stock') {
       updated.status = 'active';
+    }
+    
+    // Update cost if provided in movement (for stock in/return)
+    if (movement.cost !== undefined && movement.cost !== null && (movement.type === 'in' || movement.type === 'return')) {
+      const CostingService = require('../services/costingService');
+      const costingService = new CostingService();
+      
+      // Update average cost (this will update inventory.cost.average and save)
+      const newAverageCost = await costingService.updateAverageCost(productId, movement.quantity, movement.cost);
+      
+      // Reload inventory to get updated cost and set lastPurchase
+      const inventoryWithCost = await this.findOne({ product: productId });
+      
+      if (inventoryWithCost) {
+        // Update last purchase cost
+        if (!inventoryWithCost.cost) {
+          inventoryWithCost.cost = {};
+        }
+        inventoryWithCost.cost.lastPurchase = movement.cost;
+        await inventoryWithCost.save();
+        
+        // Sync cost to Product model
+        const Product = require('../models/Product');
+        const product = await Product.findById(productId);
+        if (product) {
+          // Update product pricing.cost with average cost from inventory
+          if (!product.pricing) {
+            product.pricing = {};
+          }
+          product.pricing.cost = newAverageCost;
+          await product.save();
+        }
+      }
     }
     
     await updated.save();

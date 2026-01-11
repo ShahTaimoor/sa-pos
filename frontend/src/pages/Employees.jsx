@@ -12,7 +12,7 @@ import {
   MapPin,
   Briefcase,
   Calendar,
-  DollarSign,
+  TrendingUp,
   Building,
   Clock,
   Filter,

@@ -1,14 +1,17 @@
 const express = require('express');
 const { body, query, param } = require('express-validator');
 const { auth, requireAnyPermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const investorService = require('../services/investorService');
-const Investor = require('../models/Investor'); // Still needed for some operations
+const Investor = require('../models/Investor');
+const logger = require('../utils/logger'); // Still needed for some operations
 
 const router = express.Router();
 
 // Get all investors
 router.get('/', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['view_investors', 'manage_investors', 'view_reports']),
   query('status').optional().isIn(['active', 'inactive', 'suspended']),
   query('search').optional().isString().trim()
@@ -24,7 +27,7 @@ router.get('/', [
       data: investors
     });
   } catch (error) {
-    console.error('Error fetching investors:', error);
+    logger.error('Error fetching investors:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -36,6 +39,7 @@ router.get('/', [
 // Get single investor
 router.get('/:id', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['view_investors', 'manage_investors', 'view_reports']),
   param('id').isMongoId().withMessage('Invalid investor ID')
 ], async (req, res) => {
@@ -47,7 +51,7 @@ router.get('/:id', [
       data: result
     });
   } catch (error) {
-    console.error('Error fetching investor:', error);
+    logger.error('Error fetching investor:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -59,6 +63,7 @@ router.get('/:id', [
 // Create investor
 router.post('/', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['manage_investors', 'create_investors']),
   body('name').isString().trim().notEmpty().withMessage('Name is required'),
   body('email').isEmail().withMessage('Valid email is required'),
@@ -68,7 +73,8 @@ router.post('/', [
   body('status').optional().isIn(['active', 'inactive', 'suspended'])
 ], async (req, res) => {
   try {
-    const investor = await investorService.createInvestor(req.body, req.user._id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const investor = await investorService.createInvestor(req.body, req.user._id, { tenantId });
     
     res.status(201).json({
       success: true,
@@ -82,7 +88,7 @@ router.post('/', [
         message: error.message
       });
     }
-    console.error('Error creating investor:', error);
+    logger.error('Error creating investor:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -94,6 +100,7 @@ router.post('/', [
 // Update investor
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['manage_investors', 'edit_investors']),
   param('id').isMongoId().withMessage('Invalid investor ID'),
   body('name').optional().isString().trim().notEmpty(),
@@ -104,7 +111,8 @@ router.put('/:id', [
   body('status').optional().isIn(['active', 'inactive', 'suspended'])
 ], async (req, res) => {
   try {
-    const investor = await investorService.updateInvestor(req.params.id, req.body, req.user._id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const investor = await investorService.updateInvestor(req.params.id, req.body, req.user._id, { tenantId });
     
     res.json({
       success: true,
@@ -124,7 +132,7 @@ router.put('/:id', [
         message: error.message
       });
     }
-    console.error('Error updating investor:', error);
+    logger.error('Error updating investor:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -159,7 +167,7 @@ router.delete('/:id', [
         message: error.message
       });
     }
-    console.error('Error deleting investor:', error);
+    logger.error('Error deleting investor:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -171,6 +179,7 @@ router.delete('/:id', [
 // Record payout for investor
 router.post('/:id/payout', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['manage_investors', 'payout_investors']),
   param('id').isMongoId().withMessage('Invalid investor ID'),
   body('amount').isFloat({ min: 0.01 }).withMessage('Payout amount must be greater than 0')
@@ -196,7 +205,7 @@ router.post('/:id/payout', [
         message: error.message
       });
     }
-    console.error('Error recording payout:', error);
+    logger.error('Error recording payout:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -208,6 +217,7 @@ router.post('/:id/payout', [
 // Record investment (receive money from investor)
 router.post('/:id/investment', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['manage_investors', 'payout_investors']),
   param('id').isMongoId().withMessage('Invalid investor ID'),
   body('amount').isFloat({ min: 0.01 }).withMessage('Investment amount must be greater than 0'),
@@ -228,7 +238,7 @@ router.post('/:id/investment', [
         message: error.message
       });
     }
-    console.error('Error recording investment:', error);
+    logger.error('Error recording investment:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -240,6 +250,7 @@ router.post('/:id/investment', [
 // Get profit shares for investor
 router.get('/:id/profit-shares', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['view_investors', 'manage_investors', 'view_reports']),
   param('id').isMongoId().withMessage('Invalid investor ID'),
   query('startDate').optional().isISO8601(),
@@ -257,7 +268,7 @@ router.get('/:id/profit-shares', [
       data: profitShares
     });
   } catch (error) {
-    console.error('Error fetching profit shares:', error);
+    logger.error('Error fetching profit shares:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -284,7 +295,7 @@ router.get('/profit-shares/summary', [
       data: summary
     });
   } catch (error) {
-    console.error('Error fetching profit summary:', error);
+    logger.error('Error fetching profit summary:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -296,6 +307,7 @@ router.get('/profit-shares/summary', [
 // Get profit shares for order
 router.get('/profit-shares/order/:orderId', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['view_investors', 'manage_investors', 'view_reports']),
   param('orderId').isMongoId().withMessage('Invalid order ID')
 ], async (req, res) => {
@@ -307,7 +319,7 @@ router.get('/profit-shares/order/:orderId', [
       data: profitShares
     });
   } catch (error) {
-    console.error('Error fetching profit shares for order:', error);
+    logger.error('Error fetching profit shares for order:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -319,6 +331,7 @@ router.get('/profit-shares/order/:orderId', [
 // Get products linked to an investor
 router.get('/:id/products', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['view_investors', 'manage_investors']),
   param('id').isMongoId().withMessage('Invalid investor ID')
 ], async (req, res) => {
@@ -356,7 +369,7 @@ router.get('/:id/products', [
       data: productsWithShares
     });
   } catch (error) {
-    console.error('Error fetching investor products:', error);
+    logger.error('Error fetching investor products:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',

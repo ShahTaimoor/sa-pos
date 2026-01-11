@@ -1,14 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { body, validationResult, query } = require('express-validator');
 const noteService = require('../services/noteService');
+const logger = require('../utils/logger');
 
 // @route   GET /api/notes
 // @desc    Get notes for an entity
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   query('entityType').isIn(['Customer', 'Product', 'SalesOrder', 'PurchaseOrder', 'Supplier', 'Sale', 'PurchaseInvoice', 'SalesInvoice']).optional(),
   query('entityId').isMongoId().optional(),
   query('isPrivate').isBoolean().optional(),
@@ -28,7 +31,7 @@ router.get('/', [
       pagination
     });
   } catch (error) {
-    console.error('Get notes error:', error);
+    logger.error('Get notes error:', { error: error });
     res.status(500).json({ message: 'Failed to fetch notes', error: error.message });
   }
 });
@@ -36,7 +39,7 @@ router.get('/', [
 // @route   GET /api/notes/:id
 // @desc    Get a single note with history
 // @access  Private
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
     const note = await noteService.getNoteById(req.params.id, req.user.id);
     res.json(note);
@@ -47,7 +50,7 @@ router.get('/:id', auth, async (req, res) => {
     if (error.message === 'Access denied to private note') {
       return res.status(403).json({ message: error.message });
     }
-    console.error('Get note error:', error);
+    logger.error('Get note error:', { error: error });
     res.status(500).json({ message: 'Failed to fetch note', error: error.message });
   }
 });
@@ -57,6 +60,7 @@ router.get('/:id', auth, async (req, res) => {
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   body('entityType').isIn(['Customer', 'Product', 'SalesOrder', 'PurchaseOrder', 'Supplier', 'Sale', 'PurchaseInvoice', 'SalesInvoice']),
   body('entityId').isMongoId(),
   body('content').trim().isLength({ min: 1, max: 10000 }),
@@ -75,7 +79,7 @@ router.post('/', [
     
     res.status(201).json(note);
   } catch (error) {
-    console.error('Create note error:', error);
+    logger.error('Create note error:', { error: error });
     res.status(500).json({ message: 'Failed to create note', error: error.message });
   }
 });
@@ -85,6 +89,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   body('content').optional().trim().isLength({ min: 1, max: 10000 }),
   body('htmlContent').optional().isString(),
   body('isPrivate').optional().isBoolean(),
@@ -108,7 +113,7 @@ router.put('/:id', [
     if (error.message === 'Only the note creator can edit this note') {
       return res.status(403).json({ message: error.message });
     }
-    console.error('Update note error:', error);
+    logger.error('Update note error:', { error: error });
     res.status(500).json({ message: 'Failed to update note', error: error.message });
   }
 });
@@ -116,7 +121,7 @@ router.put('/:id', [
 // @route   DELETE /api/notes/:id
 // @desc    Delete a note (soft delete)
 // @access  Private
-router.delete('/:id', auth, async (req, res) => {
+router.delete('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
     const result = await noteService.deleteNote(req.params.id, req.user.id);
     
@@ -128,7 +133,7 @@ router.delete('/:id', auth, async (req, res) => {
     if (error.message === 'Only the note creator can delete this note') {
       return res.status(403).json({ message: error.message });
     }
-    console.error('Delete note error:', error);
+    logger.error('Delete note error:', { error: error });
     res.status(500).json({ message: 'Failed to delete note', error: error.message });
   }
 });
@@ -136,7 +141,7 @@ router.delete('/:id', auth, async (req, res) => {
 // @route   GET /api/notes/:id/history
 // @desc    Get note history
 // @access  Private
-router.get('/:id/history', auth, async (req, res) => {
+router.get('/:id/history', [auth, tenantMiddleware], async (req, res) => {
   try {
     const history = await noteService.getNoteHistory(req.params.id, req.user.id);
     res.json(history);
@@ -147,7 +152,7 @@ router.get('/:id/history', auth, async (req, res) => {
     if (error.message === 'Access denied') {
       return res.status(403).json({ message: error.message });
     }
-    console.error('Get note history error:', error);
+    logger.error('Get note history error:', { error: error });
     res.status(500).json({ message: 'Failed to fetch note history', error: error.message });
   }
 });
@@ -155,12 +160,12 @@ router.get('/:id/history', auth, async (req, res) => {
 // @route   GET /api/notes/search/users
 // @desc    Search users for @mentions
 // @access  Private
-router.get('/search/users', auth, async (req, res) => {
+router.get('/search/users', [auth, tenantMiddleware], async (req, res) => {
   try {
     const users = await noteService.searchUsers(req.query.q);
     res.json(users);
   } catch (error) {
-    console.error('Search users error:', error);
+    logger.error('Search users error:', { error: error });
     res.status(500).json({ message: 'Failed to search users', error: error.message });
   }
 });

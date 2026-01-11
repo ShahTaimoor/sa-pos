@@ -43,7 +43,7 @@ class CashReceiptRepository extends BaseRepository {
       });
     }
     
-    if (sort) {
+    if (sort && typeof sort === 'object' && Object.keys(sort).length > 0) {
       queryBuilder = queryBuilder.sort(sort);
     }
     

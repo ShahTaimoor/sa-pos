@@ -47,7 +47,7 @@ export const formatTime = (dateString) => {
   }
 };
 
-// Currency formatting utilities
+// Currency formatting utilities (without dollar sign)
 export const formatCurrency = (amount, currency = 'USD') => {
   if (amount === null || amount === undefined) return '';
   
@@ -56,8 +56,8 @@ export const formatCurrency = (amount, currency = 'USD') => {
     if (isNaN(numAmount)) return '';
     
     return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
     }).format(numAmount);
   } catch (error) {
     return amount.toString();

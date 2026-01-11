@@ -1,6 +1,7 @@
 const ProductRepository = require('../repositories/ProductRepository');
 const InvestorRepository = require('../repositories/InvestorRepository');
 const ProfitShareRepository = require('../repositories/ProfitShareRepository');
+const logger = require('../utils/logger');
 
 class ProfitDistributionService {
   constructor() {
@@ -124,7 +125,7 @@ class ProfitDistributionService {
               });
             } catch (err) {
               if (err.code === 11000) {
-                console.log('Duplicate profit share record, skipping:', {
+                logger.info('Duplicate profit share record, skipping:', {
                   order: order.orderNumber,
                   investor: invDetail.investorName
                 });
@@ -171,7 +172,7 @@ class ProfitDistributionService {
             item: item.product,
             error: itemError.message
           });
-          console.error(`Error processing profit for item ${item.product}:`, itemError);
+          logger.error(`Error processing profit for item ${item.product}:`, itemError);
         }
       }
 
@@ -181,7 +182,7 @@ class ProfitDistributionService {
 
       return distributionResults;
     } catch (error) {
-      console.error('Error distributing profit for order:', error);
+      logger.error('Error distributing profit for order:', error);
       throw error;
     }
   }

@@ -10,7 +10,7 @@ import {
   X,
   Phone,
   MapPin,
-  DollarSign,
+  TrendingUp,
   CheckCircle
 } from 'lucide-react';
 import {
@@ -205,7 +205,7 @@ const BankFormModal = ({ bank, onSave, onCancel, isSubmitting }) => {
                   Opening Balance
                 </label>
                 <div className="relative">
-                  <DollarSign className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <TrendingUp className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
                     type="number"
                     step="0.01"

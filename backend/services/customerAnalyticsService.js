@@ -1,5 +1,6 @@
 const CustomerRepository = require('../repositories/CustomerRepository');
 const SalesRepository = require('../repositories/SalesRepository');
+const logger = require('../utils/logger');
 
 /**
  * Customer Analytics Service
@@ -81,7 +82,7 @@ class CustomerAnalyticsService {
         recentOrdersCount: frequency
       };
     } catch (error) {
-      console.error('Error calculating RFM:', error);
+      logger.error('Error calculating RFM:', error);
       throw error;
     }
   }
@@ -315,7 +316,7 @@ class CustomerAnalyticsService {
         timeHorizon: '12_months'
       };
     } catch (error) {
-      console.error('Error predicting CLV:', error);
+      logger.error('Error predicting CLV:', error);
       throw error;
     }
   }
@@ -549,7 +550,7 @@ class CustomerAnalyticsService {
             analytics.summary.churnedCount++;
           }
         } catch (error) {
-          console.error(`Error analyzing customer ${customer._id}:`, error);
+          logger.error(`Error analyzing customer ${customer._id}:`, error);
           // Continue with next customer
         }
       }
@@ -566,7 +567,7 @@ class CustomerAnalyticsService {
 
       return analytics;
     } catch (error) {
-      console.error('Error analyzing all customers:', error);
+      logger.error('Error analyzing all customers:', error);
       throw error;
     }
   }
@@ -603,7 +604,7 @@ class CustomerAnalyticsService {
         churnRisk
       };
     } catch (error) {
-      console.error('Error getting customer analytics:', error);
+      logger.error('Error getting customer analytics:', error);
       throw error;
     }
   }

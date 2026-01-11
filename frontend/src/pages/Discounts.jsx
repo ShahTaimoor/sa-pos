@@ -10,7 +10,7 @@ import {
   ToggleLeft,
   ToggleRight,
   Percent,
-  DollarSign,
+  TrendingUp,
   Tag,
   Calendar,
   Users,
@@ -19,7 +19,6 @@ import {
   CheckCircle,
   Clock,
   XCircle,
-  TrendingUp,
   TrendingDown
 } from 'lucide-react';
 import {
@@ -168,7 +167,7 @@ const Discounts = () => {
   const getTypeIcon = (type) => {
     return type === 'percentage' ? 
       <Percent className="h-4 w-4 text-blue-500" /> : 
-      <DollarSign className="h-4 w-4 text-green-500" />;
+      <TrendingUp className="h-4 w-4 text-green-500" />;
   };
 
   const getTypeColor = (type) => {
@@ -299,7 +298,7 @@ const Discounts = () => {
               <div className="flex items-center">
                 <div className="flex-shrink-0">
                   <div className="p-3 rounded-md bg-yellow-50 text-yellow-600">
-                    <DollarSign className="h-5 w-5" />
+                    <TrendingUp className="h-5 w-5" />
                   </div>
                 </div>
                 <div className="ml-5 w-0 flex-1">

@@ -1,17 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
-  Book,
-  Search,
-  Calendar,
-  FileText,
-  TrendingUp,
-  TrendingDown,
-  DollarSign,
-  Filter,
-  Download,
-  RefreshCw,
-  FileDown,
-  Printer
+  FileText
 } from 'lucide-react';
 import {
   useGetLedgerEntriesQuery,
@@ -22,24 +11,6 @@ import {
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { handleApiError } from '../utils/errorHandler';
 import toast from 'react-hot-toast';
-
-const AccountTypeBadge = ({ type }) => {
-  const config = {
-    asset: { bg: 'bg-green-100', text: 'text-green-800', label: 'Asset' },
-    liability: { bg: 'bg-red-100', text: 'text-red-800', label: 'Liability' },
-    equity: { bg: 'bg-blue-100', text: 'text-blue-800', label: 'Equity' },
-    revenue: { bg: 'bg-purple-100', text: 'text-purple-800', label: 'Revenue' },
-    expense: { bg: 'bg-orange-100', text: 'text-orange-800', label: 'Expense' }
-  };
-
-  const typeConfig = config[type] || config.asset;
-
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${typeConfig.bg} ${typeConfig.text}`}>
-      {typeConfig.label}
-    </span>
-  );
-};
 
 const AccountLedger = () => {
   // Function to get default date range (one month difference)
@@ -65,11 +36,15 @@ const AccountLedger = () => {
     customerName: '',
     supplierName: ''
   });
-  const [showFilters, setShowFilters] = useState(true);
   const [accountSearchQuery, setAccountSearchQuery] = useState('');
+  const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportLedger] = useExportLedgerMutation();
+  // Store ledger data in local state to persist it even if query is skipped
+  const [cachedLedgerData, setCachedLedgerData] = useState(null);
+  // Use a ref to persist data across renders and prevent RTK Query from clearing it
+  const persistedLedgerDataRef = useRef(null);
 
   // Close export menu when clicking outside
   React.useEffect(() => {
@@ -77,10 +52,13 @@ const AccountLedger = () => {
       if (showExportMenu && !event.target.closest('.relative')) {
         setShowExportMenu(false);
       }
+      if (showAccountDropdown && !event.target.closest('.relative')) {
+        setShowAccountDropdown(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showExportMenu]);
+  }, [showExportMenu, showAccountDropdown]);
 
   // Fetch all accounts list
   const { data: accountsData, isLoading: accountsLoading } = useGetAccountsListQuery(undefined, {
@@ -88,17 +66,141 @@ const AccountLedger = () => {
   });
 
   // Fetch ledger entries based on filters
+  // Build query params including customerId/supplierId if available
+  // Memoize queryParams to prevent unnecessary re-renders
+  // For customer accounts, ensure customerId is always included and stable
+  const queryParams = useMemo(() => {
+    const params = { ...filters };
+    
+    // Always include customerId/supplierId if available in selectedAccount
+    // This ensures the query params remain stable for customer accounts
+    if (selectedAccount?.customerId) {
+      params.customerId = selectedAccount.customerId;
+    }
+    if (selectedAccount?.supplierId) {
+      params.supplierId = selectedAccount.supplierId;
+    }
+    
+    return params;
+  }, [
+    filters.startDate,
+    filters.endDate,
+    filters.accountCode,
+    filters.accountName,
+    filters.customerName,
+    filters.supplierName,
+    selectedAccount?.customerId,
+    selectedAccount?.supplierId
+  ]);
+
+  // Check if query should be skipped - only skip if no account is selected AND no date filters
+  const shouldSkip = useMemo(() => {
+    // Don't skip if we have an account selected (even if filters are empty, we want to keep showing data)
+    if (selectedAccount) {
+      return false;
+    }
+    // Only skip if no filters at all
+    return !(filters.accountCode || filters.startDate || filters.endDate || filters.accountName);
+  }, [selectedAccount, filters.accountCode, filters.startDate, filters.endDate, filters.accountName]);
+
+  // For customer accounts, never skip the query to keep data persistent
+  const effectiveShouldSkip = useMemo(() => {
+    // If it's a customer account, never skip - this keeps the subscription active
+    if (selectedAccount?.customerId) {
+      return false;
+    }
+    return shouldSkip;
+  }, [shouldSkip, selectedAccount?.customerId]);
+
   const { data: ledgerData, isLoading: ledgerLoading, refetch: refetchLedger } = useGetAllEntriesQuery(
-    filters,
+    queryParams,
     {
-      skip: !(filters.accountCode || filters.startDate || filters.endDate || filters.accountName),
-      onError: (error) => handleApiError(error, 'Error fetching ledger entries')
+      skip: effectiveShouldSkip,
+      onError: (error) => handleApiError(error, 'Error fetching ledger entries'),
+      // Keep data in cache for 5 minutes to prevent it from disappearing
+      keepUnusedDataFor: 300,
+      // Disable automatic refetching to prevent data from being cleared
+      refetchOnMountOrArgChange: false,
+      refetchOnFocus: false,
+      refetchOnReconnect: false
     }
   );
 
+  // Persist ledger data in both state and ref when it's available
+  // For customer accounts, ensure data persists even if query params change slightly
+  React.useEffect(() => {
+    if (ledgerData && ledgerData.data) {
+      // Update both state and ref to persist data
+      // Check if we have entries or if it's a valid response structure
+      if (ledgerData.data.entries && ledgerData.data.entries.length > 0) {
+        setCachedLedgerData(ledgerData);
+        persistedLedgerDataRef.current = ledgerData;
+      } else if (ledgerData.data.summary) {
+        // Even if entries array is empty, keep the structure if summary exists
+        setCachedLedgerData(ledgerData);
+        persistedLedgerDataRef.current = ledgerData;
+      }
+    }
+  }, [ledgerData]);
+  
+  // For customer accounts specifically, aggressively preserve data
+  React.useEffect(() => {
+    if (selectedAccount?.customerId) {
+      // If we have customer account data, always ensure it's preserved
+      if (ledgerData && ledgerData.data) {
+        // Always update cache when we have fresh data
+        setCachedLedgerData(ledgerData);
+        persistedLedgerDataRef.current = ledgerData;
+      } else if (persistedLedgerDataRef.current && !ledgerData) {
+        // If RTK Query cleared the data but we have it in ref, immediately restore it
+        setCachedLedgerData(persistedLedgerDataRef.current);
+      } else if (cachedLedgerData && !ledgerData) {
+        // If we have cached data but RTK Query cleared it, restore from cache
+        persistedLedgerDataRef.current = cachedLedgerData;
+      }
+    }
+  }, [selectedAccount?.customerId, ledgerData, cachedLedgerData]);
+  
+  // Additional safeguard: periodically check and restore customer account data
+  React.useEffect(() => {
+    if (!selectedAccount?.customerId) return;
+    
+    const checkInterval = setInterval(() => {
+      // Every 2 seconds, check if data is missing and restore it
+      if (!ledgerData && persistedLedgerDataRef.current) {
+        setCachedLedgerData(persistedLedgerDataRef.current);
+      }
+    }, 2000);
+    
+    return () => clearInterval(checkInterval);
+  }, [selectedAccount?.customerId, ledgerData]);
+  
+  // Clear cached data only when account is cleared or filters are completely reset
+  React.useEffect(() => {
+    if (!selectedAccount && !filters.accountCode && !filters.accountName) {
+      // Only clear if we truly have no account selected and no filters
+      setCachedLedgerData(null);
+      persistedLedgerDataRef.current = null;
+    }
+  }, [selectedAccount, filters.accountCode, filters.accountName]);
+
   const handleAccountSelect = (account) => {
     setSelectedAccount(account);
-    setFilters({ ...filters, accountCode: account.accountCode });
+    setFilters({ ...filters, accountCode: account.accountCode, accountName: account.accountName });
+    setShowAccountDropdown(false);
+    setAccountSearchQuery(account.accountName || account.accountCode);
+  };
+
+  const handleView = () => {
+    if (selectedAccount) {
+      // Force refetch and update cache
+      refetchLedger().then((result) => {
+        if (result.data) {
+          setCachedLedgerData(result.data);
+          persistedLedgerDataRef.current = result.data;
+        }
+      });
+    }
   };
 
   const handleFilterChange = (field, value) => {
@@ -108,32 +210,25 @@ const AccountLedger = () => {
   const handleClearFilters = () => {
     setFilters({ startDate: defaultDates.startDate, endDate: defaultDates.endDate, accountCode: '', accountName: '' });
     setSelectedAccount(null);
+    setCachedLedgerData(null); // Clear cached data when filters are cleared
   };
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
     }).format(amount || 0);
   };
 
   const formatDate = (date) => {
-    return new Date(date).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    });
+    if (!date) return '';
+    const d = new Date(date);
+    const day = d.getDate().toString().padStart(2, '0');
+    const month = d.toLocaleDateString('en-US', { month: 'short' });
+    const year = d.getFullYear().toString().slice(-2);
+    return `${day}-${month}-${year}`;
   };
 
-  const formatDateTime = (date) => {
-    return new Date(date).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
 
   const handleExport = async (format = 'csv') => {
     if (!ledgerData?.data?.entries?.length) {
@@ -196,123 +291,27 @@ const AccountLedger = () => {
   }
 
   const groupedAccounts = accountsData?.data?.groupedAccounts || {};
-  const ledgerEntries = ledgerData?.data?.entries || [];
-  const summary = ledgerData?.data?.summary || {};
+  const allAccounts = Object.values(groupedAccounts).flat();
+  // Use cached data if current data is not available (persists data even when query is skipped)
+  // For customer accounts, aggressively prioritize persisted data to prevent disappearing
+  let currentLedgerData = ledgerData;
+  
+  // For customer accounts, if RTK Query data is missing or empty, use persisted data
+  if (selectedAccount?.customerId) {
+    if (!currentLedgerData || !currentLedgerData.data || !currentLedgerData.data.entries || currentLedgerData.data.entries.length === 0) {
+      // Use persisted data if current data is missing or empty
+      currentLedgerData = persistedLedgerDataRef.current || cachedLedgerData;
+    }
+  } else {
+    // For non-customer accounts, use normal fallback
+    currentLedgerData = ledgerData || cachedLedgerData || persistedLedgerDataRef.current;
+  }
+  
+  const ledgerEntries = currentLedgerData?.data?.entries || [];
+  const summary = currentLedgerData?.data?.summary || {};
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center">
-            <Book className="h-8 w-8 mr-2 text-primary-600" />
-            Account Ledger
-          </h1>
-          <p className="mt-1 text-sm text-gray-600">
-            View detailed transaction history for all accounts
-          </p>
-        </div>
-        <div className="flex space-x-2 no-print">
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className="btn btn-secondary flex items-center"
-          >
-            <Filter className="h-4 w-4 mr-2" />
-            {showFilters ? 'Hide Filters' : 'Show Filters'}
-          </button>
-          {ledgerEntries.length > 0 && (
-            <div className="relative">
-              <button
-                onClick={() => setShowExportMenu(!showExportMenu)}
-                disabled={isExporting}
-                className="btn btn-secondary flex items-center"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                {isExporting ? 'Exporting...' : 'Export'}
-              </button>
-              
-              {showExportMenu && (
-                <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200">
-                  <div className="py-1">
-                    <button
-                      onClick={() => handleExport('csv')}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
-                    >
-                      <FileDown className="h-4 w-4 mr-2" />
-                      Export as CSV
-                    </button>
-                    <button
-                      onClick={() => handleExport('excel')}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
-                    >
-                      <FileDown className="h-4 w-4 mr-2" />
-                      Export as Excel
-                    </button>
-                    <button
-                      onClick={() => handleExport('pdf')}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
-                    >
-                      <FileDown className="h-4 w-4 mr-2" />
-                      Export as PDF
-                    </button>
-                    <button
-                      onClick={() => handleExport('json')}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
-                    >
-                      <FileDown className="h-4 w-4 mr-2" />
-                      Export as JSON
-                    </button>
-                    <div className="border-t border-gray-200 my-1"></div>
-                    <button
-                      onClick={handlePrint}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
-                    >
-                      <Printer className="h-4 w-4 mr-2" />
-                      Print View
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          <button
-            onClick={() => refetchLedger()}
-            className="btn btn-primary flex items-center"
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </button>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-12 gap-6">
-        {/* Accounts List Sidebar */}
-        <div className="col-span-12 lg:col-span-3 no-print">
-          <div className="card">
-            <div className="card-header">
-              <h2 className="text-lg font-semibold flex items-center">
-                <FileText className="h-5 w-5 mr-2" />
-                Accounts
-              </h2>
-            </div>
-            <div className="card-content p-0">
-              <div className="p-4 border-b">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search accounts..."
-                    className="input pl-10"
-                    value={accountSearchQuery}
-                    onChange={(e) => setAccountSearchQuery(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="max-h-[calc(100vh-300px)] overflow-y-auto">
-                {Object.entries(groupedAccounts).map(([type, accountsList]) => {
-                  // Filter accounts based on search query
-                  const filteredAccounts = accountsList.filter(account => {
+  // Filter accounts for dropdown
+  const filteredAccounts = allAccounts.filter(account => {
                     if (!accountSearchQuery.trim()) return true;
                     const query = accountSearchQuery.toLowerCase();
                     return (
@@ -322,377 +321,236 @@ const AccountLedger = () => {
                     );
                   });
                   
-                  if (filteredAccounts.length === 0) return null;
+  // Calculate totals
+  const totalDebits = ledgerEntries.reduce((sum, entry) => sum + (entry.debitAmount || 0), 0);
+  const totalCredits = ledgerEntries.reduce((sum, entry) => sum + (entry.creditAmount || 0), 0);
+  const closingBalance = summary.closingBalance !== undefined ? summary.closingBalance : (summary.openingBalance || 0) + totalDebits - totalCredits;
                   
                   return (
-                  <div key={type} className="border-b last:border-b-0">
-                    <div className="px-4 py-2 bg-gray-50 border-b">
-                      <h3 className="font-medium text-sm text-gray-700 uppercase">
-                        {type}
-                      </h3>
-                    </div>
-                    <div>
-                      {filteredAccounts.map((account) => (
+    <div className="space-y-4">
+      {/* Filter Header Bar */}
+      <div className="bg-white border border-gray-200 rounded-lg p-4 no-print">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          {/* Account Dropdown */}
+          <div className="relative">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Account</label>
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Select account..."
+                value={accountSearchQuery}
+                onChange={(e) => {
+                  setAccountSearchQuery(e.target.value);
+                  setShowAccountDropdown(true);
+                }}
+                onFocus={() => setShowAccountDropdown(true)}
+                className="input w-full"
+              />
+              {showAccountDropdown && filteredAccounts.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                  {filteredAccounts.slice(0, 50).map((account) => (
                         <button
                           key={account._id}
                           onClick={() => handleAccountSelect(account)}
-                          className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors border-b last:border-b-0 ${
-                            selectedAccount?._id === account._id ? 'bg-primary-50 border-l-4 border-l-primary-500' : ''
-                          }`}
-                        >
-                          <div className="flex justify-between items-start">
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium text-gray-900 truncate">
-                                {account.accountCode}
-                              </div>
-                              <div className="text-xs text-gray-600 truncate">
-                                {account.accountName}
-                              </div>
-                              {account.transactionCount > 0 && (
-                                <div className="text-xs text-gray-500 mt-1">
-                                  {account.transactionCount} transactions
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-right ml-2">
-                              <div className={`text-sm font-semibold ${
-                                account.currentBalance >= 0 ? 'text-green-600' : 'text-red-600'
-                              }`}>
-                                {formatCurrency(Math.abs(account.currentBalance))}
-                              </div>
-                            </div>
-                          </div>
+                      className={`w-full text-left px-4 py-2 hover:bg-gray-50 ${
+                        selectedAccount?._id === account._id ? 'bg-orange-50' : ''
+                      }`}
+                    >
+                      <div className="text-sm font-medium text-gray-900">{account.accountName || account.accountCode}</div>
+                      {account.accountName && (
+                        <div className="text-xs text-gray-500">{account.accountCode}</div>
+                      )}
                         </button>
                       ))}
-                    </div>
-                  </div>
-                );
-                })}
-                {accountSearchQuery.trim() && Object.values(groupedAccounts).flat().filter(account => {
-                  const query = accountSearchQuery.toLowerCase();
-                  return (
-                    account.accountCode.toLowerCase().includes(query) ||
-                    account.accountName.toLowerCase().includes(query) ||
-                    (account.description && account.description.toLowerCase().includes(query))
-                  );
-                }).length === 0 && (
-                  <div className="p-4 text-center text-sm text-gray-500">
-                    No accounts found matching "{accountSearchQuery}"
                   </div>
                 )}
-              </div>
-            </div>
           </div>
         </div>
 
-        {/* Ledger Entries */}
-        <div className="col-span-12 lg:col-span-9">
-          {/* Filters */}
-          {showFilters && (
-            <div className="card mb-6 no-print">
-              <div className="card-header">
-                <h3 className="text-lg font-semibold">Filters</h3>
-              </div>
-              <div className="card-content">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {/* From Date */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Start Date
-                    </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">From Date</label>
                     <input
                       type="date"
                       value={filters.startDate}
                       onChange={(e) => handleFilterChange('startDate', e.target.value)}
-                      className="input"
+              className="input w-full"
                     />
                   </div>
+
+          {/* To Date */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      End Date
-                    </label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">To Date</label>
                     <input
                       type="date"
                       value={filters.endDate}
                       onChange={(e) => handleFilterChange('endDate', e.target.value)}
-                      className="input"
+              className="input w-full"
                     />
                   </div>
+
+          {/* View Button */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Account Name
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Search by account, customer, or supplier name..."
-                      value={filters.accountName}
-                      onChange={(e) => handleFilterChange('accountName', e.target.value)}
-                      className="input"
-                    />
-                  </div>
-                  <div className="flex items-end">
                     <button
-                      onClick={handleClearFilters}
-                      className="btn btn-secondary w-full"
+              onClick={handleView}
+              className="btn btn-primary w-full"
+              disabled={!selectedAccount}
                     >
-                      Clear Filters
+              View
                     </button>
                   </div>
                 </div>
               </div>
-            </div>
-          )}
 
-          {/* Account Info */}
+      {/* Ledger Report */}
           {selectedAccount && (
-            <div className="card mb-6 print-only">
-              {/* Print header */}
-              <div className="print-header hidden print:block mb-4">
-                <h2 className="text-2xl font-bold text-center">Account Ledger</h2>
-                <div className="text-center mt-2">
-                  <p className="font-semibold">{selectedAccount.accountCode} - {selectedAccount.accountName}</p>
+        <div className="bg-white border border-gray-200 rounded-lg">
+          {/* Report Header */}
+          <div className="p-6 border-b border-gray-200">
+            <h2 className="text-2xl font-bold italic text-center mb-2">Account Ledger</h2>
+            <div className="text-center">
+              <p className="text-lg font-bold italic">{selectedAccount.accountName || selectedAccount.accountCode}</p>
                   {filters.startDate && filters.endDate && (
-                    <p className="text-sm text-gray-600">
-                      Period: {formatDate(filters.startDate)} to {formatDate(filters.endDate)}
-                    </p>
-                  )}
-                  <p className="text-sm text-gray-600">
-                    Generated: {new Date().toLocaleString()}
-                  </p>
-                </div>
-              </div>
-              
-              {/* Regular account info (hidden in print) */}
-              <div className="no-print">
-              <div className="card-content">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <div className="flex items-center space-x-3">
-                      <h2 className="text-xl font-bold text-gray-900">
-                        {selectedAccount.accountCode} - {selectedAccount.accountName}
-                      </h2>
-                      <AccountTypeBadge type={selectedAccount.accountType} />
-                    </div>
-                    {selectedAccount.description && (
-                      <p className="text-sm text-gray-600 mt-2">
-                        {selectedAccount.description}
+                <p className="text-sm text-gray-600 mt-1">
+                  From: {formatDate(filters.startDate)} To: {formatDate(filters.endDate)}
                       </p>
                     )}
-                    <div className="mt-3 flex items-center space-x-4 text-sm">
-                      <span className="text-gray-600">
-                        Normal Balance: <span className="font-medium capitalize">{selectedAccount.normalBalance}</span>
-                      </span>
-                      <span className="text-gray-400">|</span>
-                      <span className="text-gray-600">
-                        Category: <span className="font-medium capitalize">{selectedAccount.accountCategory.replace('_', ' ')}</span>
-                      </span>
-                      {selectedAccount.openingBalance !== undefined && (
-                        <>
-                          <span className="text-gray-400">|</span>
-                          <span className="text-gray-600">
-                            Opening Balance: <span className={`font-medium ${(selectedAccount.openingBalance || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {formatCurrency(Math.abs(selectedAccount.openingBalance || 0))}
-                            </span>
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm text-gray-600">Current Balance</div>
-                    <div className={`text-2xl font-bold ${
-                      selectedAccount.currentBalance >= 0 ? 'text-green-600' : 'text-red-600'
-                    }`}>
-                      {formatCurrency(Math.abs(selectedAccount.currentBalance))}
-                    </div>
-                  </div>
                 </div>
               </div>
-              </div>
-            </div>
-          )}
-
-          {/* Summary Cards */}
-          {summary.totalEntries > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-              <div className="card">
-                <div className="card-content">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600">Opening Balance</p>
-                      <p className={`text-xl font-bold ${
-                        (summary.openingBalance || 0) >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        {formatCurrency(Math.abs(summary.openingBalance || 0))}
-                      </p>
-                    </div>
-                    <DollarSign className="h-8 w-8 text-gray-500" />
-                  </div>
-                </div>
-              </div>
-              
-              <div className="card">
-                <div className="card-content">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600">Total Debits</p>
-                      <p className="text-xl font-bold text-green-600">
-                        {formatCurrency(summary.totalDebits)}
-                      </p>
-                    </div>
-                    <TrendingUp className="h-8 w-8 text-green-500" />
-                  </div>
-                </div>
-              </div>
-              
-              <div className="card">
-                <div className="card-content">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600">Total Credits</p>
-                      <p className="text-xl font-bold text-red-600">
-                        {formatCurrency(summary.totalCredits)}
-                      </p>
-                    </div>
-                    <TrendingDown className="h-8 w-8 text-red-500" />
-                  </div>
-                </div>
-              </div>
-              
-              <div className="card">
-                <div className="card-content">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600">Closing Balance</p>
-                      <p className={`text-xl font-bold ${
-                        summary.closingBalance >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        {formatCurrency(Math.abs(summary.closingBalance))}
-                      </p>
-                    </div>
-                    <DollarSign className="h-8 w-8 text-blue-500" />
-                  </div>
-                </div>
-              </div>
-              
-              <div className="card">
-                <div className="card-content">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-600">Total Entries</p>
-                      <p className="text-xl font-bold text-gray-900">
-                        {summary.totalEntries}
-                      </p>
-                    </div>
-                    <FileText className="h-8 w-8 text-purple-500" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Ledger Table */}
-          <div className="card account-ledger-print">
-            <div className="card-header">
-              <h3 className="text-lg font-semibold flex items-center">
-                <Calendar className="h-5 w-5 mr-2" />
-                Ledger Entries
-                {ledgerEntries.length > 0 && (
-                  <span className="ml-2 text-sm font-normal text-gray-500">
-                    ({ledgerEntries.length} entries)
-                  </span>
-                )}
-              </h3>
-            </div>
-            <div className="card-content p-0">
+          <div className="overflow-x-auto">
               {ledgerLoading ? (
                 <div className="flex justify-center items-center py-12">
                   <LoadingSpinner />
                 </div>
-              ) : ledgerEntries.length === 0 ? (
-                <div className="text-center py-12">
-                  <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">
-                    {selectedAccount
-                      ? 'No transactions found for this account'
-                      : 'Select an account to view ledger entries'}
-                  </p>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full divide-y divide-gray-200 account-ledger-table">
+            ) : (
+              <table className="min-w-full divide-y divide-gray-200">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Date
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Description
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Reference
-                        </th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Debit
-                        </th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Credit
-                        </th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Balance
-                        </th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                          Source
-                        </th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Voucher No</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">Particular</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Debits</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Credits</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase">Balance</th>
                       </tr>
                     </thead>
                     <tbody className="bg-white divide-y divide-gray-200">
-                      {ledgerEntries.map((entry, index) => (
+                  {/* Opening Balance Row */}
+                  <tr className="bg-gray-50">
+                    <td className="px-4 py-3 text-sm text-gray-900"></td>
+                    <td className="px-4 py-3 text-sm text-gray-900"></td>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">Opening Balance:</td>
+                    <td className="px-4 py-3 text-sm text-right text-gray-900"></td>
+                    <td className="px-4 py-3 text-sm text-right text-gray-900"></td>
+                    <td className="px-4 py-3 text-sm text-right font-bold text-gray-900">
+                      {formatCurrency(Math.abs(summary.openingBalance || 0))}
+                    </td>
+                  </tr>
+
+                  {/* Transaction Rows */}
+                  {ledgerEntries.map((entry, index) => {
+                    // Build the particular text with customer/supplier info
+                    let particularText = entry.description || '';
+                    
+                    // Add customer information if available
+                    if (entry.customer) {
+                      const customerName = typeof entry.customer === 'string' 
+                        ? entry.customer 
+                        : (entry.customer.businessName || 
+                           `${entry.customer.firstName || ''} ${entry.customer.lastName || ''}`.trim() ||
+                           entry.customer.displayName ||
+                           entry.customer.name);
+                      
+                      if (customerName) {
+                        particularText = particularText 
+                          ? `${particularText} - ${customerName}`
+                          : customerName;
+                      }
+                    }
+                    
+                    // Add supplier information if available
+                    if (entry.supplier) {
+                      const supplierName = typeof entry.supplier === 'string'
+                        ? entry.supplier
+                        : (entry.supplier.companyName || 
+                           entry.supplier.contactPerson?.name ||
+                           entry.supplier.name ||
+                           `${entry.supplier.firstName || ''} ${entry.supplier.lastName || ''}`.trim());
+                      
+                      if (supplierName) {
+                        particularText = particularText 
+                          ? `${particularText} - ${supplierName}`
+                          : supplierName;
+                      }
+                    }
+                    
+                    return (
                         <tr key={index} className="hover:bg-gray-50">
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                            {formatDate(entry.date)}
+                        <td className="px-4 py-3 text-sm text-gray-900">{formatDate(entry.date)}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">{entry.reference || '-'}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          {particularText || '-'}
                           </td>
-                          <td className="px-6 py-4 text-sm text-gray-900">
-                            <div>{entry.description}</div>
-                            {entry.customer && (
-                              <div className="text-xs text-gray-500 mt-1">
-                                Customer: {entry.customer}
-                              </div>
-                            )}
-                            {entry.supplier && (
-                              <div className="text-xs text-gray-500 mt-1">
-                                Supplier: {entry.supplier}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
-                            {entry.reference || '-'}
-                          </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-green-600">
+                        <td className="px-4 py-3 text-sm text-right text-gray-900">
                             {entry.debitAmount > 0 ? formatCurrency(entry.debitAmount) : '-'}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-red-600">
+                        <td className="px-4 py-3 text-sm text-right text-gray-900">
                             {entry.creditAmount > 0 ? formatCurrency(entry.creditAmount) : '-'}
                           </td>
-                          <td className={`px-6 py-4 whitespace-nowrap text-sm text-right font-semibold ${
-                            entry.balance >= 0 ? 'text-gray-900' : 'text-red-600'
-                          }`}>
-                            {formatCurrency(Math.abs(entry.balance))}
+                        <td className="px-4 py-3 text-sm text-right font-semibold text-gray-900">
+                          {formatCurrency(Math.abs(entry.balance || 0))}
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {/* Total Row */}
+                  {ledgerEntries.length > 0 && (
+                    <tr className="bg-gray-100 font-bold">
+                      <td className="px-4 py-3 text-sm text-gray-900"></td>
+                      <td className="px-4 py-3 text-sm text-gray-900"></td>
+                      <td className="px-4 py-3 text-sm text-gray-900">Total</td>
+                      <td className="px-4 py-3 text-sm text-right text-gray-900">
+                        {formatCurrency(totalDebits)}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-right text-gray-900">
+                        {formatCurrency(totalCredits)}
                           </td>
-                          <td className="px-6 py-4 whitespace-nowrap">
-                            <span className="inline-flex px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800">
-                              {entry.source}
-                            </span>
+                      <td className="px-4 py-3 text-sm text-right text-gray-900">
+                        {formatCurrency(Math.abs(closingBalance))}
                           </td>
                         </tr>
-                      ))}
+                  )}
                     </tbody>
                   </table>
-                </div>
               )}
             </div>
+
+          {/* Footer */}
+          <div className="p-4 border-t border-gray-200 flex justify-between text-xs text-gray-600">
+            <div>Print Date: {new Date().toLocaleString('en-US', { 
+              year: 'numeric', 
+              month: '2-digit', 
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              hour12: true
+            })}</div>
+            <div>Page: 1 of 1</div>
           </div>
         </div>
+      )}
+
+      {/* Empty State */}
+      {!selectedAccount && !ledgerLoading && (
+        <div className="text-center py-12 bg-white border border-gray-200 rounded-lg">
+          <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+          <p className="text-gray-500">Select an account and click View to see ledger entries</p>
       </div>
+      )}
     </div>
   );
 };

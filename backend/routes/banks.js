@@ -2,13 +2,16 @@ const express = require('express');
 const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const bankService = require('../services/bankService');
+const logger = require('../utils/logger');
 
 // @route   GET /api/banks
 // @desc    Get all banks
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   query('isActive').optional().isBoolean().withMessage('isActive must be a boolean')
 ], async (req, res) => {
@@ -18,16 +21,17 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
     const banks = await bankService.getBanks({
       isActive: req.query.isActive
-    });
+    }, tenantId);
 
     res.json({
       success: true,
       data: { banks }
     });
   } catch (error) {
-    console.error('Get banks error:', error);
+    logger.error('Get banks error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -41,10 +45,12 @@ router.get('/', [
 // @access  Private
 router.get('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    const bank = await bankService.getBankById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const bank = await bankService.getBankById(req.params.id, tenantId);
 
     res.json({
       success: true,
@@ -57,7 +63,7 @@ router.get('/:id', [
         message: 'Bank not found' 
       });
     }
-    console.error('Get bank error:', error);
+    logger.error('Get bank error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -71,6 +77,7 @@ router.get('/:id', [
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('create_orders'),
   body('accountName').isString().trim().isLength({ min: 1, max: 200 }).withMessage('Account name is required'),
   body('accountNumber').isString().trim().isLength({ min: 1, max: 100 }).withMessage('Account number is required'),
@@ -105,6 +112,7 @@ router.post('/', [
       notes
     } = req.body;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
     const bank = await bankService.createBank({
       accountName,
       accountNumber,
@@ -118,7 +126,7 @@ router.post('/', [
       openingBalance,
       isActive,
       notes
-    }, req.user._id);
+    }, req.user._id, { tenantId });
 
     res.status(201).json({
       success: true,
@@ -126,7 +134,7 @@ router.post('/', [
       data: bank
     });
   } catch (error) {
-    console.error('Create bank error:', error);
+    logger.error('Create bank error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -140,6 +148,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('edit_orders'),
   body('accountName').optional().isString().trim().isLength({ min: 1, max: 200 }),
   body('accountNumber').optional().isString().trim().isLength({ min: 1, max: 100 }),
@@ -159,7 +168,8 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const bank = await bankService.updateBank(req.params.id, req.body, req.user._id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const bank = await bankService.updateBank(req.params.id, req.body, req.user._id, { tenantId });
 
     res.json({
       success: true,
@@ -173,7 +183,7 @@ router.put('/:id', [
         message: 'Bank not found' 
       });
     }
-    console.error('Update bank error:', error);
+    logger.error('Update bank error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',
@@ -187,10 +197,12 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('delete_orders')
 ], async (req, res) => {
   try {
-    const result = await bankService.deleteBank(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const result = await bankService.deleteBank(req.params.id, { tenantId });
 
     res.json({
       success: true,
@@ -203,7 +215,7 @@ router.delete('/:id', [
         message: 'Bank not found' 
       });
     }
-    console.error('Delete bank error:', error);
+    logger.error('Delete bank error:', { error: error });
     res.status(500).json({ 
       success: false,
       message: 'Server error',

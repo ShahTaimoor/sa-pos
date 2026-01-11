@@ -2,6 +2,13 @@ const mongoose = require('mongoose');
 const Counter = require('./Counter');
 
 const cashReceiptSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
+  
   // Receipt Information
   date: {
     type: Date,
@@ -97,8 +104,9 @@ cashReceiptSchema.pre('save', async function(next) {
 });
 
 // Index for better query performance
-cashReceiptSchema.index({ date: -1 });
-cashReceiptSchema.index({ voucherCode: 1 }, { unique: true, sparse: true }); // Sparse allows multiple null values
-cashReceiptSchema.index({ createdBy: 1 });
+// Compound indexes for multi-tenant performance
+cashReceiptSchema.index({ tenantId: 1, date: -1 });
+cashReceiptSchema.index({ tenantId: 1, voucherCode: 1 }, { unique: true, sparse: true });
+cashReceiptSchema.index({ tenantId: 1, createdBy: 1, date: -1 });
 
 module.exports = mongoose.model('CashReceipt', cashReceiptSchema);

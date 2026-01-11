@@ -7,6 +7,8 @@ const BalanceSheet = require('../models/BalanceSheet'); // Still needed for mode
 const transactionRepository = require('../repositories/TransactionRepository');
 const chartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
 const { auth, requirePermission, requireAnyPermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -96,7 +98,7 @@ router.get('/transactions', [
       }
     });
   } catch (error) {
-    console.error('Error fetching transactions:', error);
+    logger.error('Error fetching transactions:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -113,10 +115,18 @@ router.get('/accounts/:accountCode/balance', [
   query('asOfDate').optional().isISO8601().withMessage('Invalid date format')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    
     const { accountCode } = req.params;
     const asOfDate = req.query.asOfDate ? new Date(req.query.asOfDate) : new Date();
     
-    const balance = await AccountingService.getAccountBalance(accountCode, asOfDate);
+    const balance = await AccountingService.getAccountBalance(accountCode, asOfDate, tenantId);
     
     res.json({
       success: true,
@@ -127,7 +137,7 @@ router.get('/accounts/:accountCode/balance', [
       }
     });
   } catch (error) {
-    console.error('Error getting account balance:', error);
+    logger.error('Error getting account balance:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -143,9 +153,17 @@ router.get('/trial-balance', [
   query('asOfDate').optional().isISO8601().withMessage('Invalid date format')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    
     const asOfDate = req.query.asOfDate ? new Date(req.query.asOfDate) : new Date();
     
-    const trialBalance = await AccountingService.getTrialBalance(asOfDate);
+    const trialBalance = await AccountingService.getTrialBalance(asOfDate, tenantId);
     
     // Calculate totals
     const totalDebits = trialBalance.reduce((sum, account) => sum + account.debitBalance, 0);
@@ -165,7 +183,7 @@ router.get('/trial-balance', [
       }
     });
   } catch (error) {
-    console.error('Error generating trial balance:', error);
+    logger.error('Error generating trial balance:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -181,9 +199,17 @@ router.post('/balance-sheet/update', [
   body('statementDate').optional().isISO8601().withMessage('Invalid date format')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    
     const statementDate = req.body.statementDate ? new Date(req.body.statementDate) : new Date();
     
-    const balanceSheet = await AccountingService.updateBalanceSheet(statementDate);
+    const balanceSheet = await AccountingService.updateBalanceSheet(statementDate, tenantId);
     
     res.json({
       success: true,
@@ -191,7 +217,7 @@ router.post('/balance-sheet/update', [
       data: balanceSheet
     });
   } catch (error) {
-    console.error('Error updating balance sheet:', error);
+    logger.error('Error updating balance sheet:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -203,24 +229,37 @@ router.post('/balance-sheet/update', [
 // Get chart of accounts with balances
 router.get('/chart-of-accounts', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['view_chart_of_accounts', 'view_reports', 'view_general_reports']),
   query('includeBalances').optional().isBoolean(),
   query('asOfDate').optional().isISO8601().withMessage('Invalid date format')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    
     const includeBalances = req.query.includeBalances === 'true';
     const asOfDate = req.query.asOfDate ? new Date(req.query.asOfDate) : new Date();
     
-    const accounts = await chartOfAccountsRepository.findAll({ isActive: true }, {
+    const accounts = await chartOfAccountsRepository.findAll({ 
+      tenantId: tenantId,
+      isActive: true,
+      isDeleted: false 
+    }, {
       sort: { accountCode: 1 }
     });
     
     let accountsWithBalances = accounts;
     
     if (includeBalances) {
-      accountsWithBalances = await Promise.all(
+        accountsWithBalances = await Promise.all(
         accounts.map(async (account) => {
-          const balance = await AccountingService.getAccountBalance(account.accountCode, asOfDate);
+          const balance = await AccountingService.getAccountBalance(account.accountCode, asOfDate, tenantId);
           return {
             ...account.toObject(),
             currentBalance: balance
@@ -238,7 +277,7 @@ router.get('/chart-of-accounts', [
       }
     });
   } catch (error) {
-    console.error('Error fetching chart of accounts:', error);
+    logger.error('Error fetching chart of accounts:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
@@ -254,15 +293,26 @@ router.get('/financial-summary', [
   query('asOfDate').optional().isISO8601().withMessage('Invalid date format')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    
     const asOfDate = req.query.asOfDate ? new Date(req.query.asOfDate) : new Date();
     
+    // Get account codes dynamically for this tenant
+    const accountCodes = await AccountingService.getDefaultAccountCodes(tenantId);
+    
     // Get key account balances
-    const cashBalance = await AccountingService.getAccountBalance('1001', asOfDate);
-    const bankBalance = await AccountingService.getAccountBalance('1002', asOfDate);
-    const accountsReceivable = await AccountingService.getAccountBalance('1201', asOfDate);
-    const accountsPayable = await AccountingService.getAccountBalance('2001', asOfDate);
-    const salesRevenue = await AccountingService.getAccountBalance('4001', asOfDate);
-    const expenses = await AccountingService.getAccountBalance('5001', asOfDate);
+    const cashBalance = await AccountingService.getAccountBalance(accountCodes.cash, asOfDate, tenantId);
+    const bankBalance = await AccountingService.getAccountBalance(accountCodes.bank, asOfDate, tenantId);
+    const accountsReceivable = await AccountingService.getAccountBalance(accountCodes.accountsReceivable, asOfDate, tenantId);
+    const accountsPayable = await AccountingService.getAccountBalance(accountCodes.accountsPayable, asOfDate, tenantId);
+    const salesRevenue = await AccountingService.getAccountBalance(accountCodes.salesRevenue, asOfDate, tenantId);
+    const expenses = await AccountingService.getAccountBalance(accountCodes.costOfGoodsSold, asOfDate, tenantId);
     
     const summary = {
       assets: {
@@ -291,7 +341,7 @@ router.get('/financial-summary', [
       data: summary
     });
   } catch (error) {
-    console.error('Error generating financial summary:', error);
+    logger.error('Error generating financial summary:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',

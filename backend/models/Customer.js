@@ -1,6 +1,13 @@
 const mongoose = require('mongoose');
 
 const customerSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    required: true,
+    index: true
+  },
+  
   // Basic Information
   name: {
     type: String,
@@ -13,21 +20,18 @@ const customerSchema = new mongoose.Schema({
     required: false,
     lowercase: true,
     trim: true,
-    unique: true,
     sparse: true
   },
   phone: {
     type: String,
     trim: true,
-    unique: true,
-    sparse: true // Allows multiple null/undefined values, but ensures uniqueness for provided values
+    sparse: true
   },
   
   // Business Information
   businessName: {
     type: String,
     required: true,
-    unique: true,
     trim: true,
     maxlength: 200
   },
@@ -129,6 +133,41 @@ const customerSchema = new mongoose.Schema({
     default: 'active'
   },
   
+  // Credit Policy
+  creditPolicy: {
+    gracePeriodDays: {
+      type: Number,
+      default: 0, // Days after due date before action
+      min: 0
+    },
+    autoSuspendDays: {
+      type: Number,
+      default: 90, // Days overdue before auto-suspension
+      min: 0
+    },
+    warningThresholds: [{
+      daysOverdue: {
+        type: Number,
+        required: true,
+        min: 0
+      },
+      action: {
+        type: String,
+        enum: ['email', 'sms', 'letter', 'call'],
+        required: true
+      },
+      message: String
+    }]
+  },
+  
+  // Suspension Information
+  suspendedAt: Date,
+  suspensionReason: String,
+  suspendedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  
   // Notes
   notes: {
     type: String,
@@ -147,22 +186,62 @@ const customerSchema = new mongoose.Schema({
   ledgerAccount: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'ChartOfAccounts'
+  },
+  
+  // Soft Delete Fields
+  isDeleted: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  deletedAt: {
+    type: Date,
+    default: null
+  },
+  deletedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  deletionReason: {
+    type: String,
+    maxlength: 500
+  },
+  
+  // Anonymization (for GDPR)
+  isAnonymized: {
+    type: Boolean,
+    default: false,
+    index: true
+  },
+  anonymizedAt: Date,
+  
+  // Version for optimistic locking
+  version: {
+    type: Number,
+    default: 0
   }
 }, {
   timestamps: true,
   toJSON: { virtuals: true },
-  toObject: { virtuals: true }
+  toObject: { virtuals: true },
+  versionKey: '__v', // Enable Mongoose versioning
+  optimisticConcurrency: true // Enable optimistic concurrency control
 });
 
 // Indexes for better performance
 // businessName and email indexes removed - already have unique: true in field definitions
-customerSchema.index({ businessType: 1, status: 1 });
-customerSchema.index({ name: 1 });
-customerSchema.index({ phone: 1 }); // For phone lookups
-customerSchema.index({ status: 1, createdAt: -1 }); // For active customers listing
-customerSchema.index({ customerTier: 1, status: 1 }); // For tier-based queries
-customerSchema.index({ 'currentBalance': -1 }); // For balance sorting
-customerSchema.index({ createdAt: -1 }); // For recent customers
+// Compound indexes for multi-tenant performance
+customerSchema.index({ tenantId: 1, email: 1 }, { unique: true, sparse: true });
+customerSchema.index({ tenantId: 1, phone: 1 }, { unique: true, sparse: true });
+customerSchema.index({ tenantId: 1, businessName: 1 }, { unique: true });
+customerSchema.index({ tenantId: 1, businessType: 1, status: 1 });
+customerSchema.index({ tenantId: 1, name: 1 });
+customerSchema.index({ tenantId: 1, status: 1, createdAt: -1 });
+customerSchema.index({ tenantId: 1, customerTier: 1, status: 1 });
+customerSchema.index({ tenantId: 1, currentBalance: -1 });
+customerSchema.index({ tenantId: 1, createdAt: -1 });
+customerSchema.index({ tenantId: 1, isDeleted: 1, status: 1 });
+customerSchema.index({ tenantId: 1, isAnonymized: 1 });
 
 // Virtual for display name
 customerSchema.virtual('displayName').get(function() {

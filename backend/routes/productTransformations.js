@@ -7,17 +7,20 @@ const Product = require('../models/Product'); // Still needed for model referenc
 const Inventory = require('../models/Inventory'); // Still needed for new Inventory()
 const StockMovement = require('../models/StockMovement'); // Still needed for new StockMovement()
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const productTransformationRepository = require('../repositories/ProductTransformationRepository');
 const productVariantRepository = require('../repositories/ProductVariantRepository');
 const productRepository = require('../repositories/ProductRepository');
 const inventoryRepository = require('../repositories/InventoryRepository');
 const stockMovementRepository = require('../repositories/StockMovementRepository');
+const logger = require('../utils/logger');
 
 // @route   GET /api/product-transformations
 // @desc    Get all product transformations with filters
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   query('baseProduct').optional().isMongoId(),
   query('targetVariant').optional().isMongoId(),
@@ -60,7 +63,7 @@ router.get('/', [
       transformations
     });
   } catch (error) {
-    console.error('Error fetching product transformations:', error);
+    logger.error('Error fetching product transformations:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -70,6 +73,7 @@ router.get('/', [
 // @access  Private
 router.get('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   param('id').isMongoId()
 ], async (req, res) => {
@@ -96,7 +100,7 @@ router.get('/:id', [
       transformation
     });
   } catch (error) {
-    console.error('Error fetching product transformation:', error);
+    logger.error('Error fetching product transformation:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -286,7 +290,7 @@ router.post('/', [
       transformation: populatedTransformation
     });
   } catch (error) {
-    console.error('Error creating product transformation:', error);
+    logger.error('Error creating product transformation:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
@@ -296,6 +300,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id/cancel', [
   auth,
+  tenantMiddleware,
   requirePermission('update_inventory'),
   param('id').isMongoId()
 ], async (req, res) => {
@@ -325,7 +330,7 @@ router.put('/:id/cancel', [
       transformation
     });
   } catch (error) {
-    console.error('Error cancelling product transformation:', error);
+    logger.error('Error cancelling product transformation:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 });

@@ -7,7 +7,7 @@ import {
   Search,
   Save,
   Trash2,
-  DollarSign,
+  TrendingUp,
   Package,
   RefreshCw,
   ArrowRight,

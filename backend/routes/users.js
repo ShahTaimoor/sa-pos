@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const userService = require('../services/userService');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -17,7 +18,7 @@ router.get('/', auth, requirePermission('manage_users'), async (req, res) => {
       data: { users }
     });
   } catch (error) {
-    console.error('Get users error:', error);
+    logger.error('Get users error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -37,7 +38,7 @@ router.get('/:id', auth, requirePermission('manage_users'), async (req, res) => 
     if (error.message === 'User not found') {
       return res.status(404).json({ message: 'User not found' });
     }
-    console.error('Get user error:', error);
+    logger.error('Get user error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -83,7 +84,7 @@ router.put('/:id', [
     if (error.message === 'Email already exists') {
       return res.status(400).json({ message: 'Email already exists' });
     }
-    console.error('Update user error:', error);
+    logger.error('Update user error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -107,7 +108,7 @@ router.patch('/:id/reset-password', auth, requirePermission('manage_users'), asy
     if (error.message.includes('Password must be at least')) {
       return res.status(400).json({ message: error.message });
     }
-    console.error('❌ Reset password error:', error);
+    logger.error('❌ Reset password error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -127,7 +128,7 @@ router.get('/:id/activity', auth, requirePermission('manage_users'), async (req,
     if (error.message === 'User not found') {
       return res.status(404).json({ message: 'User not found' });
     }
-    console.error('Get user activity error:', error);
+    logger.error('Get user activity error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -149,7 +150,7 @@ router.patch('/update-role-permissions', auth, requirePermission('manage_users')
     if (error.message === 'Role and permissions are required') {
       return res.status(400).json({ message: error.message });
     }
-    console.error('Update role permissions error:', error);
+    logger.error('Update role permissions error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -172,7 +173,7 @@ router.delete('/:id', auth, requirePermission('manage_users'), async (req, res) 
     if (error.message === 'Cannot delete your own account') {
       return res.status(400).json({ message: error.message });
     }
-    console.error('Delete user error:', error);
+    logger.error('Delete user error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -196,7 +197,7 @@ router.patch('/:id/toggle-status', auth, requirePermission('manage_users'), asyn
     if (error.message === 'Cannot modify your own account status') {
       return res.status(400).json({ message: error.message });
     }
-    console.error('Toggle user status error:', error);
+    logger.error('Toggle user status error:', { error: error });
     res.status(500).json({ message: 'Server error' });
   }
 });
