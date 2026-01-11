@@ -25,6 +25,7 @@ const transformProductToUppercase = (product) => {
 // @access  Private (requires 'view_inventory' permission)
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   sanitizeRequest,
   query('page').optional().custom((value) => {
@@ -73,10 +74,16 @@ router.get('/', [
 ], async (req, res) => {
   try {
     const { page = 1, limit = 10, search, status, lowStock, warehouse } = req.query;
+    const tenantId = req.tenantId || req.user?.tenantId;
     const skip = (page - 1) * limit;
 
     // Build filter object
     const filter = {};
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
     
     if (status) {
       filter.status = status;
@@ -106,6 +113,12 @@ router.get('/', [
 
     // Get all products that match the search criteria
     const productFilter = { status: 'active' };
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      productFilter.tenantId = tenantId;
+    }
+    
     if (search) {
       productFilter.$or = [
         { name: { $regex: search, $options: 'i' } },
@@ -245,6 +258,7 @@ router.get('/summary', [
 // @access  Private (requires 'view_inventory' permission)
 router.get('/low-stock', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   sanitizeRequest,
   handleValidationErrors,
@@ -263,6 +277,7 @@ router.get('/low-stock', [
 // @access  Private (requires 'view_inventory' permission)
 router.get('/:productId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   sanitizeRequest,
   param('productId').isMongoId().withMessage('Valid Product ID is required'),
@@ -283,6 +298,7 @@ router.get('/:productId', [
 // @access  Private (requires 'view_inventory' permission)
 router.get('/:productId/history', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   sanitizeRequest,
   param('productId').isMongoId().withMessage('Valid Product ID is required'),
@@ -318,6 +334,7 @@ router.get('/:productId/history', [
 // @access  Private (requires 'update_inventory' permission)
 router.post('/update-stock', [
   auth,
+  tenantMiddleware,
   requirePermission('update_inventory'),
   sanitizeRequest,
   body('productId').isMongoId().withMessage('Valid Product ID is required'),
@@ -372,6 +389,7 @@ router.post('/update-stock', [
 // @access  Private (requires 'update_inventory' permission)
 router.post('/bulk-update', [
   auth,
+  tenantMiddleware,
   requirePermission('update_inventory'),
   sanitizeRequest,
   body('updates').isArray({ min: 1 }).withMessage('Updates array is required'),
@@ -407,6 +425,7 @@ router.post('/bulk-update', [
 // @access  Private (requires 'update_inventory' permission)
 router.post('/reserve-stock', [
   auth,
+  tenantMiddleware,
   requirePermission('update_inventory'),
   sanitizeRequest,
   body('productId').isMongoId().withMessage('Valid Product ID is required'),
@@ -433,6 +452,7 @@ router.post('/reserve-stock', [
 // @access  Private (requires 'update_inventory' permission)
 router.post('/release-stock', [
   auth,
+  tenantMiddleware,
   requirePermission('update_inventory'),
   sanitizeRequest,
   body('productId').isMongoId().withMessage('Valid Product ID is required'),
@@ -459,6 +479,7 @@ router.post('/release-stock', [
 // @access  Private (requires 'create_inventory_adjustments' permission)
 router.post('/adjustments', [
   auth,
+  tenantMiddleware,
   requirePermission('create_inventory_adjustments'),
   sanitizeRequest,
   body('type').isIn(['physical_count', 'damage', 'theft', 'transfer', 'correction', 'return', 'write_off']).withMessage('Invalid adjustment type'),
@@ -504,6 +525,7 @@ router.post('/adjustments', [
 // @access  Private (requires 'view_inventory_adjustments' permission)
 router.get('/adjustments', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory_adjustments'),
   sanitizeRequest,
   query('page').optional().isInt({ min: 1 }),
@@ -546,6 +568,7 @@ router.get('/adjustments', [
 // @access  Private (requires 'approve_inventory_adjustments' permission)
 router.put('/adjustments/:adjustmentId/approve', [
   auth,
+  tenantMiddleware,
   requirePermission('approve_inventory_adjustments'),
   sanitizeRequest,
   param('adjustmentId').isMongoId().withMessage('Valid Adjustment ID is required'),
@@ -571,6 +594,7 @@ router.put('/adjustments/:adjustmentId/approve', [
 // @access  Private (requires 'complete_inventory_adjustments' permission)
 router.put('/adjustments/:adjustmentId/complete', [
   auth,
+  tenantMiddleware,
   requirePermission('complete_inventory_adjustments'),
   sanitizeRequest,
   param('adjustmentId').isMongoId().withMessage('Valid Adjustment ID is required'),

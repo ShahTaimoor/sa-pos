@@ -8,6 +8,7 @@ const CashReceipt = require('../models/CashReceipt'); // Still needed for create
 const Sales = require('../models/Sales');
 const Customer = require('../models/Customer');
 const Supplier = require('../models/Supplier');
+const logger = require('../utils/logger');
 
 // @route   GET /api/cash-receipts
 // @desc    Get all cash receipts with filtering and pagination
@@ -93,6 +94,7 @@ router.get('/', [
       filter.particular = { $regex: particular, $options: 'i' };
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
     const result = await cashReceiptService.getCashReceipts({
       page,
       limit,
@@ -103,7 +105,7 @@ router.get('/', [
       voucherCode,
       amount,
       particular
-    });
+    }, tenantId);
 
     res.json({
       success: true,
@@ -131,7 +133,8 @@ router.get('/:id', [
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    const cashReceipt = await cashReceiptService.getCashReceiptById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const cashReceipt = await cashReceiptService.getCashReceiptById(req.params.id, tenantId);
 
     res.json({
       success: true,
@@ -158,6 +161,7 @@ router.get('/:id', [
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('create_orders'),
   body('date').optional().isISO8601().withMessage('Date must be a valid date'),
   body('amount')
@@ -193,9 +197,15 @@ router.post('/', [
       notes
     } = req.body;
 
-    // Validate order exists if provided
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Validate order exists if provided (with tenant filtering)
     if (order) {
-      const orderExists = await Sales.findById(order);
+      const orderQuery = { _id: order };
+      if (tenantId) {
+        orderQuery.tenantId = tenantId;
+      }
+      const orderExists = await Sales.findOne(orderQuery);
       if (!orderExists) {
         return res.status(400).json({ 
           success: false,
@@ -204,9 +214,13 @@ router.post('/', [
       }
     }
 
-    // Validate customer exists if provided
+    // Validate customer exists if provided (with tenant filtering)
     if (customer) {
-      const customerExists = await Customer.findById(customer);
+      const customerQuery = { _id: customer };
+      if (tenantId) {
+        customerQuery.tenantId = tenantId;
+      }
+      const customerExists = await Customer.findOne(customerQuery);
       if (!customerExists) {
         return res.status(400).json({ 
           success: false,
@@ -215,9 +229,13 @@ router.post('/', [
       }
     }
 
-    // Validate supplier exists if provided
+    // Validate supplier exists if provided (with tenant filtering)
     if (supplier) {
-      const supplierExists = await Supplier.findById(supplier);
+      const supplierQuery = { _id: supplier };
+      if (tenantId) {
+        supplierQuery.tenantId = tenantId;
+      }
+      const supplierExists = await Supplier.findOne(supplierQuery);
       if (!supplierExists) {
         return res.status(400).json({ 
           success: false,
@@ -320,7 +338,15 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const cashReceipt = await CashReceipt.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Build query with tenant filter
+    const query = { _id: req.params.id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const cashReceipt = await CashReceipt.findOne(query);
     if (!cashReceipt) {
       return res.status(404).json({ 
         success: false,
@@ -389,10 +415,19 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('delete_orders')
 ], async (req, res) => {
   try {
-    const cashReceipt = await CashReceipt.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Build query with tenant filter
+    const query = { _id: req.params.id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const cashReceipt = await CashReceipt.findOne(query);
     if (!cashReceipt) {
       return res.status(404).json({ 
         success: false,
@@ -400,7 +435,7 @@ router.delete('/:id', [
       });
     }
 
-    await CashReceipt.findByIdAndDelete(req.params.id);
+    await CashReceipt.findOneAndDelete(query);
 
     res.json({
       success: true,
@@ -491,9 +526,11 @@ router.post('/batch', [
       });
     }
 
-    // Validate all customers exist
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Validate all customers exist (with tenant filtering)
     const customerIds = receipts.map(r => r.customer).filter(Boolean);
-    const customers = await cashReceiptService.getCustomersByIds(customerIds);
+    const customers = await cashReceiptService.getCustomersByIds(customerIds, tenantId);
     
     if (customers.length !== customerIds.length) {
       return res.status(400).json({ 
@@ -515,7 +552,6 @@ router.post('/batch', [
     const createdReceipts = [];
     const CustomerBalanceService = require('../services/customerBalanceService');
     const AccountingService = require('../services/accountingService');
-const logger = require('../utils/logger');
 
     for (const receiptData of receipts) {
       if (!receiptData.amount || receiptData.amount <= 0) {
@@ -523,7 +559,7 @@ const logger = require('../utils/logger');
       }
 
       const cashReceiptData = {
-        tenantId: req.tenantId || req.user.tenantId,
+        tenantId: tenantId,
         date: new Date(voucherDate),
         amount: parseFloat(receiptData.amount),
         particular: receiptData.particular ? receiptData.particular.trim() : 'Cash Receipt',

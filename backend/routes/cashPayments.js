@@ -60,8 +60,15 @@ router.get('/', [
     const fromDate = fromDateParam || dateFrom;
     const toDate = toDateParam || dateTo;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
     // Build filter object
     const filter = {};
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
 
     // Date range filter
     if (fromDate || toDate) {
@@ -328,6 +335,7 @@ router.get('/summary/date-range', [
     }
 
     const { fromDate, toDate } = req.query;
+    const tenantId = req.tenantId || req.user?.tenantId;
 
     const filter = {
       date: {
@@ -335,6 +343,11 @@ router.get('/summary/date-range', [
         $lte: new Date(toDate + 'T23:59:59.999Z')
       }
     };
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
 
     // Get summary data
     const summary = await cashPaymentRepository.getSummary(filter);

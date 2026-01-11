@@ -13,15 +13,26 @@ class CustomerAnalyticsService {
    * @param {Date} analysisDate - Date to analyze from (default: today)
    * @returns {Promise<Object>} RFM scores and metrics
    */
-  static async calculateRFM(customer, analysisDate = new Date()) {
+  static async calculateRFM(customer, analysisDate = new Date(), tenantId = null) {
     try {
       const customerId = customer && customer._id ? customer._id : customer;
       
-      // Get sales data for this customer
-      const sales = await SalesRepository.findAll({
+      // Build sales query with tenant filter
+      const salesQuery = {
         customer: customerId,
         status: 'completed'
-      }, {
+      };
+      
+      // Add tenant filter for multi-tenant isolation
+      if (tenantId) {
+        salesQuery.tenantId = tenantId;
+      } else if (customer && customer.tenantId) {
+        // Fallback to customer's tenantId if not provided
+        salesQuery.tenantId = customer.tenantId;
+      }
+      
+      // Get sales data for this customer
+      const sales = await SalesRepository.findAll(salesQuery, {
         sort: { createdAt: -1 },
         lean: true
       });
@@ -258,13 +269,22 @@ class CustomerAnalyticsService {
    * @param {Object} rfmData - RFM calculation results
    * @returns {Promise<Object>} CLV prediction
    */
-  static async predictCLV(customer, rfmData) {
+  static async predictCLV(customer, rfmData, tenantId = null) {
     try {
       const { averageOrderValue, frequency, recency, monetary } = rfmData;
       
       // Get customer age (days since first purchase)
       const customerId = customer && customer._id ? customer._id : customer;
-      const sales = await SalesRepository.findAll({ customer: customerId }, {
+      
+      // Build sales query with tenant filter
+      const salesQuery = { customer: customerId };
+      if (tenantId) {
+        salesQuery.tenantId = tenantId;
+      } else if (customer && customer.tenantId) {
+        salesQuery.tenantId = customer.tenantId;
+      }
+      
+      const sales = await SalesRepository.findAll(salesQuery, {
         sort: { createdAt: 1 },
         limit: 1,
         lean: true
@@ -479,13 +499,19 @@ class CustomerAnalyticsService {
       const {
         includeInactive = false,
         minOrders = 0,
-        dateRange = null
+        dateRange = null,
+        tenantId = null
       } = options;
 
       // Build customer query
       const customerQuery = {};
       if (!includeInactive) {
         customerQuery.status = 'active';
+      }
+      
+      // Add tenant filter for multi-tenant isolation
+      if (tenantId) {
+        customerQuery.tenantId = tenantId;
       }
 
       const customers = await CustomerRepository.findAll(customerQuery, { lean: true });
@@ -513,9 +539,9 @@ class CustomerAnalyticsService {
       // Analyze each customer
       for (const customer of customers) {
         try {
-          const rfmData = await this.calculateRFM(customer);
+          const rfmData = await this.calculateRFM(customer, new Date(), tenantId);
           const segment = this.segmentCustomer(rfmData);
-          const clv = await this.predictCLV(customer, rfmData);
+          const clv = await this.predictCLV(customer, rfmData, tenantId);
           const churnRisk = this.calculateChurnRisk(rfmData, segment);
 
           // Filter by minimum orders if specified
@@ -575,18 +601,25 @@ class CustomerAnalyticsService {
   /**
    * Get customer analytics for a single customer
    * @param {String} customerId - Customer ID
+   * @param {String} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<Object>} Customer analytics
    */
-  static async getCustomerAnalytics(customerId) {
+  static async getCustomerAnalytics(customerId, tenantId = null) {
     try {
-      const customer = await CustomerRepository.findById(customerId);
+      // Build query with tenant filter
+      const customerQuery = { _id: customerId };
+      if (tenantId) {
+        customerQuery.tenantId = tenantId;
+      }
+      
+      const customer = await CustomerRepository.findOne(customerQuery);
       if (!customer) {
         throw new Error('Customer not found');
       }
 
-      const rfmData = await this.calculateRFM(customer);
+      const rfmData = await this.calculateRFM(customer, new Date(), tenantId || customer.tenantId);
       const segment = this.segmentCustomer(rfmData);
-      const clv = await this.predictCLV(customer, rfmData);
+      const clv = await this.predictCLV(customer, rfmData, tenantId || customer.tenantId);
       const churnRisk = this.calculateChurnRisk(rfmData, segment);
 
       return {

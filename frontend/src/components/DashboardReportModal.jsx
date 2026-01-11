@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Search, RefreshCw, Calendar, ArrowUpDown } from 'lucide-react';
 import { formatDate, formatCurrency } from '../utils/formatters';
 
@@ -15,17 +15,40 @@ const DashboardReportModal = ({
   filters = {},
   onFilterChange
 }) => {
-  const [localFilters, setLocalFilters] = useState(filters);
-  const [localDateFrom, setLocalDateFrom] = useState(dateFrom);
-  const [localDateTo, setLocalDateTo] = useState(dateTo);
+  const [localFilters, setLocalFilters] = useState(() => filters || {});
+  const [localDateFrom, setLocalDateFrom] = useState(() => dateFrom);
+  const [localDateTo, setLocalDateTo] = useState(() => dateTo);
+
+  // Use refs to track previous values and avoid unnecessary updates
+  const prevFiltersRef = useRef(JSON.stringify(filters || {}));
+  const prevDateFromRef = useRef(dateFrom);
+  const prevDateToRef = useRef(dateTo);
 
   useEffect(() => {
-    setLocalDateFrom(dateFrom);
-    setLocalDateTo(dateTo);
-  }, [dateFrom, dateTo]);
+    // Only update if dateFrom actually changed
+    if (dateFrom !== prevDateFromRef.current) {
+      setLocalDateFrom(dateFrom);
+      prevDateFromRef.current = dateFrom;
+    }
+  }, [dateFrom]);
 
   useEffect(() => {
-    setLocalFilters(filters);
+    // Only update if dateTo actually changed
+    if (dateTo !== prevDateToRef.current) {
+      setLocalDateTo(dateTo);
+      prevDateToRef.current = dateTo;
+    }
+  }, [dateTo]);
+
+  useEffect(() => {
+    // Only update if filters object actually changed (deep comparison using JSON)
+    const currentFiltersStr = JSON.stringify(filters || {});
+    const prevFiltersStr = prevFiltersRef.current;
+    
+    if (currentFiltersStr !== prevFiltersStr) {
+      setLocalFilters(filters || {});
+      prevFiltersRef.current = currentFiltersStr;
+    }
   }, [filters]);
 
   if (!isOpen) return null;

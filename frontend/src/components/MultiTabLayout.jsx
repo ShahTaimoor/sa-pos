@@ -17,7 +17,6 @@ import {
   Building,
   Building2,
   FileText,
-  Keyboard,
   RotateCcw,
   Tag,
   TrendingUp,
@@ -29,7 +28,8 @@ import {
   Clock,
   MapPin,
   AlertTriangle,
-  Wallet
+  Wallet,
+  Shield
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useTab } from '../contexts/TabContext';
@@ -80,8 +80,8 @@ const navigation = [
   { name: 'Customer Analytics', href: '/customer-analytics', icon: BarChart3, permission: 'view_customer_analytics' },
   { name: 'Suppliers', href: '/suppliers', icon: Building, permission: 'view_suppliers' },
   { name: 'Banks', href: '/banks', icon: Building2, permission: null },
-  // { name: 'Investors', href: '/investors', icon: TrendingUp, permission: 'view_investors' },
-  // { name: 'Drop Shipping', href: '/drop-shipping', icon: ArrowRight, permission: 'create_drop_shipping' },
+  { name: 'Investors', href: '/investors', icon: TrendingUp, permission: 'view_investors' },
+  { name: 'Drop Shipping', href: '/drop-shipping', icon: ArrowRight, permission: 'create_drop_shipping' },
   { name: 'Cities', href: '/cities', icon: MapPin, permission: 'manage_users' },
   
   // Inventory Section
@@ -89,7 +89,7 @@ const navigation = [
   { name: 'Inventory', href: '/inventory', icon: Warehouse, permission: 'view_inventory' },
   { name: 'Inventory Alerts', href: '/inventory-alerts', icon: AlertTriangle, permission: 'view_inventory' },
   { name: 'Warehouses', href: '/warehouses', icon: Warehouse, permission: 'view_inventory' },
-  // { name: 'Stock Movements', href: '/stock-movements', icon: ArrowUpDown, permission: 'view_stock_movements' },
+  { name: 'Stock Movements', href: '/stock-movements', icon: ArrowUpDown, permission: 'view_stock_movements' },
   
   // Accounting Section
   { type: 'heading', name: 'Accounting Section', color: 'bg-pink-500' },
@@ -102,9 +102,9 @@ const navigation = [
   { name: 'P&L Statements', href: '/pl-statements', icon: BarChart3, permission: 'view_pl_statements' },
   { name: 'Balance Sheets', href: '/balance-sheets', icon: FileText, permission: 'view_balance_sheets' },
   { name: 'Sales Performance', href: '/sales-performance', icon: TrendingUp, permission: 'view_sales_performance' },
-  // { name: 'Inventory Reports', href: '/inventory-reports', icon: Warehouse, permission: 'view_inventory_reports' },
+  { name: 'Inventory Reports', href: '/inventory-reports', icon: Warehouse, permission: 'view_inventory_reports' },
   { name: 'Anomaly Detection', href: '/anomaly-detection', icon: AlertTriangle, permission: 'view_anomaly_detection' },
-  // { name: 'Reports', href: '/reports', icon: BarChart3, permission: 'view_general_reports' },
+  { name: 'Reports', href: '/reports', icon: BarChart3, permission: 'view_general_reports' },
   { name: 'Backdate Report', href: '/backdate-report', icon: Clock, permission: 'view_backdate_report' },
   
   // HR/Admin Section
@@ -115,6 +115,13 @@ const navigation = [
   // System/Utilities Section
   { type: 'heading', name: 'System/Utilities', color: 'bg-red-500' },
   { name: 'Settings', href: '/settings2', icon: Settings, permission: 'manage_users' },
+];
+
+// Super Admin navigation (only visible to super_admin)
+const superAdminNavigation = [
+  { type: 'heading', name: 'Super Admin', color: 'bg-yellow-500' },
+  { name: 'Super Admin Dashboard', href: '/super-admin', icon: Shield, permission: null, superAdminOnly: true },
+  { name: 'Admin Management', href: '/admin-management', icon: Users, permission: null, superAdminOnly: true },
 ];
 
 // Inventory Alerts Badge Component
@@ -158,9 +165,21 @@ export const MultiTabLayout = ({ children }) => {
   const filteredNavigation = navigation.filter(item => {
     if (item.type === 'divider' || item.type === 'heading') return true; // Always show dividers and headings
     if (!item.permission) return true; // Always show items without permission requirement (like Dashboard)
-    if (user?.role === 'admin') return true; // Admin users see everything
+    if (user?.role === 'super_admin' || user?.role === 'admin') return true; // Super admin and admin users see everything
     return hasPermission(item.permission);
   });
+
+  // Filter super admin navigation - only show for super_admin users
+  const filteredSuperAdminNav = user?.role === 'super_admin' 
+    ? superAdminNavigation.filter(item => {
+        if (item.type === 'heading') return true;
+        if (item.superAdminOnly && user?.role !== 'super_admin') return false;
+        return true;
+      })
+    : [];
+
+  // Combine navigation
+  const allNavigation = [...filteredNavigation, ...filteredSuperAdminNav];
 
   const handleLogout = () => {
     logout();
@@ -219,7 +238,7 @@ export const MultiTabLayout = ({ children }) => {
             </button>
           </div>
           <nav className="flex-1 space-y-1 px-2 py-4 overflow-y-auto max-h-[calc(100vh-4rem)] scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
-            {filteredNavigation.map((item, index) => {
+            {allNavigation.map((item, index) => {
               if (item.type === 'divider') {
                 return (
                   <div key={`divider-${index}`} className="my-2 border-t border-gray-200"></div>
@@ -264,7 +283,7 @@ export const MultiTabLayout = ({ children }) => {
             <h1 className="text-xl font-bold text-gray-900">POS System</h1>
           </div>
           <nav className="flex-1 space-y-1 px-2 py-4 overflow-y-auto max-h-[calc(100vh-4rem)] scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
-            {filteredNavigation.map((item, index) => {
+            {allNavigation.map((item, index) => {
               if (item.type === 'divider') {
                 return (
                   <div key={`divider-${index}`} className="my-2 border-t border-gray-200"></div>
@@ -362,18 +381,6 @@ export const MultiTabLayout = ({ children }) => {
             </div>
 
             <div className="flex items-center gap-x-4 ml-auto">
-              {/* Keyboard Shortcuts Button */}
-              <button
-                onClick={() => {
-                  toast.success('Keyboard Shortcuts: Ctrl+F (Product Search), Ctrl+S (Supplier Search), Ctrl+P (Process Purchase), Esc (Clear Items)');
-                }}
-                className="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-gray-100 transition-colors"
-                title="Show Keyboard Shortcuts"
-              >
-                <Keyboard className="h-4 w-4" />
-                <span className="hidden sm:inline">Shortcuts</span>
-              </button>
-
               {/* User menu */}
               <div className="flex items-center gap-x-2">
                 <div className="flex items-center gap-x-2">

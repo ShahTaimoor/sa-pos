@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "configure-atlas": "node configure-atlas.js",
     "migrate:soft-delete": "node migrations/addSoftDeleteFields.js",
+    "create-superadmin": "node scripts/create-superadmin.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"

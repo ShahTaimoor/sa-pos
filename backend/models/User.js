@@ -82,7 +82,7 @@ const userSchema = new mongoose.Schema({
   // Role and Permissions
   role: {
     type: String,
-    enum: ['admin', 'manager', 'cashier', 'inventory', 'viewer'],
+    enum: ['super_admin', 'admin', 'manager', 'cashier', 'inventory', 'viewer'],
     default: 'cashier'
   },
   permissions: [{
@@ -375,7 +375,7 @@ userSchema.methods.resetLoginAttempts = function() {
 
 // Method to check permission
 userSchema.methods.hasPermission = function(permission) {
-  if (this.role === 'admin') return true;
+  if (this.role === 'super_admin' || this.role === 'admin') return true;
   return this.permissions.includes(permission);
 };
 

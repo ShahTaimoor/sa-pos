@@ -40,7 +40,6 @@ import { ProductInvestorsModal } from '../components/ProductInvestorsModal';
 import { ProductList } from '../components/ProductList';
 import { useAppDispatch } from '../store/hooks';
 import { api } from '../store/api';
-import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 import { useProductOperations } from '../hooks/useProductOperations';
 
 const Products = () => {
@@ -114,49 +113,6 @@ const Products = () => {
     toast.success('Categories refreshed');
   };
 
-  const shortcuts = useMemo(() => ({
-    'ctrl+n': () => {
-      productOps.setIsModalOpen(true);
-      toast.success('Creating new product...');
-    },
-    'ctrl+f': () => {
-      const searchInput = document.querySelector('input[placeholder*="Search products"]');
-      if (searchInput) {
-        searchInput.focus();
-        searchInput.select();
-      }
-    },
-    'ctrl+i': () => {
-      const importButton = Array.from(document.querySelectorAll('button')).find(btn => 
-        btn.textContent?.includes('Import Products') || 
-        btn.querySelector('svg')?.parentElement?.textContent?.includes('Import')
-      );
-      if (importButton) {
-        importButton.click();
-        toast.success('Import dialog opened');
-      } else {
-        const importSection = document.querySelector('[class*="Import"]') || 
-                             document.querySelector('h2, h3, h4')?.closest('div');
-        if (importSection) {
-          importSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          toast.success('Please use the Import button in the Import/Export section');
-        } else {
-          toast.success('Use the Import/Export section to import products');
-        }
-      }
-    },
-    'escape': () => {
-      if (productOps.isModalOpen) {
-        productOps.handleCloseModal();
-        toast.success('Cancelled');
-      }
-    },
-    'f1': () => {
-      toast.success('Keyboard Shortcuts: Ctrl+N (New Product), Ctrl+F (Search), Ctrl+I (Import), Esc (Cancel)');
-    }
-  }), [productOps]);
-
-  useKeyboardShortcuts(shortcuts);
 
   const handleFiltersChange = (newFilters) => {
     setFilters(newFilters);

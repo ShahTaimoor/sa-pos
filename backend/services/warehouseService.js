@@ -5,12 +5,19 @@ class WarehouseService {
   /**
    * Get warehouses with filters
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<{warehouses: Array, pagination: object}>}
    */
-  async getWarehouses(queryParams) {
+  async getWarehouses(queryParams, tenantId = null) {
     const { search, isActive, page = 1, limit = 20 } = queryParams;
 
     const filter = {};
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
+    
     if (isActive !== undefined) {
       filter.isActive = isActive === 'true' || isActive === true;
     }
@@ -32,10 +39,17 @@ class WarehouseService {
   /**
    * Get single warehouse by ID
    * @param {string} id - Warehouse ID
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<object>}
    */
-  async getWarehouseById(id) {
-    const warehouse = await WarehouseRepository.findById(id);
+  async getWarehouseById(id, tenantId = null) {
+    // Build query with tenant filter
+    const query = { _id: id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const warehouse = await WarehouseRepository.findOne(query);
     if (!warehouse) {
       throw new Error('Warehouse not found');
     }

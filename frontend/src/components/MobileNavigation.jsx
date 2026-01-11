@@ -106,7 +106,7 @@ const MobileNavigation = ({ user, onLogout }) => {
   // Filter navigation based on user permissions
   const filteredNavigationItems = navigationItems.filter(item => {
     if (!item.permission) return true; // Always show items without permission requirement
-    if (user?.role === 'admin') return true; // Admin users see everything
+    if (user?.role === 'super_admin' || user?.role === 'admin') return true; // Super admin and admin users see everything
     return hasPermission(item.permission);
   });
 

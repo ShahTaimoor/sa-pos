@@ -30,7 +30,13 @@ router.get('/', [
     }
 
     const { baseProduct, variantType, status, search } = req.query;
+    const tenantId = req.tenantId || req.user?.tenantId;
     const filter = {};
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
 
     if (baseProduct) filter.baseProduct = baseProduct;
     if (variantType) filter.variantType = variantType;
@@ -78,7 +84,15 @@ router.get('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const variant = await productVariantRepository.findById(req.params.id, {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Build query with tenant filter
+    const query = { _id: req.params.id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const variant = await productVariantRepository.findOne(query, {
       populate: [
         { path: 'baseProduct', select: 'name description pricing inventory' },
         { path: 'createdBy', select: 'firstName lastName' },
@@ -105,6 +119,7 @@ router.get('/:id', [
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('create_products'),
   body('baseProduct').isMongoId().withMessage('Valid base product ID is required'),
   body('variantName').trim().isLength({ min: 1, max: 200 }).withMessage('Variant name is required'),
@@ -141,12 +156,21 @@ router.post('/', [
       return res.status(404).json({ message: 'Base product not found' });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
     // Check if variant already exists
-    const existingVariant = await productVariantRepository.findOne({
+    const variantCheckQuery = {
       baseProduct,
       variantType,
       variantValue
-    });
+    };
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      variantCheckQuery.tenantId = tenantId;
+    }
+    
+    const existingVariant = await productVariantRepository.findOne(variantCheckQuery);
 
     if (existingVariant) {
       return res.status(400).json({ 
@@ -260,6 +284,7 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('delete_products'),
   param('id').isMongoId()
 ], async (req, res) => {
@@ -314,7 +339,15 @@ router.get('/base-product/:productId', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const variants = await productVariantRepository.findByBaseProduct(req.params.productId, {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Build filter with tenant
+    const filter = { baseProduct: req.params.productId };
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
+    
+    const variants = await productVariantRepository.findWithFilter(filter, {
       sort: { variantType: 1, variantValue: 1 },
       populate: [
         { path: 'baseProduct', select: 'name description pricing' }

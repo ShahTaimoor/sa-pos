@@ -49,10 +49,20 @@ app.use('/api', createRateLimiter({
   max: 100 // 100 requests per minute
 }));
 // Stricter rate limiter for auth endpoints: 5 requests per minute per IP
-app.use('/api/auth', createRateLimiter({ 
+// Exclude logout and /me from strict rate limiting (legitimate authenticated actions)
+const authRateLimiter = createRateLimiter({ 
   windowMs: 60000, // 1 minute
   max: 5 // 5 requests per minute (prevents brute force)
-}));
+});
+app.use('/api/auth', (req, res, next) => {
+  // Skip rate limiting for logout and /me endpoints (legitimate user actions)
+  const path = req.path.toLowerCase();
+  if (path === '/logout' || path === '/me') {
+    return next();
+  }
+  // Apply strict rate limiting for other auth endpoints (login, register, etc.)
+  return authRateLimiter(req, res, next);
+});
 
 // CORS configuration - use environment variable for allowed origins
 const allowedOrigins = process.env.ALLOWED_ORIGINS

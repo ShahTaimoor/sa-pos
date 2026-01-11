@@ -249,8 +249,8 @@ router.get('/me', [
 router.get('/team', [
   auth,
   (req, res, next) => {
-    // Allow admins or users with view_team_attendance permission
-    if (req.user.role === 'admin' || req.user.hasPermission('view_team_attendance')) {
+    // Allow super_admins, admins or users with view_team_attendance permission
+    if (req.user.role === 'super_admin' || req.user.role === 'admin' || req.user.hasPermission('view_team_attendance')) {
       return next();
     }
     return res.status(403).json({

@@ -6,10 +6,16 @@ class InvestorService {
   /**
    * Get investors with filters
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<Array>}
    */
-  async getInvestors(queryParams) {
+  async getInvestors(queryParams, tenantId = null) {
     const filter = {};
+
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
 
     if (queryParams.status) {
       filter.status = queryParams.status;
@@ -31,10 +37,17 @@ class InvestorService {
   /**
    * Get single investor by ID
    * @param {string} id - Investor ID
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<object>}
    */
-  async getInvestorById(id) {
-    const investor = await InvestorRepository.findById(id);
+  async getInvestorById(id, tenantId = null) {
+    // Build query with tenant filter
+    const query = { _id: id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const investor = await InvestorRepository.findOne(query);
     if (!investor) {
       throw new Error('Investor not found');
     }
@@ -135,12 +148,20 @@ class InvestorService {
   /**
    * Get products linked to investor
    * @param {string} investorId - Investor ID
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<Array>}
    */
-  async getProductsForInvestor(investorId) {
-    const products = await ProductRepository.findAll({
+  async getProductsForInvestor(investorId, tenantId = null) {
+    const productQuery = {
       'investors.investor': investorId
-    }, {
+    };
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      productQuery.tenantId = tenantId;
+    }
+    
+    const products = await ProductRepository.findAll(productQuery, {
       populate: [
         { path: 'category', select: 'name' }
       ]

@@ -8,6 +8,11 @@ const logger = require('../utils/logger');
 
 // Permission matrix: role -> permissions
 const PERMISSION_MATRIX = {
+  // Super Admin: Full access with no restrictions
+  super_admin: [
+    'all'
+  ],
+
   // Admin: Full access
   admin: [
     'all'
@@ -146,15 +151,20 @@ function requirePermission(permission) {
         });
       }
 
+      // Super admin bypasses all permission checks
+      if (user.role === 'super_admin') {
+        return next();
+      }
+
       // Check if action is destructive
       if (isDestructiveAction(permission)) {
-        // Destructive actions require admin or manager role
-        if (user.role !== 'admin' && user.role !== 'manager') {
+        // Destructive actions require super_admin, admin or manager role
+        if (user.role !== 'super_admin' && user.role !== 'admin' && user.role !== 'manager') {
           return res.status(403).json({
             success: false,
             error: {
               code: 'DESTRUCTIVE_ACTION_BLOCKED',
-              message: `Action '${permission}' is destructive and requires admin or manager role.`,
+              message: `Action '${permission}' is destructive and requires super_admin, admin or manager role.`,
               userRole: user.role
             }
           });
@@ -194,8 +204,8 @@ function blockDestructiveActions(req, res, next) {
     const method = req.method;
     const path = req.path;
 
-    // Block DELETE requests for non-admins
-    if (method === 'DELETE' && user?.role !== 'admin') {
+    // Block DELETE requests for non-admins and non-super-admins
+    if (method === 'DELETE' && user?.role !== 'super_admin' && user?.role !== 'admin') {
       return res.status(403).json({
         success: false,
         error: {
@@ -213,7 +223,7 @@ function blockDestructiveActions(req, res, next) {
       today.setHours(0, 0, 0, 0);
       requestDate.setHours(0, 0, 0, 0);
 
-      if (requestDate < today && user?.role !== 'admin') {
+      if (requestDate < today && user?.role !== 'super_admin' && user?.role !== 'admin') {
         return res.status(403).json({
           success: false,
           error: {

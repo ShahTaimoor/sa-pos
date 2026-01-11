@@ -6,9 +6,10 @@ class BankReceiptService {
   /**
    * Get bank receipts with filters and pagination
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<object>}
    */
-  async getBankReceipts(queryParams) {
+  async getBankReceipts(queryParams, tenantId = null) {
     const page = parseInt(queryParams.page) || 1;
     const limit = parseInt(queryParams.limit) || 50;
 
@@ -16,6 +17,11 @@ class BankReceiptService {
     const toDate = queryParams.toDate || queryParams.dateTo;
 
     const filter = {};
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
 
     // Date range filter
     if (fromDate || toDate) {
@@ -85,9 +91,10 @@ class BankReceiptService {
    * Get bank receipt summary
    * @param {Date} fromDate - Start date
    * @param {Date} toDate - End date
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<object>}
    */
-  async getSummary(fromDate, toDate) {
+  async getSummary(fromDate, toDate, tenantId = null) {
     const startOfDay = new Date(fromDate);
     startOfDay.setHours(0, 0, 0, 0);
     
@@ -95,26 +102,40 @@ class BankReceiptService {
     endOfDay.setDate(endOfDay.getDate() + 1);
     endOfDay.setHours(0, 0, 0, 0);
 
-    return await BankReceiptRepository.getSummary(startOfDay, endOfDay);
+    return await BankReceiptRepository.getSummary(startOfDay, endOfDay, tenantId);
   }
 
   /**
    * Check if customer exists
    * @param {string} customerId - Customer ID
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<boolean>}
    */
-  async customerExists(customerId) {
-    const customer = await CustomerRepository.findById(customerId);
+  async customerExists(customerId, tenantId = null) {
+    // Build query with tenant filter
+    const query = { _id: customerId };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const customer = await CustomerRepository.findOne(query);
     return !!customer;
   }
 
   /**
    * Check if supplier exists
    * @param {string} supplierId - Supplier ID
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<boolean>}
    */
-  async supplierExists(supplierId) {
-    const supplier = await SupplierRepository.findById(supplierId);
+  async supplierExists(supplierId, tenantId = null) {
+    // Build query with tenant filter
+    const query = { _id: supplierId };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const supplier = await SupplierRepository.findOne(query);
     return !!supplier;
   }
 }

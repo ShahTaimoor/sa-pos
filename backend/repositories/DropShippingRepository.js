@@ -29,12 +29,12 @@ class DropShippingRepository extends BaseRepository {
     const skip = (page - 1) * limit;
 
     const [transactions, total] = await Promise.all([
-      this.model.find(filter)
+      this.Model.find(filter)
         .populate(populate)
         .sort(sort)
         .skip(skip)
         .limit(limit),
-      this.model.countDocuments(filter)
+      this.Model.countDocuments(filter)
     ]);
 
     return {

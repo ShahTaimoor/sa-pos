@@ -3,6 +3,7 @@ const router = express.Router();
 const { body, validationResult, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenantMiddleware');
+const logger = require('../utils/logger');
 const BankPayment = require('../models/BankPayment'); // Still needed for new BankPayment() and static methods
 const Bank = require('../models/Bank'); // Still needed for model reference in populate
 const Sales = require('../models/Sales'); // Still needed for model reference in populate
@@ -61,8 +62,15 @@ router.get('/', [
     const fromDate = fromDateParam || dateFrom;
     const toDate = toDateParam || dateTo;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
     // Build filter object
     const filter = {};
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
 
     // Date range filter
     if (fromDate || toDate) {
@@ -305,7 +313,6 @@ router.post('/', [
     // Create accounting entries
     try {
       const AccountingService = require('../services/accountingService');
-const logger = require('../utils/logger');
       await AccountingService.recordBankPayment(bankPayment);
     } catch (error) {
       logger.error('Error creating accounting entries for bank payment:', error);
@@ -354,6 +361,7 @@ router.get('/summary/date-range', [
     }
 
     const { fromDate, toDate } = req.query;
+    const tenantId = req.tenantId || req.user?.tenantId;
 
     const filter = {
       date: {
@@ -361,6 +369,11 @@ router.get('/summary/date-range', [
         $lte: new Date(toDate + 'T23:59:59.999Z')
       }
     };
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
 
     // Get summary data
     const summary = await bankPaymentRepository.getSummary(filter);

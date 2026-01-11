@@ -79,7 +79,14 @@ router.get(
     } = req.query;
 
     try {
+      const tenantId = req.tenantId || req.user?.tenantId;
       const filter = {};
+      
+      // Add tenant filter for multi-tenant isolation
+      if (tenantId) {
+        filter.tenantId = tenantId;
+      }
+      
       if (status !== 'all') {
         filter.status = status;
       }
@@ -153,10 +160,18 @@ router.get(
     end.setHours(23, 59, 59, 999);
 
     try {
-      const upcomingExpenses = await recurringExpenseRepository.findWithFilter({
+      const tenantId = req.tenantId || req.user?.tenantId;
+      const filter = {
         status: 'active',
         nextDueDate: { $lte: end }
-      }, {
+      };
+      
+      // Add tenant filter for multi-tenant isolation
+      if (tenantId) {
+        filter.tenantId = tenantId;
+      }
+      
+      const upcomingExpenses = await recurringExpenseRepository.findWithFilter(filter, {
         sort: { nextDueDate: 1 },
         populate: [
           { path: 'supplier', select: 'name companyName businessName displayName' },
@@ -237,11 +252,13 @@ router.post(
 
       await validateRelatedEntities({ supplier, customer, bank: defaultPaymentType === 'bank' ? bank : null });
 
+      const tenantId = req.tenantId || req.user?.tenantId;
       const baseDate = startFromDate ? new Date(startFromDate) : new Date();
       const nextDueDate = calculateInitialDueDate(dayOfMonth, baseDate);
 
       const recurringExpense = new RecurringExpense({
         name: name.trim(),
+        tenantId: tenantId,
         description: description ? description.trim() : undefined,
         amount: parseFloat(amount),
         dayOfMonth,
@@ -453,6 +470,7 @@ router.post(
   '/:id/record-payment',
   [
     auth,
+    tenantMiddleware,
     requirePermission('create_orders'),
     param('id').isMongoId(),
     body('paymentDate').optional().isISO8601().withMessage('paymentDate must be a valid date'),
@@ -469,8 +487,17 @@ router.post(
 
     try {
       const { paymentDate, paymentType, notes } = req.body;
-      const recurringExpense = await recurringExpenseRepository.findByIdWithSession(req.params.id, { session });
-
+      const tenantId = req.tenantId || req.user?.tenantId;
+      
+      // Build query with tenant filter
+      const query = { _id: req.params.id };
+      if (tenantId) {
+        query.tenantId = tenantId;
+      }
+      
+      // Note: findByIdWithSession may need to be updated to accept query instead of just id
+      // For now, we'll find first then use with session
+      const recurringExpense = await recurringExpenseRepository.findOne(query);
       if (!recurringExpense) {
         await session.abortTransaction();
         return res.status(404).json({
@@ -478,8 +505,18 @@ router.post(
           message: 'Recurring expense not found'
         });
       }
+      
+      // Reload with session for transaction
+      const recurringExpenseWithSession = await recurringExpenseRepository.findByIdWithSession(req.params.id, { session });
+      if (!recurringExpenseWithSession) {
+        await session.abortTransaction();
+        return res.status(404).json({
+          success: false,
+          message: 'Recurring expense not found'
+        });
+      }
 
-      if (recurringExpense.status !== 'active') {
+      if (recurringExpenseWithSession.status !== 'active') {
         await session.abortTransaction();
         return res.status(400).json({
           success: false,
@@ -487,14 +524,14 @@ router.post(
         });
       }
 
-      const effectivePaymentType = paymentType || recurringExpense.defaultPaymentType || 'cash';
+      const effectivePaymentType = paymentType || recurringExpenseWithSession.defaultPaymentType || 'cash';
       const effectivePaymentDate = paymentDate ? new Date(paymentDate) : new Date();
       effectivePaymentDate.setHours(0, 0, 0, 0);
 
       let paymentRecord = null;
 
       if (effectivePaymentType === 'bank') {
-        if (!recurringExpense.bank) {
+        if (!recurringExpenseWithSession.bank) {
           await session.abortTransaction();
           return res.status(400).json({
             success: false,
@@ -504,12 +541,13 @@ router.post(
 
         const bankPayment = new BankPayment({
           date: effectivePaymentDate,
-          amount: recurringExpense.amount,
-          particular: recurringExpense.name,
-          bank: recurringExpense.bank,
-          supplier: recurringExpense.supplier || undefined,
-          customer: recurringExpense.customer || undefined,
-          notes: notes ? notes.trim() : recurringExpense.notes,
+          amount: recurringExpenseWithSession.amount,
+          particular: recurringExpenseWithSession.name,
+          bank: recurringExpenseWithSession.bank,
+          supplier: recurringExpenseWithSession.supplier || undefined,
+          customer: recurringExpenseWithSession.customer || undefined,
+          notes: notes ? notes.trim() : recurringExpenseWithSession.notes,
+          tenantId: tenantId,
           createdBy: req.user._id
         });
 
@@ -517,19 +555,19 @@ router.post(
         paymentRecord = bankPayment;
 
         // Update supplier/customer balances asynchronously, don't abort transaction on failure
-        if (recurringExpense.supplier && recurringExpense.amount > 0) {
+        if (recurringExpenseWithSession.supplier && recurringExpenseWithSession.amount > 0) {
           try {
             const SupplierBalanceService = require('../services/supplierBalanceService');
-            await SupplierBalanceService.recordPayment(recurringExpense.supplier, recurringExpense.amount, null);
+            await SupplierBalanceService.recordPayment(recurringExpenseWithSession.supplier, recurringExpenseWithSession.amount, null);
           } catch (error) {
             logger.error('Error updating supplier balance for recurring bank payment:', error);
           }
         }
 
-        if (recurringExpense.customer && recurringExpense.amount > 0) {
+        if (recurringExpenseWithSession.customer && recurringExpenseWithSession.amount > 0) {
           try {
             const CustomerBalanceService = require('../services/customerBalanceService');
-            await CustomerBalanceService.recordPayment(recurringExpense.customer, recurringExpense.amount, null);
+            await CustomerBalanceService.recordPayment(recurringExpenseWithSession.customer, recurringExpenseWithSession.amount, null);
           } catch (error) {
             logger.error('Error updating customer balance for recurring bank payment:', error);
           }
@@ -544,31 +582,32 @@ router.post(
       } else {
         const cashPayment = new CashPayment({
           date: effectivePaymentDate,
-          amount: recurringExpense.amount,
-          particular: recurringExpense.name,
-          supplier: recurringExpense.supplier || undefined,
-          customer: recurringExpense.customer || undefined,
+          amount: recurringExpenseWithSession.amount,
+          particular: recurringExpenseWithSession.name,
+          supplier: recurringExpenseWithSession.supplier || undefined,
+          customer: recurringExpenseWithSession.customer || undefined,
           paymentMethod: 'cash',
-          notes: notes ? notes.trim() : recurringExpense.notes,
+          notes: notes ? notes.trim() : recurringExpenseWithSession.notes,
+          tenantId: tenantId,
           createdBy: req.user._id
         });
 
         await cashPayment.save({ session });
         paymentRecord = cashPayment;
 
-        if (recurringExpense.supplier && recurringExpense.amount > 0) {
+        if (recurringExpenseWithSession.supplier && recurringExpenseWithSession.amount > 0) {
           try {
             const SupplierBalanceService = require('../services/supplierBalanceService');
-            await SupplierBalanceService.recordPayment(recurringExpense.supplier, recurringExpense.amount, null);
+            await SupplierBalanceService.recordPayment(recurringExpenseWithSession.supplier, recurringExpenseWithSession.amount, null);
           } catch (error) {
             logger.error('Error updating supplier balance for recurring cash payment:', error);
           }
         }
 
-        if (recurringExpense.customer && recurringExpense.amount > 0) {
+        if (recurringExpenseWithSession.customer && recurringExpenseWithSession.amount > 0) {
           try {
             const CustomerBalanceService = require('../services/customerBalanceService');
-            await CustomerBalanceService.recordPayment(recurringExpense.customer, recurringExpense.amount, null);
+            await CustomerBalanceService.recordPayment(recurringExpenseWithSession.customer, recurringExpenseWithSession.amount, null);
           } catch (error) {
             logger.error('Error updating customer balance for recurring cash payment:', error);
           }
@@ -583,21 +622,21 @@ const logger = require('../utils/logger');
         }
       }
 
-      const anchorDate = recurringExpense.nextDueDate && recurringExpense.nextDueDate instanceof Date
-        ? recurringExpense.nextDueDate
-        : calculateInitialDueDate(recurringExpense.dayOfMonth, effectivePaymentDate);
+      const anchorDate = recurringExpenseWithSession.nextDueDate && recurringExpenseWithSession.nextDueDate instanceof Date
+        ? recurringExpenseWithSession.nextDueDate
+        : calculateInitialDueDate(recurringExpenseWithSession.dayOfMonth, effectivePaymentDate);
 
-      let nextDueDate = calculateNextDueDate(anchorDate, recurringExpense.dayOfMonth);
+      let nextDueDate = calculateNextDueDate(anchorDate, recurringExpenseWithSession.dayOfMonth);
       if (effectivePaymentDate > anchorDate) {
-        nextDueDate = calculateNextDueDate(effectivePaymentDate, recurringExpense.dayOfMonth);
+        nextDueDate = calculateNextDueDate(effectivePaymentDate, recurringExpenseWithSession.dayOfMonth);
       }
 
-      recurringExpense.lastPaidAt = effectivePaymentDate;
-      recurringExpense.nextDueDate = nextDueDate;
-      recurringExpense.lastReminderSentAt = undefined;
-      recurringExpense.updatedBy = req.user._id;
+      recurringExpenseWithSession.lastPaidAt = effectivePaymentDate;
+      recurringExpenseWithSession.nextDueDate = nextDueDate;
+      recurringExpenseWithSession.lastReminderSentAt = undefined;
+      recurringExpenseWithSession.updatedBy = req.user._id;
 
-      await recurringExpense.save({ session });
+      await recurringExpenseWithSession.save({ session });
 
       await session.commitTransaction();
 
@@ -613,7 +652,7 @@ const logger = require('../utils/logger');
         message: 'Recurring expense payment recorded successfully',
         data: {
           payment: paymentRecord,
-          recurringExpense
+          recurringExpense: recurringExpenseWithSession
         }
       });
     } catch (error) {
@@ -646,7 +685,15 @@ router.post(
 
     try {
       const { snoozeDays, targetDate } = req.body;
-      const recurringExpense = await recurringExpenseRepository.findById(req.params.id);
+      const tenantId = req.tenantId || req.user?.tenantId;
+      
+      // Build query with tenant filter
+      const query = { _id: req.params.id };
+      if (tenantId) {
+        query.tenantId = tenantId;
+      }
+      
+      const recurringExpense = await recurringExpenseRepository.findOne(query);
 
       if (!recurringExpense) {
         return res.status(404).json({

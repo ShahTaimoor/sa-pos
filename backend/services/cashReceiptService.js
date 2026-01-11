@@ -5,9 +5,10 @@ class CashReceiptService {
   /**
    * Get cash receipts with filters and pagination
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<object>}
    */
-  async getCashReceipts(queryParams) {
+  async getCashReceipts(queryParams, tenantId = null) {
     const page = parseInt(queryParams.page) || 1;
     const limit = parseInt(queryParams.limit) || 50;
 
@@ -15,6 +16,11 @@ class CashReceiptService {
     const toDate = queryParams.toDate || queryParams.dateTo;
 
     const filter = {};
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
 
     // Date range filter
     if (fromDate || toDate) {
@@ -62,10 +68,17 @@ class CashReceiptService {
   /**
    * Get single cash receipt by ID
    * @param {string} id - Cash receipt ID
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<object>}
    */
-  async getCashReceiptById(id) {
-    const cashReceipt = await CashReceiptRepository.findById(id, [
+  async getCashReceiptById(id, tenantId = null) {
+    // Build query with tenant filter
+    const query = { _id: id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const cashReceipt = await CashReceiptRepository.findOne(query, [
       { path: 'order', model: 'Sales', select: 'orderNumber' },
       { path: 'customer', select: 'name businessName' },
       { path: 'supplier', select: 'name businessName' },
@@ -99,10 +112,17 @@ class CashReceiptService {
   /**
    * Get customers by IDs
    * @param {Array<string>} customerIds - Customer IDs
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<Array>}
    */
-  async getCustomersByIds(customerIds) {
-    return await CustomerRepository.findByIds(customerIds, { 
+  async getCustomersByIds(customerIds, tenantId = null) {
+    // Build filter with tenant
+    const filter = { _id: { $in: customerIds } };
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
+    
+    return await CustomerRepository.findAll(filter, { 
       select: 'name businessName',
       lean: true 
     });

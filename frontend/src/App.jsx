@@ -2,8 +2,8 @@ import React, { Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { ErrorProvider } from './contexts/ErrorContext';
 import { TabProvider } from './contexts/TabContext';
-import { KeyboardShortcutsProvider } from './contexts/KeyboardShortcutsContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { SuperAdminRoute } from './components/SuperAdminRoute';
 import { Layout } from './components/Layout';
 import { MultiTabLayout } from './components/MultiTabLayout';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -11,7 +11,6 @@ import NetworkStatus from './components/NetworkStatus';
 import PWAUpdateNotification from './components/PWAUpdateNotification';
 import OfflineIndicator from './components/OfflineIndicator';
 import { LoadingPage } from './components/LoadingSpinner';
-import KeyboardShortcutsHints from './components/KeyboardShortcutsHints';
 
 // Critical components - load immediately (small, frequently used)
 import { Login } from './pages/Login';
@@ -63,17 +62,17 @@ const Attendance = lazy(() => import('./pages/Attendance'));
 const Employees = lazy(() => import('./pages/Employees'));
 const ProductVariants = lazy(() => import('./pages/ProductVariants'));
 const ProductTransformations = lazy(() => import('./pages/ProductTransformations'));
+const SuperAdmin = lazy(() => import('./pages/SuperAdmin').then(m => ({ default: m.SuperAdmin })));
+const AdminManagement = lazy(() => import('./pages/AdminManagement').then(m => ({ default: m.AdminManagement })));
 
 function App() {
   return (
     <ErrorBoundary>
       <ErrorProvider>
-          <KeyboardShortcutsProvider>
-            <TabProvider>
-              <NetworkStatus />
-              <PWAUpdateNotification />
-              <OfflineIndicator />
-              <KeyboardShortcutsHints />
+          <TabProvider>
+            <NetworkStatus />
+            <PWAUpdateNotification />
+            <OfflineIndicator />
             <Routes>
               <Route path="/login" element={<Login />} />
               <Route
@@ -130,6 +129,26 @@ function App() {
                         <Route path="/attendance" element={<Suspense fallback={<LoadingPage />}><Attendance /></Suspense>} />
                         <Route path="/employees" element={<Suspense fallback={<LoadingPage />}><Employees /></Suspense>} />
                         <Route path="/help" element={<Suspense fallback={<LoadingPage />}><Help /></Suspense>} />
+                        <Route 
+                          path="/super-admin" 
+                          element={
+                            <SuperAdminRoute>
+                              <Suspense fallback={<LoadingPage />}>
+                                <SuperAdmin />
+                              </Suspense>
+                            </SuperAdminRoute>
+                          } 
+                        />
+                        <Route 
+                          path="/admin-management" 
+                          element={
+                            <SuperAdminRoute>
+                              <Suspense fallback={<LoadingPage />}>
+                                <AdminManagement />
+                              </Suspense>
+                            </SuperAdminRoute>
+                          } 
+                        />
                       </Routes>
                     </MultiTabLayout>
                   </ProtectedRoute>
@@ -137,7 +156,6 @@ function App() {
               />
             </Routes>
           </TabProvider>
-          </KeyboardShortcutsProvider>
       </ErrorProvider>
     </ErrorBoundary>
   );

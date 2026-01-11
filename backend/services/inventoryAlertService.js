@@ -15,12 +15,19 @@ class InventoryAlertService {
         includeOutOfStock = true,
         includeCritical = true,
         includeWarning = true,
-        warehouse = null
+        warehouse = null,
+        tenantId = null
       } = options;
+
+      // Build product filter with tenant
+      const productFilter = { status: 'active' };
+      if (tenantId) {
+        productFilter.tenantId = tenantId;
+      }
 
       // Get all products with their inventory
       const products = await ProductRepository.findAll(
-        { status: 'active' },
+        productFilter,
         {
           populate: [{ path: 'category', select: 'name' }],
           lean: true
@@ -203,11 +210,12 @@ class InventoryAlertService {
 
   /**
    * Get alert summary statistics
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<Object>} Alert summary
    */
-  static async getAlertSummary() {
+  static async getAlertSummary(tenantId = null) {
     try {
-      const alerts = await this.getLowStockAlerts();
+      const alerts = await this.getLowStockAlerts({ tenantId });
       
       return {
         total: alerts.length,

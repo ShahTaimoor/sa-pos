@@ -71,9 +71,15 @@ router.get('/', [
       search
     } = req.query;
     const decodedSearch = decodeHtmlEntities(search);
+    const tenantId = req.tenantId || req.user?.tenantId;
 
     // Build query
     const query = {};
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     
     if (product) query.product = product;
     if (movementType) query.movementType = movementType;
@@ -110,9 +116,16 @@ router.get('/', [
       }
 
       try {
-        const matchingProducts = await productRepository.findAll({
+        const productSearchFilter = {
           name: { $regex: decodedSearch, $options: 'i' }
-        }, { select: '_id' });
+        };
+        
+        // Add tenant filter for multi-tenant isolation
+        if (tenantId) {
+          productSearchFilter.tenantId = tenantId;
+        }
+        
+        const matchingProducts = await productRepository.findAll(productSearchFilter, { select: '_id' });
 
         if (matchingProducts.length > 0) {
           orConditions.push({
@@ -219,8 +232,9 @@ router.get('/product/:productId', [
   try {
     const { productId } = req.params;
     const { dateFrom, dateTo, movementType } = req.query;
+    const tenantId = req.tenantId || req.user?.tenantId;
 
-    const options = {};
+    const options = { tenantId: tenantId };
     if (dateFrom) options.dateFrom = dateFrom;
     if (dateTo) options.dateTo = dateTo;
     if (movementType) options.movementType = movementType;
@@ -260,12 +274,21 @@ router.get('/product/:productId', [
 
 // Get stock movement by ID
 router.get('/:id', [
-  auth, 
+  auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   param('id').isMongoId().withMessage('Invalid movement ID')
 ], async (req, res) => {
   try {
-    const movement = await stockMovementRepository.findById(req.params.id, {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Build query with tenant filter
+    const query = { _id: req.params.id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const movement = await stockMovementRepository.findOne(query, {
       populate: [
         { path: 'product', select: 'name sku category' },
         { path: 'user', select: 'firstName lastName email' },
@@ -342,6 +365,8 @@ router.post('/adjustment', [
       });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
     // Create stock movement
     const movement = new StockMovement({
       product: productId,
@@ -357,6 +382,7 @@ router.post('/adjustment', [
       referenceId: productId,
       referenceNumber: `ADJ-${Date.now()}`,
       location,
+      tenantId: tenantId,
       user: req.user._id,
       userName: `${req.user.firstName} ${req.user.lastName}`,
       reason,
@@ -400,7 +426,15 @@ router.post('/:id/reverse', [
   body('reason').optional().isString().trim().isLength({ max: 500 }).withMessage('Reason too long')
 ], async (req, res) => {
   try {
-    const movement = await stockMovementRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Build query with tenant filter
+    const query = { _id: req.params.id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const movement = await stockMovementRepository.findOne(query);
     
     if (!movement) {
       return res.status(404).json({
@@ -447,8 +481,15 @@ router.get('/stats/overview', [
 ], async (req, res) => {
   try {
     const { dateFrom, dateTo } = req.query;
+    const tenantId = req.tenantId || req.user?.tenantId;
     
     const matchStage = {};
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      matchStage.tenantId = tenantId;
+    }
+    
     if (dateFrom || dateTo) {
       matchStage.createdAt = {};
       const fromDate = toStartOfDay(dateFrom);

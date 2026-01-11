@@ -27,7 +27,8 @@ router.get('/', [
 
     const options = {
       includeInactive: req.query.includeInactive === 'true',
-      minOrders: parseInt(req.query.minOrders) || 0
+      minOrders: parseInt(req.query.minOrders) || 0,
+      tenantId: req.tenantId || req.user?.tenantId
     };
 
     const analytics = await CustomerAnalyticsService.analyzeAllCustomers(options);
@@ -70,12 +71,14 @@ router.get('/', [
 // @access  Private
 router.get('/summary', [
   auth,
+  tenantMiddleware,
   requirePermission('view_customer_analytics')
 ], async (req, res) => {
   try {
     const analytics = await CustomerAnalyticsService.analyzeAllCustomers({
       includeInactive: false,
-      minOrders: 0
+      minOrders: 0,
+      tenantId: req.tenantId || req.user?.tenantId
     });
 
     res.json({
@@ -119,7 +122,8 @@ router.get('/:customerId', [
   requirePermission('view_customer_analytics')
 ], async (req, res) => {
   try {
-    const analytics = await CustomerAnalyticsService.getCustomerAnalytics(req.params.customerId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const analytics = await CustomerAnalyticsService.getCustomerAnalytics(req.params.customerId, tenantId);
 
     res.json({
       success: true,
@@ -152,7 +156,8 @@ router.get('/segments/:segment', [
 
     const options = {
       includeInactive: false,
-      minOrders: parseInt(req.query.minOrders) || 0
+      minOrders: parseInt(req.query.minOrders) || 0,
+      tenantId: req.tenantId || req.user?.tenantId
     };
 
     const analytics = await CustomerAnalyticsService.analyzeAllCustomers(options);
@@ -181,12 +186,14 @@ router.get('/segments/:segment', [
 // @access  Private
 router.get('/churn-risk/:level', [
   auth,
+  tenantMiddleware,
   requirePermission('view_customer_analytics')
 ], async (req, res) => {
   try {
     const analytics = await CustomerAnalyticsService.analyzeAllCustomers({
       includeInactive: false,
-      minOrders: 0
+      minOrders: 0,
+      tenantId: req.tenantId || req.user?.tenantId
     });
 
     const riskLevel = req.params.level;

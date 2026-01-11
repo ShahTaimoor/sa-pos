@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { query, validationResult } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const InventoryAlertService = require('../services/inventoryAlertService');
 const AutoPurchaseOrderService = require('../services/autoPurchaseOrderService');
 const logger = require('../utils/logger');
@@ -11,6 +12,7 @@ const logger = require('../utils/logger');
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   query('includeOutOfStock').optional().isIn(['true', 'false']),
   query('includeCritical').optional().isIn(['true', 'false']),
@@ -22,10 +24,12 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
     const options = {
       includeOutOfStock: req.query.includeOutOfStock !== 'false',
       includeCritical: req.query.includeCritical !== 'false',
-      includeWarning: req.query.includeWarning !== 'false'
+      includeWarning: req.query.includeWarning !== 'false',
+      tenantId: tenantId
     };
 
     const alerts = await InventoryAlertService.getLowStockAlerts(options);
@@ -50,10 +54,12 @@ router.get('/', [
 // @access  Private
 router.get('/summary', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory')
 ], async (req, res) => {
   try {
-    const summary = await InventoryAlertService.getAlertSummary();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const summary = await InventoryAlertService.getAlertSummary(tenantId);
 
     res.json({
       success: true,
@@ -74,10 +80,12 @@ router.get('/summary', [
 // @access  Private
 router.get('/products-needing-reorder', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory')
 ], async (req, res) => {
   try {
-    const products = await AutoPurchaseOrderService.getProductsNeedingReorder();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const products = await AutoPurchaseOrderService.getProductsNeedingReorder(tenantId);
 
     res.json({
       success: true,
@@ -99,6 +107,7 @@ router.get('/products-needing-reorder', [
 // @access  Private
 router.post('/generate-purchase-orders', [
   auth,
+  tenantMiddleware,
   requirePermission('create_purchase_orders'),
   query('autoConfirm').optional().isIn(['true', 'false']),
   query('supplierPreference').optional().isIn(['primary', 'cheapest', 'fastest']),
@@ -111,11 +120,13 @@ router.post('/generate-purchase-orders', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
     const options = {
       autoConfirm: req.query.autoConfirm === 'true',
       supplierPreference: req.query.supplierPreference || 'primary',
       groupBySupplier: req.query.groupBySupplier !== 'false',
-      minOrderValue: parseFloat(req.query.minOrderValue) || 0
+      minOrderValue: parseFloat(req.query.minOrderValue) || 0,
+      tenantId: tenantId
     };
 
     const result = await AutoPurchaseOrderService.generatePurchaseOrders(

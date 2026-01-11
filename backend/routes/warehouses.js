@@ -130,12 +130,13 @@ router.get(
         limit = 20,
       } = req.query;
 
+      const tenantId = req.tenantId || req.user?.tenantId;
       const { warehouses, pagination } = await warehouseService.getWarehouses({
         search,
         isActive,
         page,
         limit
-      });
+      }, tenantId);
 
       res.json({
         success: true,
@@ -304,7 +305,8 @@ router.delete(
   ],
   async (req, res) => {
     try {
-      const warehouse = await warehouseService.getWarehouseById(req.params.id);
+      const tenantId = req.tenantId || req.user?.tenantId;
+      const warehouse = await warehouseService.getWarehouseById(req.params.id, tenantId);
 
       if (warehouse.isPrimary) {
         return res.status(400).json({

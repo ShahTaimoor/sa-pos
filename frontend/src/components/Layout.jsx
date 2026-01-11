@@ -17,7 +17,6 @@ import {
   Building,
   Building2,
   FileText,
-  Keyboard,
   RotateCcw,
   Tag,
   TrendingUp,
@@ -79,14 +78,14 @@ const navigation = [
   { name: 'Customers', href: '/customers', icon: Users },
   { name: 'Suppliers', href: '/suppliers', icon: Building },
   { name: 'Banks', href: '/banks', icon: Building2 },
-  // { name: 'Investors', href: '/investors', icon: TrendingUp },
-  // { name: 'Drop Shipping', href: '/drop-shipping', icon: ArrowRight },
+  { name: 'Investors', href: '/investors', icon: TrendingUp },
+  { name: 'Drop Shipping', href: '/drop-shipping', icon: ArrowRight },
   
   // Inventory Management
   { type: 'heading', name: 'Inventory Management', color: 'bg-orange-500' },
   { name: 'Inventory', href: '/inventory', icon: Warehouse },
   { name: 'Warehouses', href: '/warehouses', icon: Warehouse },
-  // { name: 'Stock Movements', href: '/stock-movements', icon: ArrowUpDown },
+  { name: 'Stock Movements', href: '/stock-movements', icon: ArrowUpDown },
   
   // Accounting
   { type: 'heading', name: 'Accounting', color: 'bg-pink-500' },
@@ -100,8 +99,8 @@ const navigation = [
   { name: 'P&L Statements', href: '/pl-statements', icon: BarChart3 },
   { name: 'Balance Sheets', href: '/balance-sheets', icon: FileText },
   { name: 'Sales Performance', href: '/sales-performance', icon: TrendingUp },
-  // { name: 'Inventory Reports', href: '/inventory-reports', icon: Warehouse },
-  // { name: 'Reports', href: '/reports', icon: BarChart3 },
+  { name: 'Inventory Reports', href: '/inventory-reports', icon: Warehouse },
+  { name: 'Reports', href: '/reports', icon: BarChart3 },
   { name: 'Backdate Report', href: '/backdate-report', icon: Clock },
   
   // System Management
@@ -460,33 +459,6 @@ export const Layout = ({ children }) => {
                   <span className="hidden sm:inline">Install App</span>
                 </button>
               )}
-
-              {/* Keyboard Shortcuts */}
-              <button
-                onClick={() => {
-                  const shortcuts = {
-                    '/products': 'Ctrl+N (New), Ctrl+F (Search), Ctrl+I (Import), Esc (Cancel)',
-                    '/sales': 'Ctrl+F (Product Search), Ctrl+C (Customer Search), Ctrl+P (Process Payment), Esc (Clear Cart)',
-                    '/sales-orders': 'Ctrl+N (New), Ctrl+F (Search), Ctrl+S (Save), Esc (Cancel), F1 (Help)',
-                    '/purchase-orders': 'Ctrl+N (New), Ctrl+F (Search), Ctrl+S (Save), Esc (Cancel), F1 (Help)',
-                    '/purchase': 'Ctrl+F (Product Search), Ctrl+S (Supplier Search), Ctrl+P (Process Purchase), Esc (Clear Items)',
-                    '/customers': 'Ctrl+N (New), Ctrl+F (Search), Esc (Cancel)',
-                    '/suppliers': 'Ctrl+N (New), Ctrl+F (Search), Esc (Cancel)',
-                    '/inventory': 'Ctrl+F (Search), Esc (Cancel)',
-                    '/reports': 'Ctrl+F (Search), Esc (Cancel)',
-                    '/settings': 'Esc (Cancel)',
-                    '/dashboard': 'Ctrl+F (Search), Esc (Cancel)',
-                    '/orders': 'Ctrl+F (Search), Esc (Cancel)'
-                  };
-                  const currentShortcuts = shortcuts[location.pathname] || 'F1 (Help), Esc (Cancel)';
-                  toast.success(`Keyboard Shortcuts: ${currentShortcuts}`);
-                }}
-                className="flex items-center gap-x-2 px-3 py-2 text-sm font-medium text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
-                title="Show Keyboard Shortcuts"
-              >
-                <Keyboard className="h-4 w-4" />
-                <span className="hidden sm:inline">Shortcuts</span>
-              </button>
 
               {/* User menu */}
               <div className="flex items-center gap-x-2">

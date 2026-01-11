@@ -3,6 +3,7 @@ const { body, query, param } = require('express-validator');
 const { auth, requireAnyPermission } = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const investorService = require('../services/investorService');
+const InvestorRepository = require('../repositories/InvestorRepository');
 const Investor = require('../models/Investor');
 const logger = require('../utils/logger'); // Still needed for some operations
 
@@ -17,10 +18,11 @@ router.get('/', [
   query('search').optional().isString().trim()
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
     const investors = await investorService.getInvestors({
       status: req.query.status,
       search: req.query.search
-    });
+    }, tenantId);
     
     res.json({
       success: true,
@@ -44,7 +46,8 @@ router.get('/:id', [
   param('id').isMongoId().withMessage('Invalid investor ID')
 ], async (req, res) => {
   try {
-    const result = await investorService.getInvestorById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const result = await investorService.getInvestorById(req.params.id, tenantId);
     
     res.json({
       success: true,
@@ -280,6 +283,7 @@ router.get('/:id/profit-shares', [
 // Get profit summary
 router.get('/profit-shares/summary', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['view_investors', 'manage_investors', 'view_reports']),
   query('startDate').optional().isISO8601(),
   query('endDate').optional().isISO8601()
@@ -336,7 +340,8 @@ router.get('/:id/products', [
   param('id').isMongoId().withMessage('Invalid investor ID')
 ], async (req, res) => {
   try {
-    const products = await investorService.getProductsForInvestor(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    const products = await investorService.getProductsForInvestor(req.params.id, tenantId);
     
     // Sort products by name
     products.sort((a, b) => {

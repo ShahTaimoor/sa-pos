@@ -58,8 +58,15 @@ router.get('/', [
     const fromDate = fromDateParam || dateFrom;
     const toDate = toDateParam || dateTo;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
     // Build filter object
     const filter = {};
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
 
     // Date range filter
     if (fromDate || toDate) {
@@ -104,7 +111,7 @@ router.get('/', [
       voucherCode,
       amount,
       particular
-    });
+    }, tenantId);
 
     res.json({
       success: true,
@@ -162,9 +169,15 @@ router.post('/', [
       notes
     } = req.body;
 
-    // Validate order exists if provided
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Validate order exists if provided (with tenant filtering)
     if (order) {
-      const orderExists = await Sales.findById(order);
+      const orderQuery = { _id: order };
+      if (tenantId) {
+        orderQuery.tenantId = tenantId;
+      }
+      const orderExists = await Sales.findOne(orderQuery);
       if (!orderExists) {
         return res.status(400).json({ 
           success: false,
@@ -173,9 +186,13 @@ router.post('/', [
       }
     }
 
-    // Validate customer exists if provided
+    // Validate customer exists if provided (with tenant filtering)
     if (customer) {
-      const customerExists = await Customer.findById(customer);
+      const customerQuery = { _id: customer };
+      if (tenantId) {
+        customerQuery.tenantId = tenantId;
+      }
+      const customerExists = await Customer.findOne(customerQuery);
       if (!customerExists) {
         return res.status(400).json({ 
           success: false,
@@ -184,9 +201,9 @@ router.post('/', [
       }
     }
 
-    // Validate supplier exists if provided
+    // Validate supplier exists if provided (with tenant filtering)
     if (supplier) {
-      const supplierExists = await bankReceiptService.supplierExists(supplier);
+      const supplierExists = await bankReceiptService.supplierExists(supplier, tenantId);
       if (!supplierExists) {
         return res.status(400).json({ 
           success: false,
@@ -195,8 +212,12 @@ router.post('/', [
       }
     }
 
-    // Validate bank exists
-    const bankExists = await Bank.findById(bank);
+    // Validate bank exists (with tenant filtering)
+    const bankQuery = { _id: bank };
+    if (tenantId) {
+      bankQuery.tenantId = tenantId;
+    }
+    const bankExists = await Bank.findOne(bankQuery);
     if (!bankExists) {
       return res.status(400).json({ 
         success: false,
@@ -213,7 +234,7 @@ router.post('/', [
 
     // Create bank receipt
     const bankReceiptData = {
-      tenantId: req.tenantId || req.user.tenantId,
+      tenantId: tenantId,
       date: date ? new Date(date) : new Date(),
       amount: parseFloat(amount),
       particular: particular ? particular.trim() : 'Bank Receipt',
@@ -302,8 +323,9 @@ router.get('/summary/date-range', [
     }
 
     const { fromDate, toDate } = req.query;
+    const tenantId = req.tenantId || req.user?.tenantId;
 
-    const summary = await bankReceiptService.getSummary(fromDate, toDate);
+    const summary = await bankReceiptService.getSummary(fromDate, toDate, tenantId);
 
     res.json({
       success: true,

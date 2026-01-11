@@ -81,15 +81,21 @@ class CashReceiptRepository extends BaseRepository {
    * Get cash receipt summary by date range
    * @param {Date} fromDate - Start date
    * @param {Date} toDate - End date
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<object>}
    */
-  async getSummary(fromDate, toDate) {
+  async getSummary(fromDate, toDate, tenantId = null) {
     const match = {
       date: {
         $gte: fromDate,
         $lt: toDate
       }
     };
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      match.tenantId = tenantId;
+    }
 
     const summary = await this.Model.aggregate([
       { $match: match },

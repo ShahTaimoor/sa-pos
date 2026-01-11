@@ -67,8 +67,15 @@ router.get('/', [auth, tenantMiddleware], async (req, res) => {
       search
     } = req.query;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+
     // Build filter object
     const filter = {};
+    
+    // Add tenant filter for multi-tenant isolation
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
     
     if (status) filter.status = status;
     if (supplier) filter.supplier = supplier;
@@ -166,7 +173,15 @@ router.get('/stats', auth, async (req, res) => {
 // @access  Private
 router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const transaction = await dropShippingRepository.findById(req.params.id, {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Build query with tenant filter
+    const query = { _id: req.params.id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const transaction = await dropShippingRepository.findOne(query, {
       populate: [
         { path: 'supplier', select: 'companyName contactPerson email phone businessType currentBalance pendingBalance' },
         { path: 'customer', select: 'displayName firstName lastName email phone businessType currentBalance pendingBalance creditLimit' },
@@ -223,9 +238,12 @@ router.post('/', [
       return res.status(400).json({ message: 'One or more products not found' });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+
     // Build transaction data
     const transactionData = {
       ...req.body,
+      tenantId: tenantId,
       supplierInfo: {
         companyName: supplier.companyName,
         contactPerson: supplier.contactPerson?.name || '',
@@ -304,7 +322,15 @@ router.put('/:id', [
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const transaction = await dropShippingRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Build query with tenant filter
+    const query = { _id: req.params.id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const transaction = await dropShippingRepository.findOne(query);
     
     if (!transaction) {
       return res.status(404).json({ message: 'Drop shipping transaction not found' });
@@ -395,7 +421,15 @@ router.delete('/:id', [
   requirePermission('delete_drop_shipping')
 ], async (req, res) => {
   try {
-    const transaction = await dropShippingRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Build query with tenant filter
+    const query = { _id: req.params.id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const transaction = await dropShippingRepository.findOne(query);
     
     if (!transaction) {
       return res.status(404).json({ message: 'Drop shipping transaction not found' });
@@ -433,7 +467,15 @@ router.put('/:id/status', [
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const transaction = await dropShippingRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    // Build query with tenant filter
+    const query = { _id: req.params.id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    
+    const transaction = await dropShippingRepository.findOne(query);
     
     if (!transaction) {
       return res.status(404).json({ message: 'Drop shipping transaction not found' });
