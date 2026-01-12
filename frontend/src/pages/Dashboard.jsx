@@ -47,24 +47,24 @@ import { usePeriodComparison } from '../hooks/usePeriodComparison';
 import DashboardReportModal from '../components/DashboardReportModal';
 
 const StatCard = ({ title, value, icon: Icon, color, change, changeType }) => (
-  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 h-full">
-    <div className="text-center flex flex-col justify-center items-center h-full">
-      <div className="flex justify-center mb-3">
-        <div className={`p-3 rounded-full ${color}`}>
-          <Icon className="h-6 w-6 text-white" />
+  <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-3 sm:p-4 w-full min-h-0">
+    <div className="text-center flex flex-col justify-center items-center w-full">
+      <div className="flex justify-center mb-2 sm:mb-3">
+        <div className={`p-2 sm:p-3 rounded-full ${color}`}>
+          <Icon className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
         </div>
       </div>
-      <p className="text-sm font-medium text-gray-600 mb-1">{title}</p>
-      <p className="text-2xl font-semibold text-gray-900 mb-1">{value}</p>
-      <div className="h-5 flex items-center justify-center space-x-1">
+      <p className="text-xs sm:text-sm font-medium text-gray-600 mb-1 break-words">{title}</p>
+      <p className="text-lg sm:text-xl md:text-2xl font-semibold text-gray-900 mb-1 break-words">{value}</p>
+      <div className="min-h-[1.25rem] flex items-center justify-center space-x-1">
         {change && (
           <>
             {changeType === 'positive' && (
-              <svg className="h-4 w-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="h-3 w-3 sm:h-4 sm:w-4 text-green-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
               </svg>
             )}
-            <p className={`text-sm font-medium ${changeType === 'positive' ? 'text-green-600' : 'text-gray-600'}`}>
+            <p className={`text-xs sm:text-sm font-medium ${changeType === 'positive' ? 'text-green-600' : 'text-gray-600'} break-words`}>
               {changeType === 'positive' ? '+' : ''}{change}
             </p>
           </>
@@ -212,8 +212,8 @@ export const Dashboard = () => {
       salesInvoicesLoading || purchaseInvoicesLoading || cashReceiptsLoading || 
       cashPaymentsLoading || bankReceiptsLoading || bankPaymentsLoading || recurringExpensesLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
+      <div className="flex items-center justify-center min-h-[12rem] sm:min-h-[16rem] w-full">
+        <div className="animate-spin rounded-full h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12 border-b-2 border-primary-600"></div>
       </div>
     );
   }
@@ -699,54 +699,54 @@ export const Dashboard = () => {
   const reportData = getReportData();
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600">Welcome back! Here's what's happening today.</p>
+    <div className="space-y-4 sm:space-y-5 md:space-y-6 w-full max-w-full overflow-x-hidden">
+      <div className="w-full">
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 break-words">Dashboard</h1>
+        <p className="text-sm sm:text-base text-gray-600 break-words">Welcome back! Here's what's happening today.</p>
       </div>
 
       {upcomingRecurringExpenses.length > 0 && (
-        <div className="card">
-          <div className="card-header flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-medium text-gray-900 flex items-center space-x-2">
-                <Bell className="h-5 w-5 text-primary-600" />
+        <div className="card w-full overflow-hidden">
+          <div className="card-header flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+            <div className="w-full sm:w-auto">
+              <h2 className="text-base sm:text-lg font-medium text-gray-900 flex items-center space-x-2 break-words">
+                <Bell className="h-4 w-4 sm:h-5 sm:w-5 text-primary-600 flex-shrink-0" />
                 <span>Upcoming Monthly Obligations</span>
               </h2>
-              <p className="text-sm text-gray-600">
+              <p className="text-xs sm:text-sm text-gray-600 break-words mt-1">
                 Stay ahead of salaries, rent, and other committed expenses.
               </p>
             </div>
           </div>
-          <div className="card-content">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="card-content overflow-visible">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
               {upcomingRecurringExpenses.slice(0, 4).map((expense) => {
                 const daysLeft = calculateDaysUntilDue(expense.nextDueDate);
                 const isOverdue = typeof daysLeft === 'number' && daysLeft < 0;
                 return (
                   <div
                     key={expense._id}
-                    className={`border rounded-lg p-4 shadow-sm ${
+                    className={`border rounded-lg p-3 sm:p-4 shadow-sm w-full min-w-0 ${
                       isOverdue ? 'border-danger-200 bg-danger-50/60' : 'border-gray-200 bg-white'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 break-words">
                         {expense.defaultPaymentType === 'bank' ? 'Bank Payment' : 'Cash Payment'}
                       </span>
                     </div>
-                    <h3 className="text-base font-semibold text-gray-900">{expense.name}</h3>
-                    <p className="text-sm text-gray-600">{getRecurringPayeeName(expense)}</p>
-                    <p className="text-lg font-bold text-gray-900 mt-2">
+                    <h3 className="text-sm sm:text-base font-semibold text-gray-900 break-words">{expense.name}</h3>
+                    <p className="text-xs sm:text-sm text-gray-600 break-words">{getRecurringPayeeName(expense)}</p>
+                    <p className="text-base sm:text-lg font-bold text-gray-900 mt-2 break-words">
                       {formatCurrency(expense.amount)}
                     </p>
-                    <div className="mt-2 text-sm text-gray-600 flex items-center space-x-2">
-                      <Calendar className="h-4 w-4 text-gray-400" />
-                      <span>Due {formatDate(expense.nextDueDate)}</span>
+                    <div className="mt-2 text-xs sm:text-sm text-gray-600 flex items-center space-x-2 min-w-0">
+                      <Calendar className="h-3 w-3 sm:h-4 sm:w-4 text-gray-400 flex-shrink-0" />
+                      <span className="break-words">Due {formatDate(expense.nextDueDate)}</span>
                     </div>
                     <div className="mt-2">
                       <span
-                        className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${
+                        className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full break-words ${
                           isOverdue
                             ? 'bg-danger-100 text-danger-700'
                             : 'bg-primary-100 text-primary-700'
@@ -769,204 +769,204 @@ export const Dashboard = () => {
       )}
 
       {/* Financial Dashboard */}
-      <div className="card">
+      <div className="card w-full overflow-hidden">
         <div className="card-header">
-          <div className="flex flex-col items-center space-y-4">
-            <h2 className="text-lg font-medium text-gray-900">Financial Overview</h2>
-            <div className="flex flex-col sm:flex-row items-center space-y-3 sm:space-y-0 sm:space-x-6">
-              <div className="flex items-center space-x-3">
-                <Calendar className="h-4 w-4 text-gray-500" />
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium text-gray-600">From:</label>
+          <div className="flex flex-col items-center space-y-3 sm:space-y-4 w-full">
+            <h2 className="text-base sm:text-lg font-medium text-gray-900 break-words text-center">Financial Overview</h2>
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center space-y-3 sm:space-y-0 sm:space-x-3 md:space-x-6 w-full sm:w-auto">
+              <div className="grid grid-cols-2 sm:flex sm:flex-row items-stretch sm:items-center gap-2 sm:gap-x-2 md:gap-x-3 w-full sm:w-auto">
+                <Calendar className="h-4 w-4 text-gray-500 hidden sm:block flex-shrink-0" />
+                <div className="flex flex-col items-stretch sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-2 w-full sm:w-auto">
+                  <label className="text-xs sm:text-sm font-medium text-gray-600 sm:whitespace-nowrap">From:</label>
                   <input
                     type="date"
                     value={fromDate}
                     onChange={(e) => setFromDate(e.target.value)}
-                    className="input text-sm w-40"
+                    className="input text-xs sm:text-sm w-full sm:w-auto min-w-0 sm:min-w-[8rem] md:min-w-[10rem]"
                   />
                 </div>
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm font-medium text-gray-600">To:</label>
+                <div className="flex flex-col items-stretch sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-2 w-full sm:w-auto">
+                  <label className="text-xs sm:text-sm font-medium text-gray-600 sm:whitespace-nowrap">To:</label>
                   <input
                     type="date"
                     value={toDate}
                     onChange={(e) => setToDate(e.target.value)}
-                    className="input text-sm w-40"
+                    className="input text-xs sm:text-sm w-full sm:w-auto min-w-0 sm:min-w-[8rem] md:min-w-[10rem]"
                   />
                 </div>
               </div>
               <button 
                 onClick={handleSearch}
-                className="btn btn-primary flex items-center space-x-2 px-4 py-2"
+                className="btn btn-primary flex items-center justify-center space-x-2 px-3 sm:px-4 py-2 w-full sm:w-auto whitespace-nowrap"
               >
-                <Search className="h-4 w-4" />
-                <span>Search</span>
+                <Search className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
+                <span className="text-xs sm:text-sm">Search</span>
               </button>
             </div>
           </div>
         </div>
-        <div className="card-content space-y-6">
+        <div className="card-content space-y-4 sm:space-y-5 md:space-y-6 overflow-visible">
           
           {/* REVENUE, COST & DISCOUNT SECTION */}
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Revenue, Cost & Discounts</h3>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-5 lg:grid-cols-5">
+          <div className="w-full overflow-visible">
+            <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3 uppercase tracking-wide break-words">Revenue, Cost & Discounts</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
             
             {/* Sales */}
             <div 
-              className="text-center p-4 border-2 border-green-300 bg-green-50 rounded-lg cursor-pointer hover:bg-green-100 hover:border-green-400 transition-colors"
+              className="text-center p-3 sm:p-4 border-2 border-green-300 bg-green-50 rounded-lg cursor-pointer hover:bg-green-100 hover:border-green-400 transition-colors w-full min-w-0 overflow-hidden"
               onClick={() => openReportModal('sales', 'Sales Revenue Report')}
             >
               <div className="flex justify-center mb-2">
-                <div className="p-3 bg-green-500 rounded-full">
-                  <CreditCard className="h-6 w-6 text-white" />
+                <div className="p-2 sm:p-3 bg-green-500 rounded-full">
+                  <CreditCard className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
                 </div>
               </div>
-              <p className="text-sm font-medium text-green-700 mb-1">Sales (Revenue)</p>
-              <p className="text-xl font-bold text-green-800">{Math.round(totalSales).toLocaleString()}</p>
-              <p className="text-xs text-green-600 mt-1">SO: {Math.round(salesOrdersTotal)} | SI: {Math.round(salesInvoicesTotal)}</p>
+              <p className="text-xs sm:text-sm font-medium text-green-700 mb-1 break-words">Sales (Revenue)</p>
+              <p className="text-base sm:text-lg md:text-xl font-bold text-green-800 break-words">{Math.round(totalSales).toLocaleString()}</p>
+              <p className="text-xs text-green-600 mt-1 break-words">SO: {Math.round(salesOrdersTotal)} | SI: {Math.round(salesInvoicesTotal)}</p>
             </div>
 
             {/* Purchase (COGS) */}
             <div 
-              className="text-center p-4 border-2 border-purple-300 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 hover:border-purple-400 transition-colors"
+              className="text-center p-3 sm:p-4 border-2 border-purple-300 bg-purple-50 rounded-lg cursor-pointer hover:bg-purple-100 hover:border-purple-400 transition-colors w-full min-w-0 overflow-hidden"
               onClick={() => openReportModal('purchases', 'Purchase Cost Report')}
             >
               <div className="flex justify-center mb-2">
-                <div className="p-3 bg-purple-500 rounded-full">
-                  <Truck className="h-6 w-6 text-white" />
+                <div className="p-2 sm:p-3 bg-purple-500 rounded-full">
+                  <Truck className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
                 </div>
               </div>
-              <p className="text-sm font-medium text-purple-700 mb-1">Purchase (COGS)</p>
-              <p className="text-xl font-bold text-purple-800">{Math.round(totalPurchases).toLocaleString()}</p>
-              <p className="text-xs text-purple-600 mt-1">PO: {Math.round(purchaseOrdersTotal)} | PI: {Math.round(purchaseInvoicesTotal)}</p>
+              <p className="text-xs sm:text-sm font-medium text-purple-700 mb-1 break-words">Purchase (COGS)</p>
+              <p className="text-base sm:text-lg md:text-xl font-bold text-purple-800 break-words">{Math.round(totalPurchases).toLocaleString()}</p>
+              <p className="text-xs text-purple-600 mt-1 break-words">PO: {Math.round(purchaseOrdersTotal)} | PI: {Math.round(purchaseInvoicesTotal)}</p>
             </div>
 
             {/* Discount */}
             <div 
-              className="text-center p-4 border-2 border-red-300 bg-red-50 rounded-lg cursor-pointer hover:bg-red-100 hover:border-red-400 transition-colors"
+              className="text-center p-3 sm:p-4 border-2 border-red-300 bg-red-50 rounded-lg cursor-pointer hover:bg-red-100 hover:border-red-400 transition-colors w-full min-w-0 overflow-hidden"
               onClick={() => openReportModal('discounts', 'Discount Report')}
             >
               <div className="flex justify-center mb-2">
-                <div className="p-3 bg-red-500 rounded-full">
-                  <Tag className="h-6 w-6 text-white" />
+                <div className="p-2 sm:p-3 bg-red-500 rounded-full">
+                  <Tag className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
                 </div>
               </div>
-              <p className="text-sm font-medium text-red-700 mb-1">Discount Given</p>
-              <p className="text-xl font-bold text-red-800">{Math.round(totalDiscounts).toLocaleString()}</p>
+              <p className="text-xs sm:text-sm font-medium text-red-700 mb-1 break-words">Discount Given</p>
+              <p className="text-base sm:text-lg md:text-xl font-bold text-red-800 break-words">{Math.round(totalDiscounts).toLocaleString()}</p>
             </div>
 
              {/* Pending Sales Orders */}
              <div 
-               className="text-center p-4 border-2 border-cyan-300 bg-cyan-50 rounded-lg cursor-pointer hover:bg-cyan-100 hover:border-cyan-400 transition-colors"
+               className="text-center p-3 sm:p-4 border-2 border-cyan-300 bg-cyan-50 rounded-lg cursor-pointer hover:bg-cyan-100 hover:border-cyan-400 transition-colors w-full min-w-0 overflow-hidden"
                onClick={() => openReportModal('pending-sales-orders', 'Pending Sales Orders Report')}
              >
                <div className="flex justify-center mb-2">
-                 <div className="p-3 bg-cyan-500 rounded-full">
-                   <FileText className="h-6 w-6 text-white" />
+                 <div className="p-2 sm:p-3 bg-cyan-500 rounded-full">
+                   <FileText className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
                  </div>
                </div>
-               <p className="text-sm font-medium text-cyan-700 mb-1">Pending Sales Orders</p>
-               <p className="text-xl font-bold text-cyan-800">{pendingSalesOrdersCount}</p>
+               <p className="text-xs sm:text-sm font-medium text-cyan-700 mb-1 break-words">Pending Sales Orders</p>
+               <p className="text-base sm:text-lg md:text-xl font-bold text-cyan-800 break-words">{pendingSalesOrdersCount}</p>
              </div>
  
              {/* Pending Purchase Orders */}
              <div 
-               className="text-center p-4 border-2 border-indigo-300 bg-indigo-50 rounded-lg cursor-pointer hover:bg-indigo-100 hover:border-indigo-400 transition-colors"
+               className="text-center p-3 sm:p-4 border-2 border-indigo-300 bg-indigo-50 rounded-lg cursor-pointer hover:bg-indigo-100 hover:border-indigo-400 transition-colors w-full min-w-0 overflow-hidden"
                onClick={() => openReportModal('pending-purchase-orders', 'Pending Purchase Orders Report')}
              >
                <div className="flex justify-center mb-2">
-                 <div className="p-3 bg-indigo-500 rounded-full">
-                   <Receipt className="h-6 w-6 text-white" />
+                 <div className="p-2 sm:p-3 bg-indigo-500 rounded-full">
+                   <Receipt className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
                  </div>
                </div>
-               <p className="text-sm font-medium text-indigo-700 mb-1">Pending Purchase Orders</p>
-               <p className="text-xl font-bold text-indigo-800">{pendingPurchaseOrdersCount}</p>
+               <p className="text-xs sm:text-sm font-medium text-indigo-700 mb-1 break-words">Pending Purchase Orders</p>
+               <p className="text-base sm:text-lg md:text-xl font-bold text-indigo-800 break-words">{pendingPurchaseOrdersCount}</p>
              </div>
             </div>
           </div>
           
           {/* PROFITABILITY & CASH FLOW SECTION */}
-          <div>
-            <h3 className="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Profitability & Cash Flow</h3>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="w-full overflow-visible">
+            <h3 className="text-xs sm:text-sm font-semibold text-gray-700 mb-2 sm:mb-3 uppercase tracking-wide break-words">Profitability & Cash Flow</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
             
             {/* Gross Profit */}
             <div 
-              className="text-center p-4 border-2 border-blue-300 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 hover:border-blue-400 transition-colors"
+              className="text-center p-3 sm:p-4 border-2 border-blue-300 bg-blue-50 rounded-lg cursor-pointer hover:bg-blue-100 hover:border-blue-400 transition-colors w-full min-w-0 overflow-hidden"
               onClick={() => openReportModal('gross-profit', 'Gross Profit Report')}
             >
               <div className="flex justify-center mb-2">
-                <div className="p-3 bg-blue-500 rounded-full">
-                  <BarChart3 className="h-6 w-6 text-white" />
+                <div className="p-2 sm:p-3 bg-blue-500 rounded-full">
+                  <BarChart3 className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
                 </div>
               </div>
-              <p className="text-sm font-medium text-gray-700 mb-1">Gross Profit</p>
-              <p className={`text-xl font-bold ${grossProfit >= 0 ? 'text-blue-700' : 'text-red-600'}`}>
+              <p className="text-xs sm:text-sm font-medium text-gray-700 mb-1 break-words">Gross Profit</p>
+              <p className={`text-base sm:text-lg md:text-xl font-bold break-words ${grossProfit >= 0 ? 'text-blue-700' : 'text-red-600'}`}>
                 {Math.round(grossProfit).toLocaleString()}
               </p>
-              <p className="text-xs text-gray-600 mt-1">Revenue - COGS</p>
+              <p className="text-xs text-gray-600 mt-1 break-words">Revenue - COGS</p>
             </div>
             
             {/* Total Receipts */}
             <div 
-              className="text-center p-4 border-2 border-emerald-300 bg-emerald-50 rounded-lg cursor-pointer hover:bg-emerald-100 hover:border-emerald-400 transition-colors"
+              className="text-center p-3 sm:p-4 border-2 border-emerald-300 bg-emerald-50 rounded-lg cursor-pointer hover:bg-emerald-100 hover:border-emerald-400 transition-colors w-full min-w-0 overflow-hidden"
               onClick={() => openReportModal('receipts', 'Total Receipts Report')}
             >
               <div className="flex justify-center mb-2">
-                <div className="p-3 bg-emerald-500 rounded-full">
-                  <Receipt className="h-6 w-6 text-white" />
+                <div className="p-2 sm:p-3 bg-emerald-500 rounded-full">
+                  <Receipt className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
                 </div>
               </div>
-              <p className="text-sm font-medium text-emerald-700 mb-1">Total Receipts</p>
-              <p className="text-xl font-bold text-emerald-800">{Math.round(totalReceipts).toLocaleString()}</p>
-              <p className="text-xs text-emerald-600 mt-1">Cash: {Math.round(totalCashReceipts)} | Bank: {Math.round(totalBankReceipts)}</p>
+              <p className="text-xs sm:text-sm font-medium text-emerald-700 mb-1 break-words">Total Receipts</p>
+              <p className="text-base sm:text-lg md:text-xl font-bold text-emerald-800 break-words">{Math.round(totalReceipts).toLocaleString()}</p>
+              <p className="text-xs text-emerald-600 mt-1 break-words">Cash: {Math.round(totalCashReceipts)} | Bank: {Math.round(totalBankReceipts)}</p>
             </div>
             
             {/* Total Payments */}
             <div 
-              className="text-center p-4 border-2 border-orange-300 bg-orange-50 rounded-lg cursor-pointer hover:bg-orange-100 hover:border-orange-400 transition-colors"
+              className="text-center p-3 sm:p-4 border-2 border-orange-300 bg-orange-50 rounded-lg cursor-pointer hover:bg-orange-100 hover:border-orange-400 transition-colors w-full min-w-0 overflow-hidden"
               onClick={() => openReportModal('payments', 'Total Payments Report')}
             >
               <div className="flex justify-center mb-2">
-                <div className="p-3 bg-orange-500 rounded-full">
-                  <Banknote className="h-6 w-6 text-white" />
+                <div className="p-2 sm:p-3 bg-orange-500 rounded-full">
+                  <Banknote className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
                 </div>
               </div>
-              <p className="text-sm font-medium text-orange-700 mb-1">Total Payments</p>
-              <p className="text-xl font-bold text-orange-800">{Math.round(totalPayments).toLocaleString()}</p>
-              <p className="text-xs text-orange-600 mt-1">Cash: {Math.round(totalCashPayments)} | Bank: {Math.round(totalBankPayments)}</p>
+              <p className="text-xs sm:text-sm font-medium text-orange-700 mb-1 break-words">Total Payments</p>
+              <p className="text-base sm:text-lg md:text-xl font-bold text-orange-800 break-words">{Math.round(totalPayments).toLocaleString()}</p>
+              <p className="text-xs text-orange-600 mt-1 break-words">Cash: {Math.round(totalCashPayments)} | Bank: {Math.round(totalBankPayments)}</p>
             </div>
             
             {/* Net Cash Flow */}
             <div 
-              className={`text-center p-4 border-2 rounded-lg cursor-pointer transition-colors ${netCashFlow >= 0 ? 'border-green-300 bg-green-50 hover:bg-green-100 hover:border-green-400' : 'border-red-300 bg-red-50 hover:bg-red-100 hover:border-red-400'}`}
+              className={`text-center p-3 sm:p-4 border-2 rounded-lg cursor-pointer transition-colors w-full min-w-0 overflow-hidden ${netCashFlow >= 0 ? 'border-green-300 bg-green-50 hover:bg-green-100 hover:border-green-400' : 'border-red-300 bg-red-50 hover:bg-red-100 hover:border-red-400'}`}
               onClick={() => openReportModal('net-cash-flow', 'Net Cash Flow Report')}
             >
               <div className="flex justify-center mb-2">
-                <div className={`p-3 rounded-full ${netCashFlow >= 0 ? 'bg-green-500' : 'bg-red-500'}`}>
-                  <Wallet className="h-6 w-6 text-white" />
+                <div className={`p-2 sm:p-3 rounded-full ${netCashFlow >= 0 ? 'bg-green-500' : 'bg-red-500'}`}>
+                  <Wallet className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
                 </div>
               </div>
-              <p className="text-sm font-medium text-gray-700 mb-1">Net Cash Flow</p>
-              <p className={`text-xl font-bold ${netCashFlow >= 0 ? 'text-green-700' : 'text-red-600'}`}>
+              <p className="text-xs sm:text-sm font-medium text-gray-700 mb-1 break-words">Net Cash Flow</p>
+              <p className={`text-base sm:text-lg md:text-xl font-bold break-words ${netCashFlow >= 0 ? 'text-green-700' : 'text-red-600'}`}>
                 {Math.round(netCashFlow).toLocaleString()}
               </p>
-              <p className="text-xs text-gray-600 mt-1">Receipts - Payments</p>
+              <p className="text-xs text-gray-600 mt-1 break-words">Receipts - Payments</p>
             </div>
             
             {/* Total Orders */}
             <div 
-              className="text-center p-4 border-2 border-yellow-300 bg-yellow-50 rounded-lg cursor-pointer hover:bg-yellow-100 hover:border-yellow-400 transition-colors"
+              className="text-center p-3 sm:p-4 border-2 border-yellow-300 bg-yellow-50 rounded-lg cursor-pointer hover:bg-yellow-100 hover:border-yellow-400 transition-colors w-full min-w-0 overflow-hidden"
               onClick={() => openReportModal('transactions', 'Total Transactions Report')}
             >
               <div className="flex justify-center mb-2">
-                <div className="p-3 bg-yellow-500 rounded-full">
-                  <ShoppingCart className="h-6 w-6 text-white" />
+                <div className="p-2 sm:p-3 bg-yellow-500 rounded-full">
+                  <ShoppingCart className="h-4 w-4 sm:h-5 sm:w-5 md:h-6 md:w-6 text-white" />
                 </div>
               </div>
-              <p className="text-sm font-medium text-yellow-700 mb-1">Total Transactions</p>
-              <p className="text-xl font-bold text-yellow-800">{summary.totalOrders || 0}</p>
+              <p className="text-xs sm:text-sm font-medium text-yellow-700 mb-1 break-words">Total Transactions</p>
+              <p className="text-base sm:text-lg md:text-xl font-bold text-yellow-800 break-words">{summary.totalOrders || 0}</p>
             </div>
             
             </div>
@@ -975,7 +975,7 @@ export const Dashboard = () => {
       </div>
 
       {/* Stats Grid - Single Row */}
-      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-7">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 sm:gap-4 md:gap-5 w-full">
         <StatCard
           title="Today's Revenue"
           value={`${summary.totalRevenue?.toFixed(2) || '0.00'}`}
@@ -1071,67 +1071,67 @@ export const Dashboard = () => {
       />
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 md:gap-6 w-full">
         {/* Recent Orders */}
-        <div className="card">
+        <div className="card w-full overflow-hidden">
           <div className="card-header">
-            <h3 className="text-lg font-medium text-gray-900">Today's Orders</h3>
+            <h3 className="text-base sm:text-lg font-medium text-gray-900 break-words">Today's Orders</h3>
           </div>
-          <div className="card-content">
+          <div className="card-content overflow-visible">
             {summary.orderTypes ? (
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Retail Orders</span>
-                  <span className="font-medium">{summary.orderTypes.retail || 0}</span>
+              <div className="space-y-2 sm:space-y-3">
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-xs sm:text-sm text-gray-600 break-words">Retail Orders</span>
+                  <span className="font-medium text-xs sm:text-sm whitespace-nowrap">{summary.orderTypes.retail || 0}</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Wholesale Orders</span>
-                  <span className="font-medium">{summary.orderTypes.wholesale || 0}</span>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-xs sm:text-sm text-gray-600 break-words">Wholesale Orders</span>
+                  <span className="font-medium text-xs sm:text-sm whitespace-nowrap">{summary.orderTypes.wholesale || 0}</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Returns</span>
-                  <span className="font-medium">{summary.orderTypes.return || 0}</span>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-xs sm:text-sm text-gray-600 break-words">Returns</span>
+                  <span className="font-medium text-xs sm:text-sm whitespace-nowrap">{summary.orderTypes.return || 0}</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600">Exchanges</span>
-                  <span className="font-medium">{summary.orderTypes.exchange || 0}</span>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-xs sm:text-sm text-gray-600 break-words">Exchanges</span>
+                  <span className="font-medium text-xs sm:text-sm whitespace-nowrap">{summary.orderTypes.exchange || 0}</span>
                 </div>
               </div>
             ) : (
-              <p className="text-gray-500">No orders today</p>
+              <p className="text-xs sm:text-sm text-gray-500 break-words">No orders today</p>
             )}
           </div>
         </div>
 
         {/* Low Stock Alert */}
-        <div className="card">
+        <div className="card w-full overflow-hidden">
           <div className="card-header">
-            <h3 className="text-lg font-medium text-gray-900">Low Stock Alert</h3>
+            <h3 className="text-base sm:text-lg font-medium text-gray-900 break-words">Low Stock Alert</h3>
           </div>
-          <div className="card-content">
+          <div className="card-content overflow-visible">
             {lowStockCount > 0 ? (
               <div className="space-y-2">
-                <p className="text-sm text-gray-600">
+                <p className="text-xs sm:text-sm text-gray-600 break-words">
                   {lowStockCount} products are running low on stock
                 </p>
                 <div className="space-y-1">
                   {lowStockData?.data?.products?.slice(0, 3).map((product) => (
-                    <div key={product._id} className="flex justify-between items-center text-sm">
-                      <span className="truncate">{product.name}</span>
-                      <span className="text-danger-600 font-medium">
+                    <div key={product._id} className="flex justify-between items-center text-xs sm:text-sm gap-2 min-w-0">
+                      <span className="truncate flex-1 min-w-0">{product.name}</span>
+                      <span className="text-danger-600 font-medium flex-shrink-0 whitespace-nowrap">
                         {product.inventory.currentStock} left
                       </span>
                     </div>
                   ))}
                 </div>
                 {lowStockCount > 3 && (
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-gray-500 break-words">
                     And {lowStockCount - 3} more...
                   </p>
                 )}
               </div>
             ) : (
-              <p className="text-success-600">All products are well stocked!</p>
+              <p className="text-xs sm:text-sm text-success-600 break-words">All products are well stocked!</p>
             )}
           </div>
         </div>
@@ -1139,16 +1139,16 @@ export const Dashboard = () => {
 
       {/* Payment Methods */}
       {summary.paymentMethods && (
-        <div className="card">
+        <div className="card w-full overflow-hidden">
           <div className="card-header">
-            <h3 className="text-lg font-medium text-gray-900">Payment Methods Today</h3>
+            <h3 className="text-base sm:text-lg font-medium text-gray-900 break-words">Payment Methods Today</h3>
           </div>
-          <div className="card-content">
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div className="card-content overflow-visible">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
               {Object.entries(summary.paymentMethods).map(([method, count]) => (
-                <div key={method} className="text-center">
-                  <p className="text-2xl font-semibold text-gray-900">{count}</p>
-                  <p className="text-sm text-gray-600 capitalize">
+                <div key={method} className="text-center w-full min-w-0">
+                  <p className="text-xl sm:text-2xl font-semibold text-gray-900 break-words">{count}</p>
+                  <p className="text-xs sm:text-sm text-gray-600 capitalize break-words">
                     {method.replace('_', ' ')}
                   </p>
                 </div>
@@ -1159,10 +1159,10 @@ export const Dashboard = () => {
       )}
       
       {/* Financial Metrics Legend */}
-      <div className="card bg-blue-50 border-blue-200">
-        <div className="card-content">
-          <h3 className="text-sm font-semibold text-blue-900 mb-3">📊 Financial Metrics Explained</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-xs text-blue-800">
+      <div className="card bg-blue-50 border-blue-200 w-full overflow-hidden">
+        <div className="card-content overflow-visible">
+          <h3 className="text-xs sm:text-sm font-semibold text-blue-900 mb-2 sm:mb-3 break-words">📊 Financial Metrics Explained</h3>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 text-xs text-blue-800">
             <div><strong>Sales:</strong> Total revenue from Sales Orders + Sales Invoices</div>
             <div><strong>Net Revenue:</strong> Sales minus discounts given</div>
             <div><strong>Purchase (COGS):</strong> Cost of goods purchased from suppliers</div>
@@ -1170,7 +1170,7 @@ export const Dashboard = () => {
             <div><strong>Receipts:</strong> Cash/Bank money received (includes sales + customer payments)</div>
             <div><strong>Payments:</strong> Cash/Bank money paid (includes supplier payments + expenses)</div>
             <div><strong>Net Cash Flow:</strong> Total receipts minus total payments (cash position)</div>
-            <div className="md:col-span-2 lg:col-span-3 mt-2 p-2 bg-yellow-100 border border-yellow-300 rounded">
+            <div className="sm:col-span-2 lg:col-span-3 mt-2 p-2 sm:p-3 bg-yellow-100 border border-yellow-300 rounded break-words">
               <strong>⚠️ Note:</strong> Receipts/Payments may include both sales/purchases AND separate cash/bank transactions. For accurate accounting, check individual transaction pages.
             </div>
           </div>

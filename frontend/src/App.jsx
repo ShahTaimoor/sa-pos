@@ -8,7 +8,6 @@ import { Layout } from './components/Layout';
 import { MultiTabLayout } from './components/MultiTabLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import NetworkStatus from './components/NetworkStatus';
-import PWAUpdateNotification from './components/PWAUpdateNotification';
 import OfflineIndicator from './components/OfflineIndicator';
 import { LoadingPage } from './components/LoadingSpinner';
 
@@ -71,7 +70,6 @@ function App() {
       <ErrorProvider>
           <TabProvider>
             <NetworkStatus />
-            <PWAUpdateNotification />
             <OfflineIndicator />
             <Routes>
               <Route path="/login" element={<Login />} />

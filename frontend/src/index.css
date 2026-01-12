@@ -53,15 +53,15 @@
   }
   
   .card {
-    @apply rounded-lg border border-gray-200 bg-white shadow-soft;
+    @apply rounded-lg border border-gray-200 bg-white shadow-soft w-full max-w-full;
   }
-  
+
   .card-header {
-    @apply flex flex-col space-y-1.5 p-6;
+    @apply flex flex-col space-y-1.5 p-4 sm:p-5 md:p-6;
   }
-  
+
   .card-content {
-    @apply p-6 pt-0;
+    @apply p-4 sm:p-5 md:p-6 pt-0;
   }
   
   .badge {

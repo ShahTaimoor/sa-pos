@@ -2157,39 +2157,39 @@ const totalProfit = useMemo(() => {
 
           {/* Cart Items */}
           {formData.items.length === 0 ? (
-            <div className="p-8 text-center text-gray-500 border-t border-gray-200">
-              <ShoppingCart className="mx-auto h-12 w-12 text-gray-400" />
-              <p className="mt-2">No items in cart</p>
+            <div className="p-4 sm:p-6 md:p-8 text-center text-gray-500 border-t border-gray-200">
+              <ShoppingCart className="mx-auto h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12 text-gray-400" />
+              <p className="mt-2 text-sm sm:text-base">No items in cart</p>
             </div>
           ) : (
-            <div className="space-y-4 border-t border-gray-200 pt-6">
-              <div className="flex items-center justify-between mb-4">
-                <h4 className="text-md font-medium text-gray-700">Cart Items</h4>
-                <div className="flex items-center space-x-3">
+            <div className="space-y-3 sm:space-y-4 border-t border-gray-200 pt-4 sm:pt-6 overflow-x-auto">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3 mb-3 sm:mb-4">
+                <h4 className="text-sm sm:text-base md:text-md font-medium text-gray-700 break-words">Cart Items</h4>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
                   <LoadingButton
                     type="button"
                     onClick={handleSortCartItems}
                     isLoading={isSortingItems}
-                    className="btn btn-secondary btn-sm flex items-center space-x-2"
+                    className="btn btn-secondary btn-sm flex items-center justify-center gap-x-1 sm:gap-x-2 w-full sm:w-auto text-xs sm:text-sm"
                     title="Sort products alphabetically"
                   >
-                    <ArrowUpDown className="h-4 w-4" />
+                    <ArrowUpDown className="h-3 w-3 sm:h-4 sm:w-4 flex-shrink-0" />
                     <span>Sort A-Z</span>
                   </LoadingButton>
                   {isLastPricesApplied && Object.keys(priceStatus).length > 0 && (
-                    <div className="flex items-center space-x-3 text-xs">
-                      <span className="text-gray-600 font-medium">Price Status:</span>
-                      <div className="flex items-center space-x-1">
-                        <CheckCircle className="h-3 w-3 text-green-600" />
-                        <span className="text-gray-600">Updated</span>
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-[10px] sm:text-xs">
+                      <span className="text-gray-600 font-medium whitespace-nowrap">Price Status:</span>
+                      <div className="flex items-center gap-x-1">
+                        <CheckCircle className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-green-600 flex-shrink-0" />
+                        <span className="text-gray-600 whitespace-nowrap">Updated</span>
                       </div>
-                      <div className="flex items-center space-x-1">
-                        <Info className="h-3 w-3 text-blue-600" />
-                        <span className="text-gray-600">Same Price</span>
+                      <div className="flex items-center gap-x-1">
+                        <Info className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-blue-600 flex-shrink-0" />
+                        <span className="text-gray-600 whitespace-nowrap">Same Price</span>
                       </div>
-                      <div className="flex items-center space-x-1">
-                        <AlertCircle className="h-3 w-3 text-yellow-600" />
-                        <span className="text-gray-600">Not in Last Order</span>
+                      <div className="flex items-center gap-x-1">
+                        <AlertCircle className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-yellow-600 flex-shrink-0" />
+                        <span className="text-gray-600 whitespace-nowrap">Not in Last Order</span>
                       </div>
                     </div>
                   )}
@@ -2201,29 +2201,164 @@ const totalProfit = useMemo(() => {
                 const isLowStock = product?.inventory?.currentStock <= (product?.inventory?.reorderPoint || 0);
                 
                 return (
-                  <div key={index} className={`py-1 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}>
-                    {/* Structured Grid Layout - Following Purchase Orders Format */}
-                    <div className="grid grid-cols-12 gap-4 items-center">
+                  <div key={index} className={`py-2 sm:py-1 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} border border-gray-200 sm:border-0 rounded sm:rounded-none mb-2 sm:mb-0`}>
+                    {/* Mobile Layout - Stacked */}
+                    <div className="block sm:hidden space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">#{index + 1}</span>
+                            <span className="font-medium text-xs sm:text-sm truncate flex-1 min-w-0">
+                              {safeRender(product?.name) || 'Unknown Product'}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1 mt-1">
+                            {isLowStock && <span className="text-yellow-600 text-[10px] px-1 py-0.5 rounded bg-yellow-50">⚠️ Low Stock</span>}
+                            {lastPurchasePrices[item.product?.toString()] !== undefined && 
+                             item.unitPrice < lastPurchasePrices[item.product?.toString()] && (
+                              <span className="text-[10px] px-1 py-0.5 rounded bg-red-100 text-red-700 font-bold" title={`Sale price below cost! Loss: ${Math.round(lastPurchasePrices[item.product?.toString()] - item.unitPrice)} per unit`}>
+                                ⚠️ Below Cost
+                              </span>
+                            )}
+                            {isLastPricesApplied && priceStatus[item.product?.toString()] && (
+                              <span className={`text-[10px] px-1 py-0.5 rounded ${
+                                priceStatus[item.product?.toString()] === 'updated'
+                                  ? 'bg-green-100 text-green-700'
+                                  : priceStatus[item.product?.toString()] === 'unchanged'
+                                  ? 'bg-blue-100 text-blue-700'
+                                  : 'bg-yellow-100 text-yellow-700'
+                              }`}>
+                                {priceStatus[item.product?.toString()] === 'updated'
+                                  ? 'Updated'
+                                  : priceStatus[item.product?.toString()] === 'unchanged'
+                                  ? 'Same Price'
+                                  : 'Not in Last Order'}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <LoadingButton
+                          onClick={() => handleRemoveItem(index)}
+                          isLoading={isRemovingFromCart[formData.items[index]?.product?.toString() || index]}
+                          className="btn btn-danger btn-sm h-7 w-7 p-0 flex-shrink-0"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </LoadingButton>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <div className="flex flex-col">
+                          <label className="text-[10px] text-gray-500 mb-0.5">Stock</label>
+                          <span className="text-xs font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 text-center">
+                            {product?.inventory?.currentStock || 0}
+                          </span>
+                        </div>
+                        <div className="flex flex-col">
+                          <label className="text-[10px] text-gray-500 mb-0.5">Qty</label>
+                          <input
+                            type="number"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const newQuantity = parseInt(e.target.value) || 1;
+                              if (newQuantity <= 0) {
+                                handleRemoveItem(index);
+                                return;
+                              }
+                              setFormData(prev => ({
+                                ...prev,
+                                items: prev.items.map((itm, i) => 
+                                  i === index ? { ...itm, quantity: newQuantity, total: newQuantity * itm.unitPrice } : itm
+                                )
+                              }));
+                            }}
+                            className="input text-center h-7 text-xs"
+                            min="1"
+                          />
+                        </div>
+                        {showCostPrice && canViewCostPrice && (
+                          <div className="flex flex-col">
+                            <label className="text-[10px] text-gray-500 mb-0.5">Cost</label>
+                            <span className="text-xs font-semibold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 text-center" title="Last Purchase Price">
+                              {lastPurchasePrices[item.product?.toString()] !== undefined 
+                                ? `${Math.round(lastPurchasePrices[item.product?.toString()])}` 
+                                : 'N/A'}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex flex-col">
+                          <label className="text-[10px] text-gray-500 mb-0.5">Rate</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={item.unitPrice}
+                            onChange={(e) => {
+                              const newPrice = parseFloat(e.target.value) || 0;
+                              const costPrice = lastPurchasePrices[item.product?.toString()];
+                              
+                              if (costPrice !== undefined && newPrice < costPrice) {
+                                const loss = costPrice - newPrice;
+                                const lossPercent = ((loss / costPrice) * 100).toFixed(1);
+                                const shouldProceed = window.confirm(
+                                  `⚠️ WARNING: Sale price (${newPrice}) is below cost price (${Math.round(costPrice)}).\n\n` +
+                                  `Loss per unit: ${Math.round(loss)} (${lossPercent}%)\n` +
+                                  `Total loss: ${Math.round(loss * item.quantity)}\n\n` +
+                                  `Do you want to proceed?`
+                                );
+                                if (!shouldProceed) {
+                                  return;
+                                }
+                              }
+                              
+                              setFormData(prev => ({
+                                ...prev,
+                                items: prev.items.map((itm, i) => 
+                                  i === index ? { ...itm, unitPrice: newPrice, total: itm.quantity * newPrice } : itm
+                                )
+                              }));
+                            }}
+                            className={`input text-center h-7 text-xs ${
+                              lastPurchasePrices[item.product?.toString()] !== undefined && 
+                              item.unitPrice < lastPurchasePrices[item.product?.toString()] 
+                                ? 'border-red-500 bg-red-50' 
+                                : ''
+                            }`}
+                            title={
+                              lastPurchasePrices[item.product?.toString()] !== undefined && 
+                              item.unitPrice < lastPurchasePrices[item.product?.toString()] 
+                                ? `⚠️ WARNING: Sale price (${Math.round(item.unitPrice)}) is below cost price (${Math.round(lastPurchasePrices[item.product?.toString()])})`
+                                : ''
+                            }
+                            min="0"
+                          />
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center pt-1 border-t border-gray-200">
+                        <span className="text-[10px] text-gray-500">Total:</span>
+                        <span className="text-sm font-bold text-gray-900">{Math.round(totalPrice)}</span>
+                      </div>
+                    </div>
+
+                    {/* Desktop Layout - Grid */}
+                    <div className="hidden sm:grid grid-cols-12 gap-2 md:gap-4 items-center">
                       {/* Serial Number - 1 column */}
                       <div className="col-span-1">
-                        <span className="text-sm font-medium text-gray-700 bg-gray-50 px-0.5 py-1 rounded border border-gray-200 block text-center h-8 flex items-center justify-center">
+                        <span className="text-xs sm:text-sm font-medium text-gray-700 bg-gray-50 px-0.5 sm:px-1 py-1 rounded border border-gray-200 block text-center h-8 flex items-center justify-center">
                           {index + 1}
                         </span>
                       </div>
                       
                       {/* Product Name - 5 columns (reduced from 6 to accommodate Cost column when shown) */}
-                      <div className={`${showCostPrice && canViewCostPrice ? 'col-span-5' : 'col-span-6'} flex items-center h-8`}>
-                        <span className="font-medium text-sm truncate">
+                      <div className={`${showCostPrice && canViewCostPrice ? 'col-span-5' : 'col-span-6'} flex items-center h-8 min-w-0`}>
+                        <span className="font-medium text-xs sm:text-sm truncate break-words">
                           {safeRender(product?.name) || 'Unknown Product'}
-                          {isLowStock && <span className="text-yellow-600 text-xs ml-2">⚠️ Low Stock</span>}
+                          {isLowStock && <span className="text-yellow-600 text-[10px] sm:text-xs ml-1 sm:ml-2">⚠️ Low Stock</span>}
                           {lastPurchasePrices[item.product?.toString()] !== undefined && 
                            item.unitPrice < lastPurchasePrices[item.product?.toString()] && (
-                            <span className="text-xs ml-2 px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold" title={`Sale price below cost! Loss: ${Math.round(lastPurchasePrices[item.product?.toString()] - item.unitPrice)} per unit`}>
+                            <span className="text-[10px] sm:text-xs ml-1 sm:ml-2 px-1 sm:px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-bold" title={`Sale price below cost! Loss: ${Math.round(lastPurchasePrices[item.product?.toString()] - item.unitPrice)} per unit`}>
                               ⚠️ Below Cost
                             </span>
                           )}
                           {isLastPricesApplied && priceStatus[item.product?.toString()] && (
-                            <span className={`text-xs ml-2 px-1.5 py-0.5 rounded ${
+                            <span className={`text-[10px] sm:text-xs ml-1 sm:ml-2 px-1 sm:px-1.5 py-0.5 rounded ${
                               priceStatus[item.product?.toString()] === 'updated'
                                 ? 'bg-green-100 text-green-700'
                                 : priceStatus[item.product?.toString()] === 'unchanged'
@@ -2242,7 +2377,7 @@ const totalProfit = useMemo(() => {
                       
                       {/* Stock - 1 column */}
                       <div className="col-span-1">
-                        <span className="text-sm font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 block text-center h-8 flex items-center justify-center">
+                        <span className="text-xs sm:text-sm font-semibold text-gray-700 bg-gray-100 px-1 sm:px-2 py-1 rounded border border-gray-200 block text-center h-8 flex items-center justify-center">
                           {product?.inventory?.currentStock || 0}
                         </span>
                       </div>
@@ -2265,7 +2400,7 @@ const totalProfit = useMemo(() => {
                               )
                             }));
                           }}
-                          className="input text-center h-8"
+                          className="input text-center h-8 text-xs sm:text-sm"
                           min="1"
                         />
                       </div>
@@ -2273,7 +2408,7 @@ const totalProfit = useMemo(() => {
                       {/* Purchase Price (Cost) - 1 column (conditional) - Between Quantity and Rate */}
                       {showCostPrice && canViewCostPrice && (
                         <div className="col-span-1">
-                          <span className="text-sm font-semibold text-red-700 bg-red-50 px-2 py-1 rounded border border-red-200 block text-center h-8 flex items-center justify-center" title="Last Purchase Price">
+                          <span className="text-xs sm:text-sm font-semibold text-red-700 bg-red-50 px-1 sm:px-2 py-1 rounded border border-red-200 block text-center h-8 flex items-center justify-center" title="Last Purchase Price">
                             {lastPurchasePrices[item.product?.toString()] !== undefined 
                               ? `${Math.round(lastPurchasePrices[item.product?.toString()])}` 
                               : 'N/A'}
@@ -2313,7 +2448,7 @@ const totalProfit = useMemo(() => {
                               )
                             }));
                           }}
-                          className={`input text-center h-8 ${
+                          className={`input text-center h-8 text-xs sm:text-sm ${
                             lastPurchasePrices[item.product?.toString()] !== undefined && 
                             item.unitPrice < lastPurchasePrices[item.product?.toString()] 
                               ? 'border-red-500 bg-red-50' 
@@ -2331,7 +2466,7 @@ const totalProfit = useMemo(() => {
                       
                       {/* Total - 1 column */}
                       <div className="col-span-1">
-                        <span className="text-sm font-semibold text-gray-700 bg-gray-100 px-2 py-1 rounded border border-gray-200 block text-center h-8 flex items-center justify-center">
+                        <span className="text-xs sm:text-sm font-semibold text-gray-700 bg-gray-100 px-1 sm:px-2 py-1 rounded border border-gray-200 block text-center h-8 flex items-center justify-center">
                           {Math.round(totalPrice)}
                         </span>
                       </div>
@@ -2343,7 +2478,7 @@ const totalProfit = useMemo(() => {
                           isLoading={isRemovingFromCart[formData.items[index]?.product?.toString() || index]}
                           className="btn btn-danger btn-sm h-8 w-full"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3 w-3 sm:h-4 sm:w-4" />
                         </LoadingButton>
                       </div>
                     </div>
@@ -2357,21 +2492,21 @@ const totalProfit = useMemo(() => {
 
       {/* Sales Order Details */}
       {formData.items.length > 0 && !showEditModal && (
-        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg max-w-5xl ml-auto mt-4">
-          <div className="px-6 py-4 border-b border-blue-200">
-            <h3 className="text-lg font-medium text-gray-900 text-right mb-4">
+        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg w-full max-w-full sm:max-w-5xl ml-auto mt-4 overflow-hidden">
+          <div className="px-3 sm:px-4 md:px-6 py-3 sm:py-4 border-b border-blue-200">
+            <h3 className="text-base sm:text-lg font-medium text-gray-900 text-left sm:text-right mb-3 sm:mb-4 break-words">
               Sales Order Details
             </h3>
-            <div className="flex flex-nowrap gap-3 items-end justify-end">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:flex lg:flex-nowrap gap-3 items-end lg:justify-end">
               {/* Order Type */}
-              <div className="flex flex-col w-44">
-                <label className="block text-xs font-medium text-gray-700 mb-1">
+              <div className="flex flex-col w-full sm:w-full lg:w-44">
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 break-words">
                   Order Type
                 </label>
                 <select
                   value={formData.orderType}
                   onChange={(e) => setFormData(prev => ({ ...prev, orderType: e.target.value }))}
-                  className="input h-8 text-sm"
+                  className="input h-8 sm:h-9 text-xs sm:text-sm w-full"
                 >
                   <option value="retail">Retail</option>
                   <option value="wholesale">Wholesale</option>
@@ -2381,25 +2516,25 @@ const totalProfit = useMemo(() => {
               </div>
 
               {/* Tax Exemption Option */}
-              <div className="flex flex-col w-40">
-                <label className="block text-xs font-medium text-gray-700 mb-1">
+              <div className="flex flex-col w-full sm:w-full lg:w-40">
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 break-words">
                   Tax Status
                 </label>
-                <div className="flex items-center space-x-1 px-2 py-1 border border-gray-200 rounded h-8">
+                <div className="flex items-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-200 rounded h-8 sm:h-9 min-h-[2rem] sm:min-h-[2.25rem]">
                   <input
                     type="checkbox"
                     id="taxExempt"
                     checked={formData.isTaxExempt}
                     onChange={(e) => setFormData(prev => ({ ...prev, isTaxExempt: e.target.checked }))}
-                    className="h-3 w-3 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                    className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-primary-600 focus:ring-primary-500 border-gray-300 rounded flex-shrink-0"
                   />
-                  <div className="flex-1">
-                    <label htmlFor="taxExempt" className="text-xs font-medium text-gray-700 cursor-pointer">
+                  <div className="flex-1 min-w-0">
+                    <label htmlFor="taxExempt" className="text-xs sm:text-sm font-medium text-gray-700 cursor-pointer break-words">
                       Tax Exempt
                     </label>
                   </div>
                   {formData.isTaxExempt && (
-                    <div className="text-green-600 text-xs font-medium">
+                    <div className="text-green-600 text-xs sm:text-sm font-medium flex-shrink-0">
                       ✓
                     </div>
                   )}
@@ -2407,14 +2542,14 @@ const totalProfit = useMemo(() => {
               </div>
 
               {/* Invoice Number */}
-              <div className="flex flex-col w-72">
-                <div className="flex items-center gap-3 mb-1">
-                  <label className="block text-xs font-medium text-gray-700 m-0">
+              <div className="flex flex-col w-full sm:w-full lg:w-72">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2 lg:gap-3 mb-1">
+                  <label className="block text-xs sm:text-sm font-medium text-gray-700 m-0 break-words">
                     Invoice Number
                   </label>
                   <label
                     htmlFor="soAutoGenerateInvoice"
-                    className="flex items-center space-x-1 text-[11px] text-gray-600 cursor-pointer select-none"
+                    className="flex items-center space-x-1 text-[10px] sm:text-[11px] text-gray-600 cursor-pointer select-none whitespace-nowrap"
                   >
                     <input
                       type="checkbox"
@@ -2428,17 +2563,17 @@ const totalProfit = useMemo(() => {
                           setFormData((prev) => ({ ...prev, orderNumber: newNumber }));
                         }
                       }}
-                      className="h-3 w-3 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                      className="h-3 w-3 text-primary-600 focus:ring-primary-500 border-gray-300 rounded flex-shrink-0"
                     />
                     <span>Auto-generate</span>
                   </label>
                 </div>
-                <div className="relative">
+                <div className="relative w-full">
                   <input
                     type="text"
                     value={formData.orderNumber}
                     onChange={(e) => setFormData((prev) => ({ ...prev, orderNumber: e.target.value }))}
-                    className="w-full input pr-16 h-8 text-sm"
+                    className="w-full input pr-12 sm:pr-16 h-8 sm:h-9 text-xs sm:text-sm"
                     placeholder={autoGenerateOrderNumber ? 'Auto-generated' : 'Enter invoice number'}
                     disabled={autoGenerateOrderNumber}
                   />
@@ -2449,7 +2584,7 @@ const totalProfit = useMemo(() => {
                         const newNumber = generateOrderNumber(selectedCustomer);
                         setFormData((prev) => ({ ...prev, orderNumber: newNumber }));
                       }}
-                      className="absolute right-2 top-1/2 transform -translate-y-1/2 text-[11px] text-primary-600 hover:text-primary-800 font-medium"
+                      className="absolute right-1 sm:right-2 top-1/2 transform -translate-y-1/2 text-[10px] sm:text-[11px] text-primary-600 hover:text-primary-800 font-medium whitespace-nowrap"
                     >
                       Regenerate
                     </button>
@@ -2458,41 +2593,41 @@ const totalProfit = useMemo(() => {
               </div>
 
               {/* Notes */}
-              <div className="flex flex-col w-[28rem]">
-                <label className="block text-xs font-medium text-gray-700 mb-1">
+              <div className="flex flex-col w-full sm:w-full lg:w-[28rem]">
+                <label className="block text-xs sm:text-sm font-medium text-gray-700 mb-1 break-words">
                   Notes
                 </label>
                 <input
                   type="text"
                   value={formData.notes}
                   onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
-                  className="input h-8 text-sm"
+                  className="input h-8 sm:h-9 text-xs sm:text-sm w-full"
                   placeholder="Additional notes..."
                 />
               </div>
             </div>
           </div>
 
-          <div className="bg-gradient-to-r from-blue-500 to-indigo-600 px-6 py-4">
-            <h3 className="text-lg font-semibold text-white">Order Summary</h3>
+          <div className="bg-gradient-to-r from-blue-500 to-indigo-600 px-3 sm:px-4 md:px-6 py-3 sm:py-4">
+            <h3 className="text-base sm:text-lg font-semibold text-white break-words">Order Summary</h3>
           </div>
 
-          <div className="px-6 py-4">
-            <div className="space-y-3 mb-6">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-800 font-semibold">Subtotal:</span>
-                <span className="text-xl font-bold text-gray-900">{Math.round(subtotal)}</span>
+          <div className="px-3 sm:px-4 md:px-6 py-3 sm:py-4">
+            <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6">
+              <div className="flex justify-between items-center gap-2">
+                <span className="text-sm sm:text-base text-gray-800 font-semibold break-words">Subtotal:</span>
+                <span className="text-lg sm:text-xl font-bold text-gray-900 whitespace-nowrap">{Math.round(subtotal)}</span>
               </div>
               {totalDiscount > 0 && (
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-800 font-semibold">Discount:</span>
-                  <span className="text-xl font-bold text-red-600">-{Math.round(totalDiscount)}</span>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-sm sm:text-base text-gray-800 font-semibold break-words">Discount:</span>
+                  <span className="text-lg sm:text-xl font-bold text-red-600 whitespace-nowrap">-{Math.round(totalDiscount)}</span>
                 </div>
               )}
               {!formData.isTaxExempt && (
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-800 font-semibold">Tax (8%):</span>
-                  <span className="text-xl font-bold text-gray-900">{Math.round(totalTax)}</span>
+                <div className="flex justify-between items-center gap-2">
+                  <span className="text-sm sm:text-base text-gray-800 font-semibold break-words">Tax (8%):</span>
+                  <span className="text-lg sm:text-xl font-bold text-gray-900 whitespace-nowrap">{Math.round(totalTax)}</span>
                 </div>
               )}
               {selectedCustomer && (() => {
@@ -2504,19 +2639,19 @@ const totalProfit = useMemo(() => {
                 if (!hasPreviousBalance) return null;
 
                 return (
-                  <div className="flex justify-between items-center mt-2">
-                    <span className="text-gray-800 font-semibold">
+                  <div className="flex justify-between items-center gap-2 mt-2">
+                    <span className="text-sm sm:text-base text-gray-800 font-semibold break-words">
                       {netBalance < 0 ? 'Previous Advance:' : 'Previous Balance:'}
                     </span>
-                    <span className={`text-xl font-bold ${netBalance < 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    <span className={`text-lg sm:text-xl font-bold whitespace-nowrap ${netBalance < 0 ? 'text-green-600' : 'text-red-600'}`}>
                       {netBalance < 0 ? '-' : '+'}{Math.abs(Math.round(netBalance))}
                     </span>
                   </div>
                 );
               })()}
-              <div className="flex justify-between items-center text-xl font-bold border-t-2 border-blue-400 pt-3 mt-2">
-                <span className="text-blue-900">Total:</span>
-                <span className="text-blue-900 text-3xl">{Math.round(total)}</span>
+              <div className="flex justify-between items-center gap-2 text-base sm:text-lg md:text-xl font-bold border-t-2 border-blue-400 pt-2 sm:pt-3 mt-2">
+                <span className="text-blue-900 break-words">Total:</span>
+                <span className="text-xl sm:text-2xl md:text-3xl text-blue-900 whitespace-nowrap">{Math.round(total)}</span>
               </div>
               {selectedCustomer && (() => {
                 const receivables = selectedCustomer.pendingBalance || 0;
@@ -2530,11 +2665,11 @@ const totalProfit = useMemo(() => {
                 const isPayable = totalPayables < 0;
 
                 return (
-                  <div className="flex justify-between items-center text-lg font-bold border-t-2 border-red-400 pt-3 mt-2">
-                    <span className={isPayable ? 'text-green-700' : 'text-red-700'}>
+                  <div className="flex justify-between items-center gap-2 text-sm sm:text-base md:text-lg font-bold border-t-2 border-red-400 pt-2 sm:pt-3 mt-2">
+                    <span className={`break-words ${isPayable ? 'text-green-700' : 'text-red-700'}`}>
                       {isPayable ? 'Total Advance:' : 'Total Payables:'}
                     </span>
-                    <span className={`text-2xl ${isPayable ? 'text-green-700' : 'text-red-700'}`}>
+                    <span className={`text-lg sm:text-xl md:text-2xl whitespace-nowrap ${isPayable ? 'text-green-700' : 'text-red-700'}`}>
                       {Math.abs(Math.round(totalPayables))}
                     </span>
                   </div>
@@ -2543,13 +2678,13 @@ const totalProfit = useMemo(() => {
             </div>
           </div>
 
-          <div className="flex space-x-3 mt-6 px-6 pb-6">
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mt-4 sm:mt-6 px-3 sm:px-4 md:px-6 pb-3 sm:pb-4 md:pb-6">
             <button
               onClick={resetForm}
-              className="btn btn-secondary flex-1"
+              className="btn btn-secondary flex-1 w-full sm:w-auto"
             >
-              <Trash2 className="h-4 w-4 mr-2" />
-              Clear Cart
+              <Trash2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 flex-shrink-0" />
+              <span className="text-xs sm:text-sm">Clear Cart</span>
             </button>
             <button
               onClick={() => {
@@ -2576,18 +2711,18 @@ const totalProfit = useMemo(() => {
                 };
                 handlePrint(tempOrder);
               }}
-              className="btn btn-secondary flex-1"
+              className="btn btn-secondary flex-1 w-full sm:w-auto"
             >
-              <Receipt className="h-4 w-4 mr-2" />
-              Print Preview
+              <Receipt className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 flex-shrink-0" />
+              <span className="text-xs sm:text-sm">Print Preview</span>
             </button>
             <button
               onClick={handleCreate}
               disabled={creating || formData.items.length === 0}
-              className="btn btn-primary btn-lg flex-2"
+              className="btn btn-primary btn-lg flex-2 w-full sm:w-auto"
             >
-              <Save className="h-4 w-4 mr-2" />
-              {creating ? 'Creating...' : 'Create Sales Order'}
+              <Save className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2 flex-shrink-0" />
+              <span className="text-xs sm:text-sm md:text-base">{creating ? 'Creating...' : 'Create Sales Order'}</span>
             </button>
           </div>
         </div>

@@ -391,94 +391,101 @@ export const Layout = ({ children }) => {
       {/* Main content */}
       <div className="lg:pl-64">
         {/* Top bar */}
-        <div className="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 bg-white px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
+        <div className="sticky top-0 z-40 flex min-h-[3.5rem] sm:min-h-[4rem] md:h-14 lg:h-16 shrink-0 items-center gap-x-1 sm:gap-x-2 md:gap-x-3 border-b border-gray-200 bg-white px-1 sm:px-2 md:px-4 lg:px-6 shadow-sm">
           <button
             type="button"
-            className="-m-2.5 p-2.5 text-gray-700 lg:hidden"
+            className="-m-1.5 p-1.5 sm:-m-2 sm:p-2 text-gray-700 lg:hidden flex-shrink-0"
             onClick={() => setSidebarOpen(true)}
           >
-            <Menu className="h-6 w-6" />
+            <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
           </button>
 
-          <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
-            {/* Financial Transaction Buttons */}
-            <div className="flex items-center space-x-2">
+          <div className="flex flex-1 gap-x-1 sm:gap-x-1.5 md:gap-x-2 lg:gap-x-3 self-stretch min-w-0">
+            {/* User menu - Left side */}
+            <div className="flex items-center gap-x-1 sm:gap-x-1.5 flex-shrink-0 order-1">
+              <div className="flex items-center gap-x-1 sm:gap-x-1.5">
+                <div className="h-6 w-6 sm:h-7 sm:w-7 md:h-8 md:w-8 rounded-full bg-primary-100 flex items-center justify-center flex-shrink-0">
+                  <User className="h-3 w-3 sm:h-3.5 sm:w-3.5 md:h-4 md:w-4 text-primary-600" />
+                </div>
+                <div className="hidden lg:block">
+                  <p className="text-xs sm:text-sm font-medium text-gray-900 break-words">{user?.fullName}</p>
+                  <p className="text-[10px] sm:text-xs text-gray-500 capitalize break-words">{user?.role}</p>
+                </div>
+              </div>
+              <button
+                onClick={logout}
+                className="text-gray-400 hover:text-gray-600 p-0.5 sm:p-1 flex-shrink-0"
+                title="Logout"
+              >
+                <LogOut className="h-3.5 w-3.5 sm:h-4 sm:w-4 md:h-5 md:w-5" />
+              </button>
+            </div>
+            
+            {/* Financial Transaction Buttons - Center */}
+            <div className="flex items-center gap-x-0.5 sm:gap-x-1 md:gap-x-1.5 min-w-0 flex-1 overflow-hidden order-2">
               <button
                 onClick={() => navigate('/cash-receiving')}
-                className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-md shadow-sm hover:shadow-md transition-all duration-200 flex items-center space-x-1 text-sm font-medium"
+                className="bg-green-600 hover:bg-green-700 text-white px-1.5 sm:px-2 md:px-2.5 py-1 sm:py-1.5 md:py-2 rounded shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-center gap-x-0.5 sm:gap-x-1 text-[10px] sm:text-xs md:text-sm font-medium whitespace-nowrap flex-shrink-0 min-w-[2rem] sm:min-w-[2.5rem] md:min-w-auto"
+                title="Cash Receiving"
               >
-                <Receipt className="h-4 w-4" />
-                <span className="hidden sm:inline">Cash Receiving</span>
+                <Receipt className="h-3 w-3 sm:h-3.5 sm:w-3.5 md:h-4 md:w-4 flex-shrink-0" />
+                <span className="hidden md:inline">Cash Receiving</span>
               </button>
               <button
                 onClick={() => navigate('/cash-receipts')}
-                className="bg-green-500 hover:bg-green-600 text-white px-3 py-2 rounded-md shadow-sm hover:shadow-md transition-all duration-200 flex items-center space-x-1 text-sm font-medium"
+                className="bg-green-500 hover:bg-green-600 text-white px-1.5 sm:px-2 md:px-2.5 py-1 sm:py-1.5 md:py-2 rounded shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-center gap-x-0.5 sm:gap-x-1 text-[10px] sm:text-xs md:text-sm font-medium whitespace-nowrap flex-shrink-0 min-w-[2rem] sm:min-w-[2.5rem] md:min-w-auto"
+                title="Cash Receipts"
               >
-                <Receipt className="h-4 w-4" />
-                <span className="hidden sm:inline">Cash Receipts</span>
+                <Receipt className="h-3 w-3 sm:h-3.5 sm:w-3.5 md:h-4 md:w-4 flex-shrink-0" />
+                <span className="hidden md:inline">Cash Receipts</span>
               </button>
               <button
                 onClick={() => navigate('/cash-payments')}
-                className="bg-blue-500 hover:bg-blue-600 text-white px-3 py-2 rounded-md shadow-sm hover:shadow-md transition-all duration-200 flex items-center space-x-1 text-sm font-medium"
+                className="bg-blue-500 hover:bg-blue-600 text-white px-1.5 sm:px-2 md:px-2.5 py-1 sm:py-1.5 md:py-2 rounded shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-center gap-x-0.5 sm:gap-x-1 text-[10px] sm:text-xs md:text-sm font-medium whitespace-nowrap flex-shrink-0 min-w-[2rem] sm:min-w-[2.5rem] md:min-w-auto"
+                title="Cash Payments"
               >
-                <CreditCard className="h-4 w-4" />
-                <span className="hidden sm:inline">Cash Payments</span>
+                <CreditCard className="h-3 w-3 sm:h-3.5 sm:w-3.5 md:h-4 md:w-4 flex-shrink-0" />
+                <span className="hidden md:inline">Cash Payments</span>
               </button>
               <button
                 onClick={() => navigate('/bank-receipts')}
-                className="bg-purple-500 hover:bg-purple-600 text-white px-3 py-2 rounded-md shadow-sm hover:shadow-md transition-all duration-200 flex items-center space-x-1 text-sm font-medium"
+                className="bg-purple-500 hover:bg-purple-600 text-white px-1.5 sm:px-2 md:px-2.5 py-1 sm:py-1.5 md:py-2 rounded shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-center gap-x-0.5 sm:gap-x-1 text-[10px] sm:text-xs md:text-sm font-medium whitespace-nowrap flex-shrink-0 min-w-[2rem] sm:min-w-[2.5rem] md:min-w-auto"
+                title="Bank Receipts"
               >
-                <Building className="h-4 w-4" />
-                <span className="hidden sm:inline">Bank Receipts</span>
+                <Building className="h-3 w-3 sm:h-3.5 sm:w-3.5 md:h-4 md:w-4 flex-shrink-0" />
+                <span className="hidden md:inline">Bank Receipts</span>
               </button>
               <button
                 onClick={() => navigate('/bank-payments')}
-                className="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded-md shadow-sm hover:shadow-md transition-all duration-200 flex items-center space-x-1 text-sm font-medium"
+                className="bg-orange-500 hover:bg-orange-600 text-white px-1.5 sm:px-2 md:px-2.5 py-1 sm:py-1.5 md:py-2 rounded shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-center gap-x-0.5 sm:gap-x-1 text-[10px] sm:text-xs md:text-sm font-medium whitespace-nowrap flex-shrink-0 min-w-[2rem] sm:min-w-[2.5rem] md:min-w-auto"
+                title="Bank Payments"
               >
-                <ArrowUpDown className="h-4 w-4" />
-                <span className="hidden sm:inline">Bank Payments</span>
+                <ArrowUpDown className="h-3 w-3 sm:h-3.5 sm:w-3.5 md:h-4 md:w-4 flex-shrink-0" />
+                <span className="hidden md:inline">Bank Payments</span>
               </button>
               <button
                 onClick={() => navigate('/expenses')}
-                className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-md shadow-sm hover:shadow-md transition-all duration-200 flex items-center space-x-1 text-sm font-medium"
+                className="bg-red-500 hover:bg-red-600 text-white px-1.5 sm:px-2 md:px-2.5 py-1 sm:py-1.5 md:py-2 rounded shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-center gap-x-0.5 sm:gap-x-1 text-[10px] sm:text-xs md:text-sm font-medium whitespace-nowrap flex-shrink-0 min-w-[2rem] sm:min-w-[2.5rem] md:min-w-auto"
+                title="Record Expense"
               >
-                <CreditCard className="h-4 w-4" />
-                <span className="hidden sm:inline">Record Expense</span>
+                <CreditCard className="h-3 w-3 sm:h-3.5 sm:w-3.5 md:h-4 md:w-4 flex-shrink-0" />
+                <span className="hidden md:inline">Record Expense</span>
               </button>
             </div>
-            <div className="flex flex-1"></div>
-            <div className="flex items-center gap-x-4 lg:gap-x-6">
+            
+            {/* Right side actions */}
+            <div className="flex items-center gap-x-1 sm:gap-x-1.5 md:gap-x-2 lg:gap-x-3 flex-shrink-0 order-3">
               {/* PWA Install Button */}
               {isInstallable && (
                 <button
                   onClick={handleInstallClick}
-                  className="flex items-center gap-x-2 px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors shadow-sm"
+                  className="flex items-center gap-x-0.5 sm:gap-x-1 md:gap-x-1.5 px-1.5 sm:px-2 md:px-2.5 py-1 sm:py-1.5 md:py-2 text-[10px] sm:text-xs md:text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded shadow-sm whitespace-nowrap flex-shrink-0"
                   title="Install App"
                 >
-                  <Download className="h-4 w-4" />
-                  <span className="hidden sm:inline">Install App</span>
+                  <Download className="h-3 w-3 sm:h-3.5 sm:w-3.5 md:h-4 md:w-4 flex-shrink-0" />
+                  <span className="hidden md:inline">Install App</span>
                 </button>
               )}
-
-              {/* User menu */}
-              <div className="flex items-center gap-x-2">
-                <div className="flex items-center gap-x-2">
-                  <div className="h-8 w-8 rounded-full bg-primary-100 flex items-center justify-center">
-                    <User className="h-4 w-4 text-primary-600" />
-                  </div>
-                  <div className="hidden lg:block">
-                    <p className="text-sm font-medium text-gray-900">{user?.fullName}</p>
-                    <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={logout}
-                  className="text-gray-400 hover:text-gray-600"
-                  title="Logout"
-                >
-                  <LogOut className="h-5 w-5" />
-                </button>
-              </div>
             </div>
           </div>
         </div>
