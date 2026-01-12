@@ -772,8 +772,15 @@ export const ChartOfAccounts = () => {
 
     // Group accounts by type and category
     accountList.forEach(account => {
-      const type = account.accountType;
-      const category = account.accountCategory;
+      const type = account?.accountType;
+      const category = account?.accountCategory;
+      
+      // Skip accounts with missing or invalid type/category
+      if (!type || !category || !hierarchy[type]) {
+        console.warn('Skipping account with invalid type or category:', account);
+        return;
+      }
+      
       if (!hierarchy[type][category]) {
         hierarchy[type][category] = [];
       }
@@ -783,7 +790,11 @@ export const ChartOfAccounts = () => {
     // Sort accounts within each category by account code
     Object.keys(hierarchy).forEach(type => {
       Object.keys(hierarchy[type]).forEach(category => {
-        hierarchy[type][category].sort((a, b) => a.accountCode.localeCompare(b.accountCode));
+        hierarchy[type][category].sort((a, b) => {
+          const codeA = a?.accountCode || '';
+          const codeB = b?.accountCode || '';
+          return codeA.localeCompare(codeB);
+        });
       });
     });
 

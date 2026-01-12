@@ -8,6 +8,26 @@ const accountCategoryRepository = require('../repositories/AccountCategoryReposi
 const chartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
 const logger = require('../utils/logger');
 
+// Get all account categories grouped by type
+// This route must come before /:id to avoid matching "grouped" as an ID
+router.get('/grouped', auth, async (req, res) => {
+  try {
+    const categories = await accountCategoryRepository.getAllCategoriesGrouped();
+    
+    res.json({
+      success: true,
+      data: categories
+    });
+  } catch (error) {
+    logger.error('Error fetching grouped account categories:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch account categories',
+      error: error.message
+    });
+  }
+});
+
 // Get all account categories
 router.get('/', auth, async (req, res) => {
   try {
