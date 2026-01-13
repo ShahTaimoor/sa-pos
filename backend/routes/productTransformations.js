@@ -36,7 +36,11 @@ router.get('/', [
     }
 
     const { baseProduct, targetVariant, status, transformationType, startDate, endDate } = req.query;
-    const filter = {};
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const filter = { tenantId };
 
     if (baseProduct) filter.baseProduct = baseProduct;
     if (targetVariant) filter.targetVariant = targetVariant;
@@ -110,6 +114,7 @@ router.get('/:id', [
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('update_inventory'),
   body('baseProduct').isMongoId().withMessage('Valid base product ID is required'),
   body('targetVariant').isMongoId().withMessage('Valid target variant ID is required'),
@@ -124,15 +129,19 @@ router.post('/', [
     }
 
     const { baseProduct, targetVariant, quantity, unitTransformationCost, notes } = req.body;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
 
     // Get base product
-    const baseProductDoc = await productRepository.findById(baseProduct);
+    const baseProductDoc = await productRepository.findById(baseProduct, { tenantId });
     if (!baseProductDoc) {
       return res.status(404).json({ message: 'Base product not found' });
     }
 
     // Get target variant
-    const variantDoc = await productVariantRepository.findById(targetVariant, {
+    const variantDoc = await productVariantRepository.findById(targetVariant, { tenantId }, {
       populate: [{ path: 'baseProduct' }]
     });
     
@@ -148,7 +157,7 @@ router.post('/', [
     }
 
     // Check base product stock
-    const baseInventory = await inventoryRepository.findByProduct(baseProduct);
+    const baseInventory = await inventoryRepository.findByProduct(baseProduct, { tenantId });
     if (!baseInventory || baseInventory.currentStock < quantity) {
       return res.status(400).json({ 
         message: `Insufficient stock. Available: ${baseInventory?.currentStock || 0}, Required: ${quantity}` 
@@ -156,7 +165,7 @@ router.post('/', [
     }
 
     // Get or create variant inventory
-    let variantInventory = await inventoryRepository.findByProduct(targetVariant);
+    let variantInventory = await inventoryRepository.findByProduct(targetVariant, { tenantId });
     if (!variantInventory) {
       variantInventory = new Inventory({
         product: targetVariant,
@@ -198,7 +207,8 @@ router.post('/', [
       status: 'completed',
       performedBy: req.user._id,
       transformationDate: new Date(),
-      completedAt: new Date()
+      completedAt: new Date(),
+      tenantId
     });
 
     await transformation.save();
@@ -256,7 +266,8 @@ router.post('/', [
       referenceType: 'production',
       referenceId: transformation._id,
       notes: `Transformed to ${variantDoc.displayName}`,
-      performedBy: req.user._id
+      performedBy: req.user._id,
+      tenantId
     });
     await baseMovement.save();
 
@@ -272,7 +283,8 @@ router.post('/', [
       referenceType: 'production',
       referenceId: transformation._id,
       notes: `Transformed from ${baseProductDoc.name}`,
-      performedBy: req.user._id
+      performedBy: req.user._id,
+      tenantId
     });
     await variantMovement.save();
 
@@ -310,7 +322,11 @@ router.put('/:id/cancel', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const transformation = await productTransformationRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const transformation = await productTransformationRepository.findById(req.params.id, { tenantId });
     if (!transformation) {
       return res.status(404).json({ message: 'Product transformation not found' });
     }

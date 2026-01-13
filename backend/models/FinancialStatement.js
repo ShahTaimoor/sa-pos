@@ -356,16 +356,24 @@ FinancialStatementSchema.pre('save', async function(next) {
 });
 
 // Static method to get latest statement
-FinancialStatementSchema.statics.getLatestStatement = async function(type = 'profit_loss', periodType = 'monthly') {
+FinancialStatementSchema.statics.getLatestStatement = async function(type = 'profit_loss', periodType = 'monthly', tenantId) {
+  if (!tenantId) {
+    throw new Error('tenantId is required to get latest statement');
+  }
   return await this.findOne({
+    tenantId,
     type,
     'period.type': periodType,
   }).sort({ 'period.endDate': -1 });
 };
 
 // Static method to get statements by date range
-FinancialStatementSchema.statics.getStatementsByDateRange = async function(startDate, endDate, type = 'profit_loss') {
+FinancialStatementSchema.statics.getStatementsByDateRange = async function(startDate, endDate, type = 'profit_loss', tenantId) {
+  if (!tenantId) {
+    throw new Error('tenantId is required to get statements by date range');
+  }
   return await this.find({
+    tenantId,
     type,
     'period.startDate': { $gte: startDate },
     'period.endDate': { $lte: endDate },
@@ -373,8 +381,12 @@ FinancialStatementSchema.statics.getStatementsByDateRange = async function(start
 };
 
 // Static method to get statement comparison
-FinancialStatementSchema.statics.getStatementComparison = async function(currentStatementId, comparisonType = 'previous') {
-  const currentStatement = await this.findById(currentStatementId);
+FinancialStatementSchema.statics.getStatementComparison = async function(currentStatementId, comparisonType = 'previous', tenantId) {
+  if (!tenantId) {
+    throw new Error('tenantId is required to get statement comparison');
+  }
+  
+  const currentStatement = await this.findOne({ _id: currentStatementId, tenantId });
   if (!currentStatement) {
     throw new Error('Statement not found');
   }
@@ -382,14 +394,16 @@ FinancialStatementSchema.statics.getStatementComparison = async function(current
   let comparisonStatement;
   
   if (comparisonType === 'previous') {
-    // Find previous period statement
+    // Find previous period statement (same tenant)
     comparisonStatement = await this.findOne({
+      tenantId,
       type: currentStatement.type,
       'period.endDate': { $lt: currentStatement.period.startDate },
     }).sort({ 'period.endDate': -1 });
   } else if (comparisonType === 'budget') {
-    // Find budget statement for same period
+    // Find budget statement for same period (same tenant)
     comparisonStatement = await this.findOne({
+      tenantId,
       type: 'budget_' + currentStatement.type,
       'period.startDate': currentStatement.period.startDate,
       'period.endDate': currentStatement.period.endDate,

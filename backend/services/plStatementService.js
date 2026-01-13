@@ -71,13 +71,21 @@ class PLStatementService {
   /**
    * Get single P&L statement by ID
    * @param {string} statementId - Statement ID
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<object>}
    */
-  async getStatementById(statementId) {
-    const statement = await financialStatementRepository.findById(statementId, [
-      { path: 'generatedBy', select: 'firstName lastName email' },
-      { path: 'approvedBy', select: 'firstName lastName email' }
-    ]);
+  async getStatementById(statementId, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get statement');
+    }
+    
+    const statement = await financialStatementRepository.findById(statementId, {
+      populate: [
+        { path: 'generatedBy', select: 'firstName lastName email' },
+        { path: 'approvedBy', select: 'firstName lastName email' }
+      ],
+      tenantId
+    });
 
     if (!statement) {
       throw new Error('P&L statement not found');
@@ -90,10 +98,15 @@ class PLStatementService {
    * Update P&L statement
    * @param {string} statementId - Statement ID
    * @param {object} updates - Update data
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<object>}
    */
-  async updateStatement(statementId, updates) {
-    const statement = await financialStatementRepository.findById(statementId);
+  async updateStatement(statementId, updates, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to update statement');
+    }
+    
+    const statement = await financialStatementRepository.findById(statementId, { tenantId });
     if (!statement) {
       throw new Error('P&L statement not found');
     }
@@ -128,7 +141,7 @@ class PLStatementService {
       updateData.metadata.description = updates.description;
     }
 
-    const updatedStatement = await financialStatementRepository.update(statementId, updateData);
+    const updatedStatement = await financialStatementRepository.update(statementId, updateData, { tenantId });
     return updatedStatement;
   }
 
@@ -138,10 +151,15 @@ class PLStatementService {
    * @param {string} status - New status
    * @param {string} userId - User ID making the change
    * @param {string} notes - Optional notes
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<object>}
    */
-  async updateStatementStatus(statementId, status, userId, notes) {
-    const statement = await financialStatementRepository.findById(statementId);
+  async updateStatementStatus(statementId, status, userId, notes, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to update statement status');
+    }
+    
+    const statement = await financialStatementRepository.findById(statementId, { tenantId });
     if (!statement) {
       throw new Error('P&L statement not found');
     }
@@ -165,7 +183,7 @@ class PLStatementService {
       updateData.notes = currentNotes;
     }
 
-    const updatedStatement = await financialStatementRepository.update(statementId, updateData);
+    const updatedStatement = await financialStatementRepository.update(statementId, updateData, { tenantId });
     return {
       statementId: updatedStatement.statementId,
       status: updatedStatement.status,
@@ -177,10 +195,15 @@ class PLStatementService {
   /**
    * Delete P&L statement
    * @param {string} statementId - Statement ID
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<object>}
    */
-  async deleteStatement(statementId) {
-    const statement = await financialStatementRepository.findById(statementId);
+  async deleteStatement(statementId, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to delete statement');
+    }
+    
+    const statement = await financialStatementRepository.findById(statementId, { tenantId });
     if (!statement) {
       throw new Error('P&L statement not found');
     }
@@ -190,27 +213,35 @@ class PLStatementService {
       throw new Error('Only draft statements can be deleted');
     }
 
-    await financialStatementRepository.softDelete(statementId);
+    await financialStatementRepository.softDelete(statementId, { tenantId });
     return { message: 'P&L statement deleted successfully' };
   }
 
   /**
    * Get latest P&L statement
    * @param {string} periodType - Period type
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<object|null>}
    */
-  async getLatestStatement(periodType = 'monthly') {
-    return await financialStatementRepository.getLatestStatement('profit_loss', periodType);
+  async getLatestStatement(periodType = 'monthly', tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get latest statement');
+    }
+    return await financialStatementRepository.getLatestStatement('profit_loss', periodType, tenantId);
   }
 
   /**
    * Get statement comparison
    * @param {string} statementId - Statement ID
    * @param {string} type - Comparison type
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<object>}
    */
-  async getStatementComparison(statementId, type) {
-    return await financialStatementRepository.getStatementComparison(statementId, type);
+  async getStatementComparison(statementId, type, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get statement comparison');
+    }
+    return await financialStatementRepository.getStatementComparison(statementId, type, tenantId);
   }
 }
 

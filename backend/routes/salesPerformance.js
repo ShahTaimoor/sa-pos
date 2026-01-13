@@ -52,9 +52,14 @@ router.post('/generate', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const report = await salesPerformanceService.generateSalesPerformanceReport(
       req.body,
-      req.user._id
+      req.user._id,
+      tenantId
     );
 
     res.status(201).json({
@@ -99,7 +104,11 @@ router.get('/', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const result = await salesPerformanceService.getSalesPerformanceReports(req.query);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await salesPerformanceService.getSalesPerformanceReports(req.query, tenantId);
     
     res.json(result);
   } catch (error) {
@@ -123,7 +132,11 @@ router.get('/:reportId', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const report = await salesPerformanceService.getSalesPerformanceReportById(req.params.reportId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await salesPerformanceService.getSalesPerformanceReportById(req.params.reportId, tenantId);
     
     // Mark as viewed
     await report.markAsViewed();
@@ -154,9 +167,14 @@ router.delete('/:reportId', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const result = await salesPerformanceService.deleteSalesPerformanceReport(
       req.params.reportId,
-      req.user._id
+      req.user._id,
+      tenantId
     );
     
     res.json(result);
@@ -188,8 +206,11 @@ router.put('/:reportId/favorite', [
   try {
     const { reportId } = req.params;
     const { isFavorite } = req.body;
-
-    const report = await salesPerformanceRepository.findByReportId(reportId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await salesPerformanceRepository.findByReportId(reportId, { tenantId });
     if (!report) {
       return res.status(404).json({ message: 'Sales performance report not found' });
     }
@@ -226,8 +247,11 @@ router.put('/:reportId/tags', [
   try {
     const { reportId } = req.params;
     const { tags } = req.body;
-
-    const report = await salesPerformanceRepository.findByReportId(reportId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await salesPerformanceRepository.findByReportId(reportId, { tenantId });
     if (!report) {
       return res.status(404).json({ message: 'Sales performance report not found' });
     }
@@ -263,8 +287,11 @@ router.put('/:reportId/notes', [
   try {
     const { reportId } = req.params;
     const { notes } = req.body;
-
-    const report = await salesPerformanceRepository.findByReportId(reportId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await salesPerformanceRepository.findByReportId(reportId, { tenantId });
     if (!report) {
       return res.status(404).json({ message: 'Sales performance report not found' });
     }
@@ -290,6 +317,7 @@ router.put('/:reportId/notes', [
 // @access  Private (requires 'view_reports' permission)
 router.post('/:reportId/export', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('reportId').isLength({ min: 1 }).withMessage('Report ID is required'),
@@ -299,8 +327,11 @@ router.post('/:reportId/export', [
   try {
     const { reportId } = req.params;
     const { format } = req.body;
-
-    const report = await salesPerformanceRepository.findByReportId(reportId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await salesPerformanceRepository.findByReportId(reportId, { tenantId });
     if (!report) {
       return res.status(404).json({ message: 'Sales performance report not found' });
     }
@@ -338,7 +369,11 @@ router.get('/stats/overview', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const stats = await SalesPerformance.getReportStats(req.query);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const stats = await SalesPerformance.getReportStats(req.query, tenantId);
     res.json(stats);
   } catch (error) {
     logger.error('Error fetching report stats:', error);
@@ -383,10 +418,15 @@ router.get('/quick/top-products', [
         break;
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     // Get quick data without generating full report
     const productPerformance = await salesRepository.aggregate([
       {
         $match: {
+          tenantId,
           createdAt: { $gte: startDate, $lte: endDate },
           status: 'delivered'
         }
@@ -475,10 +515,15 @@ router.get('/quick/top-customers', [
         break;
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     // Get quick data without generating full report
     const customerPerformance = await salesRepository.aggregate([
       {
         $match: {
+          tenantId,
           createdAt: { $gte: startDate, $lte: endDate },
           status: 'completed',
           customer: { $exists: true, $ne: null }
@@ -616,6 +661,10 @@ router.get('/quick/top-sales-reps', [
         break;
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     // Generate quick report
     const report = await salesPerformanceService.generateSalesPerformanceReport({
       reportType: 'top_sales_reps',
@@ -623,7 +672,7 @@ router.get('/quick/top-sales-reps', [
       startDate,
       endDate,
       limit: parseInt(limit)
-    }, req.user._id);
+    }, req.user._id, tenantId);
 
     res.json({
       reportId: report.reportId,
@@ -673,11 +722,16 @@ router.get('/quick/summary', [
         break;
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     // Get quick summary data without generating full report
     // Get current period summary
     const currentSummary = await salesRepository.aggregate([
       {
         $match: {
+          tenantId,
           createdAt: { $gte: startDate, $lte: endDate },
           status: 'delivered'
         }
@@ -710,6 +764,7 @@ router.get('/quick/summary', [
     const previousSummary = await salesRepository.aggregate([
       {
         $match: {
+          tenantId,
           createdAt: { $gte: previousStartDate, $lte: startDate },
           status: 'delivered'
         }

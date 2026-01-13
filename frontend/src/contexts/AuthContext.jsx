@@ -1,5 +1,5 @@
 import toast from 'react-hot-toast';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import {
   useLoginMutation,
@@ -14,6 +14,7 @@ export const AuthProvider = ({ children }) => children;
 export const useAuth = () => {
   const dispatch = useAppDispatch();
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, token, isAuthenticated, status, error } = useAppSelector((s) => s.auth);
   const isLoginPage = location.pathname === '/login';
 
@@ -60,6 +61,8 @@ export const useAuth = () => {
     }
     dispatch(logoutAction());
     toast.success('Logged out successfully');
+    // Navigate to login page after logout
+    navigate('/login', { replace: true });
   };
 
   const updateUser = (userData) => {

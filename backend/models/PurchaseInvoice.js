@@ -202,4 +202,68 @@ purchaseInvoiceSchema.methods.calculateTotals = function() {
   return this.pricing;
 };
 
+// Post-save hook to handle stock updates, accounting entries, and supplier balance
+purchaseInvoiceSchema.post('save', async function(doc) {
+  // Only process new purchase invoices (not updates)
+  if (!doc.isNew) {
+    return;
+  }
+
+  const logger = require('../utils/logger');
+
+  // 1. Update inventory stock (increase for purchases)
+  if (doc.items && doc.items.length > 0) {
+    try {
+      const inventoryService = require('../services/inventoryService');
+      
+      for (const item of doc.items) {
+        if (item.product && item.quantity > 0) {
+          await inventoryService.updateStock({
+            productId: item.product,
+            type: 'in',
+            quantity: item.quantity,
+            cost: item.unitCost,
+            reason: 'Purchase Invoice',
+            reference: doc.invoiceNumber || 'Purchase',
+            referenceId: doc._id,
+            referenceModel: 'PurchaseInvoice',
+            performedBy: doc.createdBy,
+            notes: `Stock increased due to purchase invoice: ${doc.invoiceNumber || doc._id}`
+          });
+        }
+      }
+      logger.debug(`Stock updated for purchase invoice: ${doc.invoiceNumber || doc._id}`);
+    } catch (error) {
+      // Log error but don't fail the save
+      logger.error(`Error updating stock for purchase invoice ${doc.invoiceNumber || doc._id}:`, error);
+    }
+  }
+
+  // 2. Create accounting entries
+  try {
+    const accountingService = require('../services/accountingService');
+    await accountingService.recordPurchase(doc);
+    logger.debug(`Accounting entries created for purchase invoice: ${doc.invoiceNumber || doc._id}`);
+  } catch (error) {
+    // Log error but don't fail the save
+    logger.error(`Error creating accounting entries for purchase invoice ${doc.invoiceNumber || doc._id}:`, error);
+  }
+
+  // 3. Update supplier balance (if credit purchase)
+  if (doc.supplier && doc.pricing && doc.pricing.total > 0) {
+    const isCreditPurchase = doc.payment && (doc.payment.status === 'credit' || doc.payment.status === 'pending' || doc.payment.method === 'credit');
+    
+    if (isCreditPurchase) {
+      try {
+        const supplierBalanceService = require('../services/supplierBalanceService');
+        await supplierBalanceService.recordPurchase(doc.supplier, doc.pricing.total, doc._id);
+        logger.debug(`Supplier balance updated for purchase invoice: ${doc.invoiceNumber || doc._id}`);
+      } catch (error) {
+        // Log error but don't fail the save
+        logger.error(`Error updating supplier balance for purchase invoice ${doc.invoiceNumber || doc._id}:`, error);
+      }
+    }
+  }
+});
+
 module.exports = mongoose.model('PurchaseInvoice', purchaseInvoiceSchema);

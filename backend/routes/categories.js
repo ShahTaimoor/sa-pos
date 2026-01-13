@@ -30,8 +30,13 @@ router.get('/', [
       isActive = true
     } = req.query;
 
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
     // Call service to get categories
-    const result = await categoryService.getCategories(req.query);
+    const result = await categoryService.getCategories(req.query, tenantId);
     
     res.json({
       categories: result.categories,
@@ -74,8 +79,13 @@ router.get('/:categoryId', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
     const { categoryId } = req.params;
-    const category = await categoryService.getCategoryById(categoryId);
+    const category = await categoryService.getCategoryById(categoryId, tenantId);
     res.json(category);
   } catch (error) {
     logger.error('Error fetching category:', error);
@@ -117,6 +127,7 @@ router.post('/', [
 // @access  Private (requires 'manage_products' permission)
 router.put('/:categoryId', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('manage_products'),
   sanitizeRequest,
   param('categoryId').isMongoId().withMessage('Valid Category ID is required'),
@@ -149,6 +160,7 @@ router.put('/:categoryId', [
 // @access  Private (requires 'manage_products' permission)
 router.delete('/:categoryId', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('manage_products'),
   sanitizeRequest,
   param('categoryId').isMongoId().withMessage('Valid Category ID is required'),

@@ -17,6 +17,7 @@ const recurringExpenseRepository = require('../repositories/RecurringExpenseRepo
 const supplierRepository = require('../repositories/SupplierRepository');
 const customerRepository = require('../repositories/CustomerRepository');
 const bankRepository = require('../repositories/BankRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -206,6 +207,7 @@ router.post(
   '/',
   [
     auth,
+    tenantMiddleware,
     requirePermission('create_orders'),
     body('name').trim().notEmpty().withMessage('Name is required'),
     body('description').optional().isString().trim(),
@@ -615,7 +617,6 @@ router.post(
 
         try {
           const AccountingService = require('../services/accountingService');
-const logger = require('../utils/logger');
           await AccountingService.recordCashPayment(cashPayment);
         } catch (error) {
           logger.error('Error creating accounting entries for recurring cash payment:', error);

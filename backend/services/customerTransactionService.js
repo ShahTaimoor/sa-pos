@@ -8,9 +8,13 @@ class CustomerTransactionService {
    * Create customer transaction
    * @param {Object} transactionData - Transaction data
    * @param {Object} user - User creating transaction
+   * @param {String} tenantId - Tenant ID (required)
    * @returns {Promise<CustomerTransaction>}
    */
-  async createTransaction(transactionData, user) {
+  async createTransaction(transactionData, user, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for createTransaction');
+    }
     const {
       customerId,
       transactionType,
@@ -29,8 +33,8 @@ class CustomerTransactionService {
       requiresApproval = false
     } = transactionData;
 
-    // Get customer
-    const customer = await Customer.findById(customerId);
+    // Get customer (tenant-scoped)
+    const customer = await Customer.findOne({ _id: customerId, tenantId });
     if (!customer) {
       throw new Error('Customer not found');
     }
@@ -88,9 +92,10 @@ class CustomerTransactionService {
     // Generate transaction number
     const transactionNumber = await CustomerTransaction.generateTransactionNumber(transactionType, customerId);
 
-    // Create transaction
+    // Create transaction (include tenantId)
     const transaction = new CustomerTransaction({
       customer: customerId,
+      tenantId, // CRITICAL: Include tenantId for multi-tenant isolation
       transactionNumber,
       transactionType,
       transactionDate: new Date(),
@@ -130,7 +135,7 @@ class CustomerTransactionService {
 
     // Update customer balance if posted
     if (!requiresApproval) {
-      await this.updateCustomerBalance(customerId, balanceAfter);
+      await this.updateCustomerBalance(customerId, balanceAfter, tenantId);
     }
 
     // Create accounting entries if posted
@@ -250,15 +255,18 @@ class CustomerTransactionService {
    * @param {Object} newBalances - New balance values
    * @returns {Promise<Customer>}
    */
-  async updateCustomerBalance(customerId, newBalances) {
-    // Use atomic update with version check
-    const customer = await Customer.findById(customerId);
+  async updateCustomerBalance(customerId, newBalances, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for updateCustomerBalance');
+    }
+    // Use atomic update with version check (tenant-scoped)
+    const customer = await Customer.findOne({ _id: customerId, tenantId });
     if (!customer) {
       throw new Error('Customer not found');
     }
 
     const updated = await Customer.findOneAndUpdate(
-      { _id: customerId, __v: customer.__v },
+      { _id: customerId, tenantId, __v: customer.__v },
       {
         $set: {
           pendingBalance: newBalances.pendingBalance,
@@ -374,8 +382,11 @@ class CustomerTransactionService {
    * @param {Object} user - User
    * @returns {Promise<PaymentApplication>}
    */
-  async applyPayment(customerId, paymentAmount, applications, user) {
-    const customer = await Customer.findById(customerId);
+  async applyPayment(customerId, paymentAmount, applications, user, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for applyPayment');
+    }
+    const customer = await Customer.findOne({ _id: customerId, tenantId });
     if (!customer) {
       throw new Error('Customer not found');
     }
@@ -390,14 +401,14 @@ class CustomerTransactionService {
         paymentMethod: 'account',
         paymentDate: new Date()
       }
-    }, user);
+    }, user, tenantId);
 
     // Validate applications
     let totalApplied = 0;
     const validApplications = [];
 
     for (const app of applications) {
-      const invoice = await CustomerTransaction.findById(app.invoiceId);
+      const invoice = await CustomerTransaction.findOne({ _id: app.invoiceId, tenantId });
       if (!invoice || invoice.customer.toString() !== customerId) {
         throw new Error(`Invoice ${app.invoiceId} not found or does not belong to customer`);
       }
@@ -452,9 +463,9 @@ class CustomerTransactionService {
     // Update customer balance (handled by payment transaction creation)
     // But need to handle unapplied amount
     if (unappliedAmount > 0) {
-      const customer = await Customer.findById(customerId);
+      const customer = await Customer.findOne({ _id: customerId, tenantId });
       const newAdvanceBalance = (customer.advanceBalance || 0) + unappliedAmount;
-      await Customer.findByIdAndUpdate(customerId, {
+      await Customer.findOneAndUpdate({ _id: customerId, tenantId }, {
         advanceBalance: newAdvanceBalance,
         currentBalance: customer.pendingBalance - newAdvanceBalance
       });
@@ -470,8 +481,11 @@ class CustomerTransactionService {
    * @param {Object} user - User
    * @returns {Promise<CustomerTransaction>}
    */
-  async reverseTransaction(transactionId, reason, user) {
-    const originalTransaction = await CustomerTransaction.findById(transactionId);
+  async reverseTransaction(transactionId, reason, user, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for reverseTransaction');
+    }
+    const originalTransaction = await CustomerTransaction.findOne({ _id: transactionId, tenantId });
     if (!originalTransaction) {
       throw new Error('Transaction not found');
     }
@@ -480,8 +494,8 @@ class CustomerTransactionService {
       throw new Error('Transaction cannot be reversed');
     }
 
-    // Get customer current balances
-    const customer = await Customer.findById(originalTransaction.customer);
+    // Get customer current balances (tenant-scoped)
+    const customer = await Customer.findOne({ _id: originalTransaction.customer, tenantId });
     const balanceBefore = {
       pendingBalance: customer.pendingBalance,
       advanceBalance: customer.advanceBalance,
@@ -498,7 +512,7 @@ class CustomerTransactionService {
       referenceNumber: `REV-${originalTransaction.transactionNumber}`,
       reason: `Reversal of ${originalTransaction.transactionNumber}: ${reason}`,
       notes: reason
-    }, user);
+    }, user, tenantId);
 
     // Link reversal
     reversalTransaction.isReversal = true;
@@ -518,7 +532,7 @@ class CustomerTransactionService {
       -originalTransaction.balanceImpact,
       'reversal'
     );
-    await this.updateCustomerBalance(originalTransaction.customer, balanceAfter);
+    await this.updateCustomerBalance(originalTransaction.customer, balanceAfter, tenantId);
 
     return reversalTransaction;
   }
@@ -531,8 +545,11 @@ class CustomerTransactionService {
    * @param {Object} user - User
    * @returns {Promise<CustomerTransaction>}
    */
-  async partialReverseTransaction(transactionId, amount, reason, user) {
-    const originalTransaction = await CustomerTransaction.findById(transactionId);
+  async partialReverseTransaction(transactionId, amount, reason, user, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for partialReverseTransaction');
+    }
+    const originalTransaction = await CustomerTransaction.findOne({ _id: transactionId, tenantId });
     if (!originalTransaction) {
       throw new Error('Transaction not found');
     }
@@ -549,8 +566,8 @@ class CustomerTransactionService {
       throw new Error(`Reversal amount (${amount}) exceeds remaining amount (${originalTransaction.remainingAmount})`);
     }
 
-    // Get customer current balances
-    const customer = await Customer.findById(originalTransaction.customer);
+    // Get customer current balances (tenant-scoped)
+    const customer = await Customer.findOne({ _id: originalTransaction.customer, tenantId });
     const balanceBefore = {
       pendingBalance: customer.pendingBalance,
       advanceBalance: customer.advanceBalance,
@@ -567,7 +584,7 @@ class CustomerTransactionService {
       referenceNumber: `REV-PARTIAL-${originalTransaction.transactionNumber}`,
       reason: `Partial reversal of ${originalTransaction.transactionNumber}: ${reason}`,
       notes: `Partial reversal: ${amount} of ${originalTransaction.netAmount}. ${reason}`
-    }, user);
+    }, user, tenantId);
 
     // Link reversal
     reversalTransaction.isReversal = true;
@@ -594,7 +611,7 @@ class CustomerTransactionService {
       -amount, // Negative impact for reversal
       'reversal'
     );
-    await this.updateCustomerBalance(originalTransaction.customer, balanceAfter);
+    await this.updateCustomerBalance(originalTransaction.customer, balanceAfter, tenantId);
 
     return reversalTransaction;
   }
@@ -605,7 +622,10 @@ class CustomerTransactionService {
    * @param {Object} options - Query options
    * @returns {Promise<Object>}
    */
-  async getCustomerTransactions(customerId, options = {}) {
+  async getCustomerTransactions(customerId, options = {}, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getCustomerTransactions');
+    }
     const {
       limit = 50,
       skip = 0,
@@ -616,7 +636,7 @@ class CustomerTransactionService {
       includeReversed = false
     } = options;
 
-    const filter = { customer: customerId };
+    const filter = { customer: customerId, tenantId }; // CRITICAL: Include tenantId
     
     if (transactionType) {
       filter.transactionType = transactionType;
@@ -675,9 +695,13 @@ class CustomerTransactionService {
    * @param {String} customerId - Customer ID
    * @returns {Promise<Object>}
    */
-  async getCustomerAging(customerId) {
+  async getCustomerAging(customerId, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getCustomerAging');
+    }
     const invoices = await CustomerTransaction.find({
       customer: customerId,
+      tenantId, // CRITICAL: Include tenantId
       transactionType: 'invoice',
       status: { $in: ['posted', 'partially_paid'] },
       remainingAmount: { $gt: 0 }

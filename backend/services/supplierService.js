@@ -129,10 +129,14 @@ class SupplierService {
   /**
    * Get suppliers with filtering and pagination
    * @param {object} queryParams - Query parameters
-   * @param {string} tenantId - Tenant ID to scope the query (optional but recommended)
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getSuppliers(queryParams, tenantId = null) {
+  async getSuppliers(queryParams, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get suppliers');
+    }
+    
     const getAllSuppliers = queryParams.all === 'true' || queryParams.all === true ||
                            (queryParams.limit && parseInt(queryParams.limit) >= 999999);
 
@@ -140,8 +144,11 @@ class SupplierService {
     const limit = getAllSuppliers ? 999999 : (parseInt(queryParams.limit) || 20);
 
     const filter = this.buildFilter(queryParams, tenantId);
+    // Ensure tenantId is in filter
+    filter.tenantId = tenantId;
 
     const result = await supplierRepository.findWithPagination(filter, {
+      tenantId: tenantId,
       page,
       limit,
       getAll: getAllSuppliers,
@@ -160,12 +167,20 @@ class SupplierService {
   /**
    * Get single supplier by ID
    * @param {string} id - Supplier ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<Supplier>}
    */
-  async getSupplierById(id) {
-    const supplier = await supplierRepository.findById(id, [
-      { path: 'ledgerAccount', select: 'accountCode accountName' }
-    ]);
+  async getSupplierById(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get supplier');
+    }
+    
+    const supplier = await supplierRepository.findById(id, {
+      tenantId: tenantId,
+      populate: [
+        { path: 'ledgerAccount', select: 'accountCode accountName' }
+      ]
+    });
 
     if (!supplier) {
       throw new Error('Supplier not found');
@@ -220,9 +235,16 @@ class SupplierService {
    * @param {string} tenantId - Tenant ID to scope the query (optional but recommended)
    * @returns {Promise<Array>}
    */
-  async getSuppliersForExport(filters = {}, tenantId = null) {
+  async getSuppliersForExport(filters = {}, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to export suppliers');
+    }
+    
     const filter = this.buildFilter(filters, tenantId);
+    filter.tenantId = tenantId;
+    
     return await supplierRepository.findAll(filter, {
+      tenantId: tenantId,
       lean: true
     });
   }

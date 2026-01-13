@@ -125,7 +125,7 @@ router.get('/', [
     }
     
     // Call service to get products with tenantId
-    const result = await productService.getProducts({ ...req.query, tenantId });
+    const result = await productService.getProducts(req.query, tenantId);
     
     res.json({
       products: result.products,
@@ -293,11 +293,17 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware,
   requirePermission('delete_products')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
     // Call service to delete product (soft delete, pass req for audit logging)
-    const result = await productService.deleteProduct(req.params.id, req);
+    const result = await productService.deleteProduct(req.params.id, tenantId, req);
     res.json(result);
   } catch (error) {
     logger.error('Delete product error:', { error: error });
@@ -350,10 +356,15 @@ router.get('/deleted', [
 // @route   GET /api/products/search/:query
 // @desc    Search products by name
 // @access  Private
-router.get('/search/:query', auth, async (req, res) => {
+router.get('/search/:query', [auth, tenantMiddleware], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
     const query = req.params.query;
-    const products = await productService.searchProducts(query, 10);
+    const products = await productService.searchProducts(query, tenantId, 10);
     res.json({ products });
   } catch (error) {
     logger.error('Search products error:', { error: error });
@@ -436,6 +447,7 @@ router.get('/low-stock', [
 // @access  Private
 router.post('/:id/price-check', [
   auth,
+  tenantMiddleware,
   body('customerType').isIn(['retail', 'wholesale', 'distributor', 'individual']).withMessage('Invalid customer type'),
   body('quantity').isInt({ min: 1 }).withMessage('Quantity must be at least 1')
 ], async (req, res) => {
@@ -445,8 +457,13 @@ router.post('/:id/price-check', [
       return res.status(400).json({ errors: errors.array() });
     }
     
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
     const { customerType, quantity } = req.body;
-    const result = await productService.getPriceForCustomerType(req.params.id, customerType, quantity);
+    const result = await productService.getPriceForCustomerType(req.params.id, customerType, quantity, tenantId);
     res.json(result);
   } catch (error) {
     logger.error('Price check error:', { error: error });
@@ -457,12 +474,17 @@ router.post('/:id/price-check', [
 // @route   POST /api/products/export/csv
 // @desc    Export products to CSV
 // @access  Private
-router.post('/export/csv', [auth, requirePermission('view_products')], async (req, res) => {
+router.post('/export/csv', [auth, tenantMiddleware, requirePermission('view_products')], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
     const { filters = {} } = req.body;
     
     // Call service to get products for export
-    const products = await productService.getProductsForExport(filters);
+    const products = await productService.getProductsForExport(filters, tenantId);
     
     // Prepare CSV data with proper string conversion
     const csvData = products.map(product => ({
@@ -540,12 +562,17 @@ router.post('/export/csv', [auth, requirePermission('view_products')], async (re
 // @route   POST /api/products/export/excel
 // @desc    Export products to Excel
 // @access  Private
-router.post('/export/excel', [auth, requirePermission('view_products')], async (req, res) => {
+router.post('/export/excel', [auth, tenantMiddleware, requirePermission('view_products')], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
     const { filters = {} } = req.body;
     
     // Call service to get products for export
-    const products = await productService.getProductsForExport(filters);
+    const products = await productService.getProductsForExport(filters, tenantId);
     
     // Helper function to safely convert any value to string
     const safeString = (value) => {

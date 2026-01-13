@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const comprehensiveAuditService = require('../services/comprehensiveAuditService');
 const ImmutableAuditLog = require('../models/ImmutableAuditLog');
 const { handleValidationErrors } = require('../middleware/validation');
@@ -14,6 +15,7 @@ const logger = require('../utils/logger');
  */
 router.get('/user/:userId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_audit_logs'),
   param('userId').isMongoId().withMessage('Valid user ID is required'),
   query('startDate').optional().isISO8601().withMessage('Invalid start date format'),
@@ -22,10 +24,17 @@ router.get('/user/:userId', [
 ], async (req, res) => {
   try {
     const { userId } = req.params;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     const startDate = req.query.startDate ? new Date(req.query.startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Default: last 30 days
     const endDate = req.query.endDate ? new Date(req.query.endDate) : new Date();
     
-    const activity = await comprehensiveAuditService.investigateUserActivity(userId, startDate, endDate);
+    const activity = await comprehensiveAuditService.investigateUserActivity(userId, startDate, endDate, tenantId);
     
     res.json({
       success: true,
@@ -54,6 +63,7 @@ router.get('/user/:userId', [
  */
 router.get('/entity/:entityType/:entityId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_audit_logs'),
   param('entityType').notEmpty().withMessage('Entity type is required'),
   param('entityId').isMongoId().withMessage('Valid entity ID is required'),
@@ -61,8 +71,14 @@ router.get('/entity/:entityType/:entityId', [
 ], async (req, res) => {
   try {
     const { entityType, entityId } = req.params;
-    
-    const changes = await comprehensiveAuditService.investigateEntityChanges(entityType, entityId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const changes = await comprehensiveAuditService.investigateEntityChanges(entityType, entityId, tenantId);
     
     res.json({
       success: true,
@@ -90,6 +106,7 @@ router.get('/entity/:entityType/:entityId', [
  */
 router.get('/financial/:accountCode', [
   auth,
+  tenantMiddleware,
   requirePermission('view_audit_logs'),
   param('accountCode').notEmpty().withMessage('Account code is required'),
   query('startDate').optional().isISO8601().withMessage('Invalid start date format'),
@@ -98,10 +115,17 @@ router.get('/financial/:accountCode', [
 ], async (req, res) => {
   try {
     const { accountCode } = req.params;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     const startDate = req.query.startDate ? new Date(req.query.startDate) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const endDate = req.query.endDate ? new Date(req.query.endDate) : new Date();
     
-    const changes = await comprehensiveAuditService.investigateFinancialChanges(accountCode, startDate, endDate);
+    const changes = await comprehensiveAuditService.investigateFinancialChanges(accountCode, startDate, endDate, tenantId);
     
     res.json({
       success: true,
@@ -130,14 +154,21 @@ router.get('/financial/:accountCode', [
  */
 router.get('/transaction/:transactionId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_audit_logs'),
   param('transactionId').notEmpty().withMessage('Transaction ID is required'),
   handleValidationErrors
 ], async (req, res) => {
   try {
     const { transactionId } = req.params;
-    
-    const auditTrail = await comprehensiveAuditService.getTransactionAuditTrail(transactionId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const auditTrail = await comprehensiveAuditService.getTransactionAuditTrail(transactionId, tenantId);
     
     res.json({
       success: true,
@@ -164,11 +195,19 @@ router.get('/transaction/:transactionId', [
  */
 router.get('/verify-integrity', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_audit_logs'),
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const result = await comprehensiveAuditService.verifyAuditLogIntegrity();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const result = await comprehensiveAuditService.verifyAuditLogIntegrity(tenantId);
     
     res.json({
       success: true,

@@ -327,17 +327,21 @@ class CustomerBalanceService {
   /**
    * Get customer balance summary
    * @param {String} customerId - Customer ID
+   * @param {String} tenantId - Tenant ID (required)
    * @returns {Promise<Object>}
    */
-  static async getBalanceSummary(customerId) {
+  static async getBalanceSummary(customerId, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getBalanceSummary');
+    }
     try {
-      const customer = await Customer.findById(customerId);
+      const customer = await Customer.findOne({ _id: customerId, tenantId });
       if (!customer) {
         throw new Error('Customer not found');
       }
 
-      // Get recent orders for this customer
-      const recentOrders = await Sales.find({ customer: customerId })
+      // Get recent orders for this customer (tenant-scoped)
+      const recentOrders = await Sales.find({ customer: customerId, tenantId })
         .sort({ createdAt: -1 })
         .limit(10)
         .select('orderNumber pricing.total payment.status createdAt');

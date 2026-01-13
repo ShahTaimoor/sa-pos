@@ -264,7 +264,11 @@ router.get('/low-stock', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const lowStockItems = await inventoryService.getLowStockItems();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const lowStockItems = await inventoryService.getLowStockItems(tenantId);
     res.json({ items: lowStockItems });
   } catch (error) {
     logger.error('Error fetching low stock items:', error);
@@ -285,7 +289,11 @@ router.get('/:productId', [
 ], async (req, res) => {
   try {
     const { productId } = req.params;
-    const inventory = await inventoryService.getInventoryStatus(productId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const inventory = await inventoryService.getInventoryStatus(productId, tenantId);
     res.json(inventory);
   } catch (error) {
     logger.error('Error fetching inventory details:', error);
@@ -313,6 +321,10 @@ router.get('/:productId/history', [
     const { productId } = req.params;
     const { limit = 50, offset = 0, type, startDate, endDate } = req.query;
     
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const history = await inventoryService.getInventoryHistory({
       productId,
       limit: parseInt(limit),
@@ -320,6 +332,7 @@ router.get('/:productId/history', [
       type,
       startDate,
       endDate,
+      tenantId
     });
     
     res.json(history);
@@ -361,6 +374,10 @@ router.post('/update-stock', [
       notes,
     } = req.body;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const updatedInventory = await inventoryService.updateStock({
       productId,
       type,
@@ -372,6 +389,7 @@ router.post('/update-stock', [
       cost,
       performedBy: req.user.id,
       notes,
+      tenantId
     });
 
     res.json({
@@ -401,14 +419,19 @@ router.post('/bulk-update', [
 ], async (req, res) => {
   try {
     const { updates } = req.body;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
 
-    // Add performedBy to each update
+    // Add performedBy and tenantId to each update
     const updatesWithUser = updates.map(update => ({
       ...update,
       performedBy: req.user.id,
+      tenantId
     }));
 
-    const results = await inventoryService.bulkUpdateStock(updatesWithUser);
+    const results = await inventoryService.bulkUpdateStock(updatesWithUser, tenantId);
     
     res.json({
       message: 'Bulk stock update completed',
@@ -434,8 +457,11 @@ router.post('/reserve-stock', [
 ], async (req, res) => {
   try {
     const { productId, quantity } = req.body;
-
-    const inventory = await inventoryService.reserveStock({ productId, quantity });
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const inventory = await inventoryService.reserveStock({ productId, quantity, tenantId });
     
     res.json({
       message: 'Stock reserved successfully',
@@ -461,8 +487,11 @@ router.post('/release-stock', [
 ], async (req, res) => {
   try {
     const { productId, quantity } = req.body;
-
-    const inventory = await inventoryService.releaseStock({ productId, quantity });
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const inventory = await inventoryService.releaseStock({ productId, quantity, tenantId });
     
     res.json({
       message: 'Stock released successfully',
@@ -501,6 +530,10 @@ router.post('/adjustments', [
       variance: adj.adjustedStock - adj.currentStock,
     }));
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const adjustment = await inventoryService.processStockAdjustment({
       adjustments: adjustmentsWithVariance,
       type,
@@ -508,6 +541,7 @@ router.post('/adjustments', [
       requestedBy: req.user.id,
       warehouse,
       notes,
+      tenantId
     });
 
     res.status(201).json({
@@ -536,6 +570,10 @@ router.get('/adjustments', [
 ], async (req, res) => {
   try {
     const { page = 1, limit = 10, status, type } = req.query;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
 
     const filter = {};
     if (status) filter.status = status;
@@ -545,6 +583,7 @@ router.get('/adjustments', [
       page,
       limit,
       sort: { requestedDate: -1 },
+      tenantId,
       populate: [
         { path: 'requestedBy', select: 'firstName lastName' },
         { path: 'approvedBy', select: 'firstName lastName' },
@@ -576,8 +615,11 @@ router.put('/adjustments/:adjustmentId/approve', [
 ], async (req, res) => {
   try {
     const { adjustmentId } = req.params;
-
-    const adjustment = await stockAdjustmentRepository.approveAdjustment(adjustmentId, req.user.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const adjustment = await stockAdjustmentRepository.approveAdjustment(adjustmentId, req.user.id, tenantId);
     
     res.json({
       message: 'Stock adjustment approved successfully',
@@ -602,8 +644,11 @@ router.put('/adjustments/:adjustmentId/complete', [
 ], async (req, res) => {
   try {
     const { adjustmentId } = req.params;
-
-    const adjustment = await stockAdjustmentRepository.completeAdjustment(adjustmentId, req.user.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const adjustment = await stockAdjustmentRepository.completeAdjustment(adjustmentId, req.user.id, tenantId);
     
     res.json({
       message: 'Stock adjustment completed successfully',

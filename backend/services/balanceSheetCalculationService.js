@@ -9,6 +9,7 @@ const TransactionRepository = require('../repositories/TransactionRepository');
 const FinancialStatementRepository = require('../repositories/FinancialStatementRepository');
 const AccountingService = require('./accountingService');
 const BalanceSheet = require('../models/BalanceSheet'); // Keep for model instance methods
+const logger = require('../utils/logger');
 
 class BalanceSheetCalculationService {
   constructor() {
@@ -21,17 +22,25 @@ class BalanceSheetCalculationService {
   }
 
   // Get account codes dynamically (similar to P&L service)
-  async getAccountCodes() {
-    if (this.accountCodes) {
-      return this.accountCodes;
+  async getAccountCodes(tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getAccountCodes');
     }
-    this.accountCodes = await AccountingService.getDefaultAccountCodes();
-    return this.accountCodes;
+    // Cache per tenant to avoid cross-tenant data leakage
+    const cacheKey = `accountCodes_${tenantId}`;
+    if (this[cacheKey]) {
+      return this[cacheKey];
+    }
+    this[cacheKey] = await AccountingService.getDefaultAccountCodes(tenantId);
+    return this[cacheKey];
   }
 
   // Get basic balance sheet statistics for a period
-  async getStats(period = {}) {
-    const filter = {};
+  async getStats(period = {}, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getStats');
+    }
+    const filter = { tenantId }; // CRITICAL: Always include tenantId
     if (period.startDate || period.endDate) {
       filter.statementDate = {};
       if (period.startDate) filter.statementDate.$gte = new Date(period.startDate);
@@ -62,7 +71,10 @@ class BalanceSheetCalculationService {
   }
 
   // Generate balance sheet for a specific period
-  async generateBalanceSheet(statementDate, periodType = 'monthly', generatedBy) {
+  async generateBalanceSheet(statementDate, periodType = 'monthly', generatedBy, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for generateBalanceSheet');
+    }
     try {
       // Ensure statementDate is a Date object
       const date = new Date(statementDate);
@@ -71,10 +83,11 @@ class BalanceSheetCalculationService {
       }
 
       // Generate statement number
-      const statementNumber = await this.generateStatementNumber(date, periodType);
+      const statementNumber = await this.generateStatementNumber(date, periodType, tenantId);
       
       // Check if balance sheet already exists for this period
       const existingBalanceSheet = await BalanceSheetRepository.findOne({
+        tenantId,
         statementDate: { $gte: new Date(date.getFullYear(), date.getMonth(), 1) },
         periodType
       });
@@ -88,10 +101,11 @@ class BalanceSheetCalculationService {
         statementNumber,
         statementDate: date,
         periodType,
+        tenantId, // CRITICAL: Include tenantId
         status: 'draft',
-        assets: await this.calculateAssets(date),
-        liabilities: await this.calculateLiabilities(date),
-        equity: await this.calculateEquity(date, periodType),
+        assets: await this.calculateAssets(date, tenantId),
+        liabilities: await this.calculateLiabilities(date, tenantId),
+        equity: await this.calculateEquity(date, periodType, tenantId),
         metadata: {
           generatedBy,
           generatedAt: new Date(),
@@ -124,7 +138,10 @@ class BalanceSheetCalculationService {
   }
 
   // Generate unique statement number
-  async generateStatementNumber(statementDate, periodType) {
+  async generateStatementNumber(statementDate, periodType, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for generateStatementNumber');
+    }
     const year = statementDate.getFullYear();
     const month = String(statementDate.getMonth() + 1).padStart(2, '0');
     
@@ -144,8 +161,9 @@ class BalanceSheetCalculationService {
         prefix = `BS-M${year}${month}`;
     }
 
-    // Find all existing statement numbers with this prefix
+    // Find all existing statement numbers with this prefix (tenant-scoped)
     const existingSheets = await BalanceSheetRepository.findAll({
+      tenantId,
       statementNumber: { $regex: `^${prefix}-` }
     }, {
       select: 'statementNumber',
@@ -170,13 +188,13 @@ class BalanceSheetCalculationService {
     const nextSequence = maxSequence + 1;
     const statementNumber = `${prefix}-${String(nextSequence).padStart(3, '0')}`;
 
-    // Double-check that this number doesn't exist (safety check)
-    const exists = await BalanceSheetRepository.findOne({ statementNumber });
+    // Double-check that this number doesn't exist (safety check, tenant-scoped)
+    const exists = await BalanceSheetRepository.findOne({ tenantId, statementNumber });
     if (exists) {
       // If it exists, try incrementing until we find a free number
       let attemptSequence = nextSequence + 1;
       let attemptNumber = `${prefix}-${String(attemptSequence).padStart(3, '0')}`;
-      while (await BalanceSheetRepository.findOne({ statementNumber: attemptNumber })) {
+      while (await BalanceSheetRepository.findOne({ tenantId, statementNumber: attemptNumber })) {
         attemptSequence++;
         attemptNumber = `${prefix}-${String(attemptSequence).padStart(3, '0')}`;
       }
@@ -187,17 +205,20 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate assets
-  async calculateAssets(statementDate) {
+  async calculateAssets(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateAssets');
+    }
     try {
-      const cashAndCashEquivalents = await this.calculateCashAndCashEquivalents(statementDate);
-      const accountsReceivable = await this.calculateAccountsReceivable(statementDate);
-      const inventory = await this.calculateInventory(statementDate);
-      const prepaidExpenses = await this.calculatePrepaidExpenses(statementDate);
-      const propertyPlantEquipment = await this.calculatePropertyPlantEquipment(statementDate);
-      const accumulatedDepreciation = await this.calculateAccumulatedDepreciation(statementDate);
-      const intangibleAssets = await this.calculateIntangibleAssets(statementDate);
-      const longTermInvestments = await this.calculateLongTermInvestments(statementDate);
-      const otherAssets = await this.calculateOtherAssets(statementDate);
+      const cashAndCashEquivalents = await this.calculateCashAndCashEquivalents(statementDate, tenantId);
+      const accountsReceivable = await this.calculateAccountsReceivable(statementDate, tenantId);
+      const inventory = await this.calculateInventory(statementDate, tenantId);
+      const prepaidExpenses = await this.calculatePrepaidExpenses(statementDate, tenantId);
+      const propertyPlantEquipment = await this.calculatePropertyPlantEquipment(statementDate, tenantId);
+      const accumulatedDepreciation = await this.calculateAccumulatedDepreciation(statementDate, tenantId);
+      const intangibleAssets = await this.calculateIntangibleAssets(statementDate, tenantId);
+      const longTermInvestments = await this.calculateLongTermInvestments(statementDate, tenantId);
+      const otherAssets = await this.calculateOtherAssets(statementDate, tenantId);
 
       // Calculate totals manually to avoid pre-save middleware issues
       const totalCurrentAssets = 
@@ -262,21 +283,25 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate cash and cash equivalents
-  async calculateCashAndCashEquivalents(statementDate) {
+  async calculateCashAndCashEquivalents(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateCashAndCashEquivalents');
+    }
     try {
       // Get account codes dynamically
-      const accountCodes = await this.getAccountCodes();
+      const accountCodes = await this.getAccountCodes(tenantId);
       
       // Calculate cash account balance (dynamic lookup)
       const cashAccountCode = accountCodes.cash || '1001';
-      const cashBalance = await this.calculateAccountBalance(cashAccountCode, statementDate);
+      const cashBalance = await this.calculateAccountBalance(cashAccountCode, statementDate, tenantId);
 
       // Calculate bank account balance (dynamic lookup)
       const bankAccountCode = accountCodes.bank || '1002';
-      const bankBalance = await this.calculateAccountBalance(bankAccountCode, statementDate);
+      const bankBalance = await this.calculateAccountBalance(bankAccountCode, statementDate, tenantId);
 
       // Try to find separate cash on hand account
       const cashOnHandAccount = await ChartOfAccountsRepository.findOne({
+        tenantId,
         accountName: { $regex: /cash.*hand|petty.*cash/i },
         accountType: 'asset',
         accountCategory: 'current_assets',
@@ -287,7 +312,7 @@ class BalanceSheetCalculationService {
       let pettyCash = 0;
 
       if (cashOnHandAccount) {
-        cashOnHand = await this.calculateAccountBalance(cashOnHandAccount.accountCode, statementDate);
+        cashOnHand = await this.calculateAccountBalance(cashOnHandAccount.accountCode, statementDate, tenantId);
       } else {
         // If no separate account, use cash balance for cash on hand
         cashOnHand = Math.max(0, cashBalance);
@@ -295,6 +320,7 @@ class BalanceSheetCalculationService {
 
       // Petty cash might be in a separate account or part of cash
       const pettyCashAccount = await ChartOfAccountsRepository.findOne({
+        tenantId,
         accountName: { $regex: /petty.*cash/i },
         accountType: 'asset',
         accountCategory: 'current_assets',
@@ -302,7 +328,7 @@ class BalanceSheetCalculationService {
       });
 
       if (pettyCashAccount && pettyCashAccount.accountCode !== cashOnHandAccount?.accountCode) {
-        pettyCash = await this.calculateAccountBalance(pettyCashAccount.accountCode, statementDate);
+        pettyCash = await this.calculateAccountBalance(pettyCashAccount.accountCode, statementDate, tenantId);
       }
 
       return {
@@ -318,14 +344,17 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate accounts receivable
-  async calculateAccountsReceivable(statementDate) {
+  async calculateAccountsReceivable(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateAccountsReceivable');
+    }
     try {
       // Get account codes dynamically
-      const accountCodes = await this.getAccountCodes();
+      const accountCodes = await this.getAccountCodes(tenantId);
       
       // Calculate accounts receivable balance (dynamic lookup)
       const arAccountCode = accountCodes.accountsReceivable || '1201';
-      const arBalance = await this.calculateAccountBalance(arAccountCode, statementDate);
+      const arBalance = await this.calculateAccountBalance(arAccountCode, statementDate, tenantId);
 
       // Allowance for doubtful accounts (typically 2-5% of receivables)
       const allowancePercentage = 0.03; // 3%
@@ -349,17 +378,21 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate inventory
-  async calculateInventory(statementDate) {
+  async calculateInventory(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateInventory');
+    }
     try {
       // Get account codes dynamically
-      const accountCodes = await this.getAccountCodes();
+      const accountCodes = await this.getAccountCodes(tenantId);
       
       // Calculate inventory balance (dynamic lookup)
       const inventoryAccountCode = accountCodes.inventory || '1301';
-      const inventoryBalance = await this.calculateAccountBalance(inventoryAccountCode, statementDate);
+      const inventoryBalance = await this.calculateAccountBalance(inventoryAccountCode, statementDate, tenantId);
 
       // Try to find separate inventory accounts for breakdown
       const rawMaterialsAccount = await ChartOfAccountsRepository.findOne({
+        tenantId,
         accountName: { $regex: /raw.*material/i },
         accountType: 'asset',
         accountCategory: 'inventory',
@@ -367,6 +400,7 @@ class BalanceSheetCalculationService {
       });
 
       const workInProgressAccount = await ChartOfAccountsRepository.findOne({
+        tenantId,
         accountName: { $regex: /work.*progress|wip/i },
         accountType: 'asset',
         accountCategory: 'inventory',
@@ -377,11 +411,11 @@ class BalanceSheetCalculationService {
       let workInProgress = 0;
 
       if (rawMaterialsAccount) {
-        rawMaterials = await this.calculateAccountBalance(rawMaterialsAccount.accountCode, statementDate);
+        rawMaterials = await this.calculateAccountBalance(rawMaterialsAccount.accountCode, statementDate, tenantId);
       }
 
       if (workInProgressAccount) {
-        workInProgress = await this.calculateAccountBalance(workInProgressAccount.accountCode, statementDate);
+        workInProgress = await this.calculateAccountBalance(workInProgressAccount.accountCode, statementDate, tenantId);
       }
 
       const finishedGoods = Math.max(0, inventoryBalance) - rawMaterials - workInProgress;
@@ -404,10 +438,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate prepaid expenses
-  async calculatePrepaidExpenses(statementDate) {
+  async calculatePrepaidExpenses(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculatePrepaidExpenses');
+    }
     try {
       // Find prepaid expense accounts
       const prepaidExpenseAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'asset',
         accountCategory: 'prepaid_expenses',
         isActive: true,
@@ -416,12 +454,13 @@ class BalanceSheetCalculationService {
 
       let totalPrepaid = 0;
       for (const account of prepaidExpenseAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         totalPrepaid += balance;
       }
 
       // Also check for accounts with "prepaid" in the name
       const prepaidByName = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'asset',
         accountName: { $regex: /prepaid/i },
         isActive: true,
@@ -429,7 +468,7 @@ class BalanceSheetCalculationService {
       });
 
       for (const account of prepaidByName) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         totalPrepaid += balance;
       }
 
@@ -441,10 +480,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate property, plant, and equipment
-  async calculatePropertyPlantEquipment(statementDate) {
+  async calculatePropertyPlantEquipment(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculatePropertyPlantEquipment');
+    }
     try {
       // Find fixed asset accounts
       const fixedAssetAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'asset',
         accountCategory: 'fixed_assets',
         isActive: true,
@@ -459,7 +502,7 @@ class BalanceSheetCalculationService {
       let computerEquipment = 0;
 
       for (const account of fixedAssetAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         const accountName = (account.accountName || '').toLowerCase();
 
         if (accountName.includes('land')) {
@@ -506,10 +549,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate accumulated depreciation
-  async calculateAccumulatedDepreciation(statementDate) {
+  async calculateAccumulatedDepreciation(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateAccumulatedDepreciation');
+    }
     try {
       // Find accumulated depreciation accounts (contra-asset accounts)
       const depreciationAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'asset',
         accountName: { $regex: /accumulated.*depreciation|depreciation.*accumulated/i },
         isActive: true
@@ -518,12 +565,13 @@ class BalanceSheetCalculationService {
       let totalDepreciation = 0;
       for (const account of depreciationAccounts) {
         // Accumulated depreciation is a contra-asset (credit balance)
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         totalDepreciation += Math.abs(balance); // Use absolute value
       }
 
       // Also check for depreciation expense accounts that might track accumulated amounts
       const depreciationExpenseAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'expense',
         accountName: { $regex: /depreciation/i },
         isActive: true
@@ -542,10 +590,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate intangible assets
-  async calculateIntangibleAssets(statementDate) {
+  async calculateIntangibleAssets(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateIntangibleAssets');
+    }
     try {
       // Find intangible asset accounts
       const intangibleAssetAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'asset',
         accountCategory: 'other_assets',
         isActive: true,
@@ -561,7 +613,7 @@ class BalanceSheetCalculationService {
       let software = 0;
 
       for (const account of intangibleAssetAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         const accountName = (account.accountName || '').toLowerCase();
 
         if (accountName.includes('goodwill')) {
@@ -600,10 +652,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate long-term investments
-  async calculateLongTermInvestments(statementDate) {
+  async calculateLongTermInvestments(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateLongTermInvestments');
+    }
     try {
       // Find long-term investment accounts
       const investmentAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'asset',
         accountName: { $regex: /investment|securities|stock.*investment|bond.*investment/i },
         isActive: true,
@@ -612,7 +668,7 @@ class BalanceSheetCalculationService {
 
       let totalInvestments = 0;
       for (const account of investmentAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         totalInvestments += balance;
       }
 
@@ -624,10 +680,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate other assets
-  async calculateOtherAssets(statementDate) {
+  async calculateOtherAssets(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateOtherAssets');
+    }
     try {
       // Find other asset accounts that don't fit into main categories
       const otherAssetAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'asset',
         accountCategory: 'other_assets',
         isActive: true,
@@ -639,7 +699,7 @@ class BalanceSheetCalculationService {
 
       let totalOtherAssets = 0;
       for (const account of otherAssetAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         totalOtherAssets += balance;
       }
 
@@ -651,16 +711,19 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate liabilities
-  async calculateLiabilities(statementDate) {
+  async calculateLiabilities(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateLiabilities');
+    }
     try {
-      const accountsPayable = await this.calculateAccountsPayable(statementDate);
-      const accruedExpenses = await this.calculateAccruedExpenses(statementDate);
-      const shortTermDebt = await this.calculateShortTermDebt(statementDate);
-      const deferredRevenue = await this.calculateDeferredRevenue(statementDate);
-      const longTermDebt = await this.calculateLongTermDebt(statementDate);
-      const deferredTaxLiabilities = await this.calculateDeferredTaxLiabilities(statementDate);
-      const pensionLiabilities = await this.calculatePensionLiabilities(statementDate);
-      const otherLongTermLiabilities = await this.calculateOtherLongTermLiabilities(statementDate);
+      const accountsPayable = await this.calculateAccountsPayable(statementDate, tenantId);
+      const accruedExpenses = await this.calculateAccruedExpenses(statementDate, tenantId);
+      const shortTermDebt = await this.calculateShortTermDebt(statementDate, tenantId);
+      const deferredRevenue = await this.calculateDeferredRevenue(statementDate, tenantId);
+      const longTermDebt = await this.calculateLongTermDebt(statementDate, tenantId);
+      const deferredTaxLiabilities = await this.calculateDeferredTaxLiabilities(statementDate, tenantId);
+      const pensionLiabilities = await this.calculatePensionLiabilities(statementDate, tenantId);
+      const otherLongTermLiabilities = await this.calculateOtherLongTermLiabilities(statementDate, tenantId);
 
       // Calculate totals manually
       const totalCurrentLiabilities = 
@@ -717,14 +780,17 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate accounts payable
-  async calculateAccountsPayable(statementDate) {
+  async calculateAccountsPayable(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateAccountsPayable');
+    }
     try {
       // Get account codes dynamically
-      const accountCodes = await this.getAccountCodes();
+      const accountCodes = await this.getAccountCodes(tenantId);
       
       // Calculate accounts payable balance (dynamic lookup)
       const apAccountCode = accountCodes.accountsPayable || '2001';
-      const apBalance = await this.calculateAccountBalance(apAccountCode, statementDate);
+      const apBalance = await this.calculateAccountBalance(apAccountCode, statementDate, tenantId);
 
       return {
         tradePayables: Math.max(0, apBalance),
@@ -742,10 +808,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate accrued expenses
-  async calculateAccruedExpenses(statementDate) {
+  async calculateAccruedExpenses(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateAccruedExpenses');
+    }
     try {
       // Find accrued expense accounts
       const accruedExpenseAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'liability',
         accountCategory: 'accrued_expenses',
         isActive: true,
@@ -760,7 +830,7 @@ class BalanceSheetCalculationService {
       let otherAccruedExpenses = 0;
 
       for (const account of accruedExpenseAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         const accountName = (account.accountName || '').toLowerCase();
 
         if (accountName.includes('salary') || accountName.includes('wage')) {
@@ -780,13 +850,14 @@ class BalanceSheetCalculationService {
 
       // Also check for sales tax payable
       const salesTaxPayableAccount = await ChartOfAccountsRepository.findOne({
+        tenantId,
         accountCode: '2120',
         accountName: { $regex: /sales.*tax.*payable/i },
         isActive: true
       });
 
       if (salesTaxPayableAccount) {
-        const salesTaxBalance = await this.calculateAccountBalance(salesTaxPayableAccount.accountCode, statementDate);
+        const salesTaxBalance = await this.calculateAccountBalance(salesTaxPayableAccount.accountCode, statementDate, tenantId);
         taxesPayable += Math.max(0, salesTaxBalance);
       }
 
@@ -817,10 +888,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate short-term debt
-  async calculateShortTermDebt(statementDate) {
+  async calculateShortTermDebt(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateShortTermDebt');
+    }
     try {
       // Find short-term debt accounts
       const shortTermDebtAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'liability',
         accountCategory: 'current_liabilities',
         isActive: true,
@@ -838,7 +913,7 @@ class BalanceSheetCalculationService {
       let creditCardDebt = 0;
 
       for (const account of shortTermDebtAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         const accountName = (account.accountName || '').toLowerCase();
 
         if (accountName.includes('credit') && accountName.includes('line')) {
@@ -873,10 +948,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate deferred revenue
-  async calculateDeferredRevenue(statementDate) {
+  async calculateDeferredRevenue(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateDeferredRevenue');
+    }
     try {
       // Get orders that have been paid but not yet delivered
       const deferredOrders = await Sales.find({
+        tenantId,
         createdAt: { $lte: statementDate },
         status: { $in: ['pending', 'confirmed'] },
         payment: { status: 'completed' }
@@ -895,10 +974,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate long-term debt
-  async calculateLongTermDebt(statementDate) {
+  async calculateLongTermDebt(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateLongTermDebt');
+    }
     try {
       // Find long-term debt accounts
       const longTermDebtAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'liability',
         accountCategory: 'long_term_liabilities',
         isActive: true,
@@ -910,7 +993,7 @@ class BalanceSheetCalculationService {
       let bondsPayable = 0;
 
       for (const account of longTermDebtAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         const accountName = (account.accountName || '').toLowerCase();
 
         if (accountName.includes('mortgage')) {
@@ -945,10 +1028,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate deferred tax liabilities
-  async calculateDeferredTaxLiabilities(statementDate) {
+  async calculateDeferredTaxLiabilities(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateDeferredTaxLiabilities');
+    }
     try {
       // Find deferred tax liability accounts
       const deferredTaxAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'liability',
         accountCategory: 'long_term_liabilities',
         isActive: true,
@@ -960,7 +1047,7 @@ class BalanceSheetCalculationService {
 
       let totalDeferredTax = 0;
       for (const account of deferredTaxAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         totalDeferredTax += balance;
       }
 
@@ -972,10 +1059,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate pension liabilities
-  async calculatePensionLiabilities(statementDate) {
+  async calculatePensionLiabilities(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculatePensionLiabilities');
+    }
     try {
       // Find pension liability accounts
       const pensionAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'liability',
         accountName: { $regex: /pension|retirement|benefit.*plan/i },
         isActive: true,
@@ -984,7 +1075,7 @@ class BalanceSheetCalculationService {
 
       let totalPension = 0;
       for (const account of pensionAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         totalPension += balance;
       }
 
@@ -996,10 +1087,14 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate other long-term liabilities
-  async calculateOtherLongTermLiabilities(statementDate) {
+  async calculateOtherLongTermLiabilities(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateOtherLongTermLiabilities');
+    }
     try {
       // Find other long-term liability accounts
       const otherLiabilityAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'liability',
         accountCategory: 'long_term_liabilities',
         isActive: true,
@@ -1011,7 +1106,7 @@ class BalanceSheetCalculationService {
 
       let totalOtherLiabilities = 0;
       for (const account of otherLiabilityAccounts) {
-        const balance = await this.calculateAccountBalance(account.accountCode, statementDate);
+        const balance = await this.calculateAccountBalance(account.accountCode, statementDate, tenantId);
         totalOtherLiabilities += balance;
       }
 
@@ -1023,7 +1118,10 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate equity
-  async calculateEquity(statementDate, periodType) {
+  async calculateEquity(statementDate, periodType, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateEquity');
+    }
     try {
       // Ensure statementDate is a Date object
       const date = statementDate instanceof Date ? statementDate : new Date(statementDate);
@@ -1031,9 +1129,9 @@ class BalanceSheetCalculationService {
         throw new Error(`Invalid statement date: ${statementDate}`);
       }
 
-      const contributedCapital = await this.calculateContributedCapital(date);
-      const retainedEarnings = await this.calculateRetainedEarnings(date, periodType);
-      const otherEquity = await this.calculateOtherEquity(date);
+      const contributedCapital = await this.calculateContributedCapital(date, tenantId);
+      const retainedEarnings = await this.calculateRetainedEarnings(date, periodType, tenantId);
+      const otherEquity = await this.calculateOtherEquity(date, tenantId);
 
       // Ensure all values are numbers (handle NaN/undefined)
       const contributedCapitalTotal = Number(contributedCapital?.total) || 0;
@@ -1092,7 +1190,10 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate account balance from transactions
-  async calculateAccountBalance(accountCode, statementDate) {
+  async calculateAccountBalance(accountCode, statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateAccountBalance');
+    }
     try {
       // Ensure accountCode is uppercase to match Transaction model format
       const normalizedAccountCode = accountCode ? accountCode.toString().trim().toUpperCase() : null;
@@ -1108,6 +1209,7 @@ class BalanceSheetCalculationService {
       }
       
       const account = await ChartOfAccountsRepository.findOne({ 
+        tenantId,
         accountCode: normalizedAccountCode, 
         isActive: true 
       });
@@ -1118,10 +1220,11 @@ class BalanceSheetCalculationService {
       // Get opening balance
       let balance = account.openingBalance || 0;
 
-      // Calculate balance from transactions up to statement date
+      // Calculate balance from transactions up to statement date (tenant-scoped)
       const transactions = await TransactionRepository.aggregate([
         {
           $match: {
+            tenantId,
             accountCode: normalizedAccountCode,
             createdAt: { $lte: date },
             status: 'completed'
@@ -1154,7 +1257,10 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate contributed capital
-  async calculateContributedCapital(statementDate) {
+  async calculateContributedCapital(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateContributedCapital');
+    }
     try {
       // Ensure statementDate is a Date object
       const date = statementDate instanceof Date ? statementDate : new Date(statementDate);
@@ -1162,6 +1268,7 @@ class BalanceSheetCalculationService {
       // Get all owner equity accounts from Chart of Accounts
       // Exclude system accounts (parent accounts) as they don't have direct balances
       const ownerEquityAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'equity',
         accountCategory: 'owner_equity',
         isActive: true,
@@ -1177,7 +1284,7 @@ class BalanceSheetCalculationService {
         if (!account || !account.accountCode) {
           continue; // Skip invalid accounts
         }
-        const balance = await this.calculateAccountBalance(account.accountCode, date);
+        const balance = await this.calculateAccountBalance(account.accountCode, date, tenantId);
         
         // Map accounts to balance sheet categories based on account name/code
         // Common stock typically uses codes like 3101, 3102, etc.
@@ -1226,7 +1333,10 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate retained earnings
-  async calculateRetainedEarnings(statementDate, periodType) {
+  async calculateRetainedEarnings(statementDate, periodType, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateRetainedEarnings');
+    }
     try {
       // Get previous period's retained earnings
       const previousPeriod = await this.getPreviousPeriod(statementDate, periodType);
@@ -1234,6 +1344,7 @@ class BalanceSheetCalculationService {
 
       if (previousPeriod) {
         const previousBalanceSheet = await BalanceSheetRepository.findOne({
+          tenantId,
           statementDate: previousPeriod,
           periodType
         });
@@ -1243,10 +1354,10 @@ class BalanceSheetCalculationService {
       }
 
       // Calculate current period earnings (this would need to be integrated with P&L)
-      const currentPeriodEarnings = await this.calculateCurrentPeriodEarnings(statementDate, periodType);
+      const currentPeriodEarnings = await this.calculateCurrentPeriodEarnings(statementDate, periodType, tenantId);
 
       // Calculate dividends paid (this would need to be tracked)
-      const dividendsPaid = await this.calculateDividendsPaid(statementDate, periodType);
+      const dividendsPaid = await this.calculateDividendsPaid(statementDate, periodType, tenantId);
 
       return {
         beginningRetainedEarnings: beginningRetainedEarnings,
@@ -1266,7 +1377,10 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate other equity
-  async calculateOtherEquity(statementDate) {
+  async calculateOtherEquity(statementDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateOtherEquity');
+    }
     try {
       // Ensure statementDate is a Date object
       const date = statementDate instanceof Date ? statementDate : new Date(statementDate);
@@ -1274,6 +1388,7 @@ class BalanceSheetCalculationService {
       // Get equity accounts that are not owner_equity or retained_earnings
       // Exclude system accounts (parent accounts) as they don't have direct balances
       const otherEquityAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'equity',
         accountCategory: { $nin: ['owner_equity', 'retained_earnings'] },
         isActive: true,
@@ -1288,7 +1403,7 @@ class BalanceSheetCalculationService {
         if (!account || !account.accountCode) {
           continue; // Skip invalid accounts
         }
-        const balance = await this.calculateAccountBalance(account.accountCode, date);
+        const balance = await this.calculateAccountBalance(account.accountCode, date, tenantId);
         
         // Map accounts to balance sheet categories based on account name
         const accountNameLower = (account.accountName || '').toLowerCase();
@@ -1342,13 +1457,18 @@ class BalanceSheetCalculationService {
   }
 
   // Calculate current period earnings
-  async calculateCurrentPeriodEarnings(statementDate, periodType) {
+  async calculateCurrentPeriodEarnings(statementDate, periodType, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateCurrentPeriodEarnings');
+    }
     try {
       // Integrate with P&L service for accurate net income
       const startDate = this.getPreviousPeriod(statementDate, periodType);
       
-      // Try to find existing P&L statement for this period
+      // Try to find existing P&L statement for this period (tenant-scoped)
+      const FinancialStatement = require('../models/FinancialStatement');
       const plStatement = await FinancialStatement.findOne({
+        tenantId,
         type: 'profit_loss',
         'period.startDate': startDate,
         'period.endDate': statementDate,
@@ -1362,27 +1482,16 @@ class BalanceSheetCalculationService {
 
       // Fallback: Calculate from journal entries (event-based) if P&L not available
       // This ensures we use the single source of truth (journal entries) instead of direct queries
-      // NOTE: This requires tenantId to be passed to the service or method
-      // If tenantId is not available, we return 0 to prevent incorrect calculations
       try {
-        // Try to get tenantId from context if available
-        // This method may be called from routes that have req.tenantId
-        const tenantId = this.tenantId || null;
-        
-        if (tenantId) {
-          const financialReportingService = require('./financialReportingService');
-const logger = require('../utils/logger');
-          const plData = await financialReportingService.generateProfitAndLoss({
-            tenantId: tenantId,
-            startDate: startDate,
-            endDate: statementDate
-          });
+        const financialReportingService = require('./financialReportingService');
+        const plData = await financialReportingService.generateProfitAndLoss({
+          tenantId: tenantId,
+          startDate: startDate,
+          endDate: statementDate
+        });
 
-          if (plData && plData.netIncome !== undefined) {
-            return plData.netIncome;
-          }
-        } else {
-          logger.warn('Cannot calculate P&L from journal entries: tenantId not available. Returning 0 to prevent incorrect data.');
+        if (plData && plData.netIncome !== undefined) {
+          return plData.netIncome;
         }
       } catch (plError) {
         logger.warn('Error calculating P&L from journal entries for balance sheet:', plError);
@@ -1390,7 +1499,7 @@ const logger = require('../utils/logger');
         // This prevents showing incorrect data from deleted/edited transactions
       }
 
-      // Return 0 if P&L calculation fails or tenantId unavailable (safer than using direct queries)
+      // Return 0 if P&L calculation fails (safer than using direct queries)
       // Direct queries can show incorrect data if transactions were deleted/edited
       // This maintains data integrity even if it means showing 0 instead of potentially wrong data
       return 0;
@@ -1401,10 +1510,14 @@ const logger = require('../utils/logger');
   }
 
   // Calculate dividends paid
-  async calculateDividendsPaid(statementDate, periodType) {
+  async calculateDividendsPaid(statementDate, periodType, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for calculateDividendsPaid');
+    }
     try {
       // Find dividend accounts
       const dividendAccounts = await ChartOfAccountsRepository.findAll({
+        tenantId,
         accountType: 'equity',
         accountName: { $regex: /dividend/i },
         isActive: true,
@@ -1414,9 +1527,10 @@ const logger = require('../utils/logger');
       const startDate = this.getPreviousPeriod(statementDate, periodType);
       let totalDividends = 0;
 
-      // Sum dividends from transactions in the period
+      // Sum dividends from transactions in the period (tenant-scoped)
       for (const account of dividendAccounts) {
         const dividendTransactions = await TransactionRepository.findAll({
+          tenantId,
           accountCode: account.accountCode,
           createdAt: { $gte: startDate, $lte: statementDate },
           status: 'completed',

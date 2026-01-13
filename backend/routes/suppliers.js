@@ -13,6 +13,7 @@ const ledgerAccountService = require('../services/ledgerAccountService');
 const supplierService = require('../services/supplierService');
 const supplierRepository = require('../repositories/SupplierRepository');
 const Supplier = require('../models/Supplier'); // Still needed for new Supplier() in transaction helpers
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -69,7 +70,11 @@ const upload = multer({
   }
 });
 
-const saveSupplierWithLedger = async (supplierData, userId) => {
+const saveSupplierWithLedger = async (supplierData, userId, tenantId) => {
+  if (!tenantId) {
+    throw new Error('tenantId is required to create supplier');
+  }
+  
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
@@ -77,6 +82,9 @@ const saveSupplierWithLedger = async (supplierData, userId) => {
     if (openingBalance !== null) {
       supplierData.openingBalance = openingBalance;
     }
+    
+    // Ensure tenantId is set
+    supplierData.tenantId = tenantId;
 
     let supplier = new Supplier(supplierData);
     applyOpeningBalance(supplier, openingBalance);
@@ -90,7 +98,7 @@ const saveSupplierWithLedger = async (supplierData, userId) => {
     await session.commitTransaction();
     session.endSession();
 
-    supplier = await supplierService.getSupplierByIdWithLedger(supplier._id);
+    supplier = await supplierService.getSupplierByIdWithLedger(supplier._id, { tenantId: tenantId });
     return supplier;
   } catch (error) {
     await session.abortTransaction();
@@ -99,17 +107,27 @@ const saveSupplierWithLedger = async (supplierData, userId) => {
   }
 };
 
-const updateSupplierWithLedger = async (supplierId, updateData, userId) => {
+const updateSupplierWithLedger = async (supplierId, updateData, userId, tenantId) => {
+  if (!tenantId) {
+    throw new Error('tenantId is required to update supplier');
+  }
+  
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const supplier = await supplierRepository.findById(supplierId, { session });
+    const supplier = await supplierRepository.findById(supplierId, { 
+      tenantId: tenantId,
+      session 
+    });
 
     if (!supplier) {
       await session.abortTransaction();
       session.endSession();
       return null;
     }
+    
+    // Prevent tenantId from being changed
+    delete updateData.tenantId;
 
     const openingBalance = parseOpeningBalance(updateData.openingBalance);
     if (openingBalance !== null) {
@@ -131,7 +149,7 @@ const updateSupplierWithLedger = async (supplierId, updateData, userId) => {
     await session.commitTransaction();
     session.endSession();
 
-    return supplierService.getSupplierByIdWithLedger(supplier._id);
+    return supplierService.getSupplierByIdWithLedger(supplier._id, { tenantId: tenantId });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -139,11 +157,18 @@ const updateSupplierWithLedger = async (supplierId, updateData, userId) => {
   }
 };
 
-const deleteSupplierWithLedger = async (supplierId, userId) => {
+const deleteSupplierWithLedger = async (supplierId, userId, tenantId) => {
+  if (!tenantId) {
+    throw new Error('tenantId is required to delete supplier');
+  }
+  
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const supplier = await supplierRepository.findById(supplierId, { session });
+    const supplier = await supplierRepository.findById(supplierId, { 
+      tenantId: tenantId,
+      session 
+    });
 
     if (!supplier) {
       await session.abortTransaction();
@@ -207,8 +232,13 @@ router.get('/', [
       });
     }
 
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
     // Call service to get suppliers
-    const result = await supplierService.getSuppliers(req.query);
+    const result = await supplierService.getSuppliers(req.query, tenantId);
     
     res.json({
       suppliers: result.suppliers,
@@ -225,7 +255,12 @@ router.get('/', [
 // @access  Private
 router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const supplier = await supplierService.getSupplierById(req.params.id);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
+    const supplier = await supplierService.getSupplierById(req.params.id, tenantId);
     res.json({ supplier });
   } catch (error) {
     if (error.message === 'Supplier not found') {
@@ -291,7 +326,7 @@ router.post('/', [
       createdBy: req.user._id
     };
     
-    const supplier = await saveSupplierWithLedger(supplierData, req.user._id);
+    const supplier = await saveSupplierWithLedger(supplierData, req.user._id, tenantId);
     
     res.status(201).json({
       message: 'Supplier created successfully',
@@ -356,7 +391,8 @@ router.put('/:id', [
     const supplier = await updateSupplierWithLedger(
       req.params.id,
       req.body,
-      req.user._id
+      req.user._id,
+      tenantId
     );
 
     if (!supplier) {
@@ -385,7 +421,12 @@ router.delete('/:id', [
   requirePermission('delete_suppliers')
 ], async (req, res) => {
   try {
-    const supplier = await deleteSupplierWithLedger(req.params.id, req.user?._id);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
+    const supplier = await deleteSupplierWithLedger(req.params.id, req.user?._id, tenantId);
     
     if (!supplier) {
       return res.status(404).json({ message: 'Supplier not found' });
@@ -431,7 +472,6 @@ router.get('/deleted', [
 ], async (req, res) => {
   try {
     const supplierRepository = require('../repositories/SupplierRepository');
-const logger = require('../utils/logger');
     const deletedSuppliers = await supplierRepository.findDeleted({}, {
       sort: { deletedAt: -1 }
     });
@@ -785,7 +825,7 @@ router.post('/export/excel', [auth, tenantMiddleware, requirePermission('view_su
     if (filters.status) query.status = filters.status;
     if (filters.reliability) query.reliability = filters.reliability;
     
-    const suppliers = await supplierService.getSuppliersForExport(query, tenantId);
+    const suppliers = await supplierService.getSuppliersForExport(query || {}, tenantId);
     
     // Prepare Excel data
     const excelData = suppliers.map(supplier => ({

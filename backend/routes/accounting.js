@@ -15,6 +15,7 @@ const router = express.Router();
 // Get all transactions with filtering and pagination
 router.get('/transactions', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['view_accounting_transactions', 'view_reports', 'view_general_reports']),
   query('page').optional().isInt({ min: 1 }).withMessage('Page must be a positive integer'),
   query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100'),
@@ -65,6 +66,14 @@ router.get('/transactions', [
       ];
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    
     const parsedPage = parseInt(page) || 1;
     const parsedLimit = parseInt(limit) || 50;
     const skip = (parsedPage - 1) * parsedLimit;
@@ -78,7 +87,8 @@ router.get('/transactions', [
         { path: 'customer', select: 'name businessName' },
         { path: 'supplier', select: 'companyName' },
         { path: 'createdBy', select: 'firstName lastName' }
-      ]
+      ],
+      tenantId
     });
     
     const transactions = result.transactions;
@@ -110,18 +120,13 @@ router.get('/transactions', [
 // Get account balance
 router.get('/accounts/:accountCode/balance', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requireAnyPermission(['view_accounting_accounts', 'view_reports', 'view_general_reports']),
   param('accountCode').isString().trim().withMessage('Account code is required'),
   query('asOfDate').optional().isISO8601().withMessage('Invalid date format')
 ], async (req, res) => {
   try {
-    const tenantId = req.tenantId || req.user?.tenantId;
-    if (!tenantId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tenant ID is required'
-      });
-    }
+    const tenantId = req.tenantId;
     
     const { accountCode } = req.params;
     const asOfDate = req.query.asOfDate ? new Date(req.query.asOfDate) : new Date();
@@ -149,17 +154,12 @@ router.get('/accounts/:accountCode/balance', [
 // Get trial balance
 router.get('/trial-balance', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requireAnyPermission(['view_trial_balance', 'view_pl_statements', 'view_reports']),
   query('asOfDate').optional().isISO8601().withMessage('Invalid date format')
 ], async (req, res) => {
   try {
-    const tenantId = req.tenantId || req.user?.tenantId;
-    if (!tenantId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tenant ID is required'
-      });
-    }
+    const tenantId = req.tenantId;
     
     const asOfDate = req.query.asOfDate ? new Date(req.query.asOfDate) : new Date();
     
@@ -195,17 +195,12 @@ router.get('/trial-balance', [
 // Update balance sheet
 router.post('/balance-sheet/update', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requireAnyPermission(['update_balance_sheet', 'manage_reports']),
   body('statementDate').optional().isISO8601().withMessage('Invalid date format')
 ], async (req, res) => {
   try {
-    const tenantId = req.tenantId || req.user?.tenantId;
-    if (!tenantId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tenant ID is required'
-      });
-    }
+    const tenantId = req.tenantId;
     
     const statementDate = req.body.statementDate ? new Date(req.body.statementDate) : new Date();
     
@@ -289,17 +284,12 @@ router.get('/chart-of-accounts', [
 // Get financial summary
 router.get('/financial-summary', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requireAnyPermission(['view_accounting_summary', 'view_reports']),
   query('asOfDate').optional().isISO8601().withMessage('Invalid date format')
 ], async (req, res) => {
   try {
-    const tenantId = req.tenantId || req.user?.tenantId;
-    if (!tenantId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tenant ID is required'
-      });
-    }
+    const tenantId = req.tenantId;
     
     const asOfDate = req.query.asOfDate ? new Date(req.query.asOfDate) : new Date();
     

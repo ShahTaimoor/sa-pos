@@ -139,6 +139,7 @@ app.use('/api/images', express.static(path.join(__dirname, 'uploads/images/optim
 // Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/auth/users', require('./routes/users'));
+app.use('/api/tenants', require('./routes/tenants')); // Tenant management routes
 app.use('/api/products', require('./routes/products'));
 app.use('/api/product-variants', require('./routes/productVariants'));
 app.use('/api/product-transformations', require('./routes/productTransformations'));

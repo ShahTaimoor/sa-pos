@@ -665,6 +665,11 @@ class ReturnManagementService {
 
     const filter = {};
 
+    // Add tenantId filter for multi-tenant isolation
+    if (queryParams.tenantId) {
+      filter.tenantId = queryParams.tenantId;
+    }
+
     // Apply filters
     if (queryParams.status) filter.status = queryParams.status;
     if (queryParams.returnType) filter.returnType = queryParams.returnType;
@@ -690,7 +695,8 @@ class ReturnManagementService {
     const result = await ReturnRepository.findWithPagination(filter, {
       page,
       limit,
-      sort: { returnDate: -1 }
+      sort: { returnDate: -1 },
+      tenantId: queryParams.tenantId
     });
 
     return {

@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const dataIntegrityService = require('../services/dataIntegrityService');
 const { handleValidationErrors } = require('../middleware/validation');
 const logger = require('../utils/logger');
@@ -12,6 +13,7 @@ const logger = require('../utils/logger');
  */
 router.get('/validate', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_financials'),
   handleValidationErrors
 ], async (req, res) => {
@@ -47,6 +49,7 @@ router.get('/validate', [
  */
 router.get('/double-entry', [
   auth,
+  tenantMiddleware,
   requirePermission('view_financials'),
   handleValidationErrors
 ], async (req, res) => {
@@ -85,11 +88,19 @@ router.get('/double-entry', [
  */
 router.get('/referential', [
   auth,
+  tenantMiddleware,
   requirePermission('view_financials'),
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const issues = await dataIntegrityService.validateReferentialIntegrity();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const issues = await dataIntegrityService.validateReferentialIntegrity(tenantId);
     
     res.json({
       success: true,
@@ -115,11 +126,19 @@ router.get('/referential', [
  */
 router.get('/duplicates', [
   auth,
+  tenantMiddleware,
   requirePermission('view_financials'),
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const duplicates = await dataIntegrityService.detectDuplicates();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const duplicates = await dataIntegrityService.detectDuplicates(tenantId);
     
     res.json({
       success: true,
@@ -145,11 +164,19 @@ router.get('/duplicates', [
  */
 router.get('/inventory', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory'),
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const issues = await dataIntegrityService.validateInventoryConsistency();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const issues = await dataIntegrityService.validateInventoryConsistency(tenantId);
     
     res.json({
       success: true,
@@ -175,11 +202,19 @@ router.get('/inventory', [
  */
 router.get('/customer-balances', [
   auth,
+  tenantMiddleware,
   requirePermission('view_customers'),
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const issues = await dataIntegrityService.validateCustomerBalances();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const issues = await dataIntegrityService.validateCustomerBalances(tenantId);
     
     res.json({
       success: true,
@@ -205,11 +240,19 @@ router.get('/customer-balances', [
  */
 router.post('/fix', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_financials'),
   handleValidationErrors
 ], async (req, res) => {
   try {
     const { issues } = req.body;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     
     if (!issues || !Array.isArray(issues)) {
       return res.status(400).json({
@@ -218,7 +261,7 @@ router.post('/fix', [
       });
     }
     
-    const fixes = await dataIntegrityService.fixIssues(issues);
+    const fixes = await dataIntegrityService.fixIssues(issues, tenantId);
     
     res.json({
       success: true,

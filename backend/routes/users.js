@@ -1,17 +1,23 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const userService = require('../services/userService');
 const logger = require('../utils/logger');
 
 const router = express.Router();
 
 // @route   GET /api/auth/users
-// @desc    Get all users
+// @desc    Get all users (tenant-scoped)
 // @access  Private (Admin only)
-router.get('/', auth, requirePermission('manage_users'), async (req, res) => {
+router.get('/', auth, tenantMiddleware, requirePermission('manage_users'), async (req, res) => {
   try {
-    const users = await userService.getUsers();
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
+    const users = await userService.getUsers({}, tenantId);
     
     res.json({
       success: true,
@@ -24,11 +30,16 @@ router.get('/', auth, requirePermission('manage_users'), async (req, res) => {
 });
 
 // @route   GET /api/auth/users/:id
-// @desc    Get single user
+// @desc    Get single user (tenant-scoped)
 // @access  Private (Admin only)
-router.get('/:id', auth, requirePermission('manage_users'), async (req, res) => {
+router.get('/:id', auth, tenantMiddleware, requirePermission('manage_users'), async (req, res) => {
   try {
-    const user = await userService.getUserById(req.params.id);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
+    const user = await userService.getUserById(req.params.id, tenantId);
     
     res.json({
       success: true,
@@ -48,6 +59,7 @@ router.get('/:id', auth, requirePermission('manage_users'), async (req, res) => 
 // @access  Private (Admin only)
 router.put('/:id', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('manage_users'),
   body('firstName').optional().trim().isLength({ min: 1 }).withMessage('First name is required'),
   body('lastName').optional().trim().isLength({ min: 1 }).withMessage('Last name is required'),
@@ -70,7 +82,12 @@ router.put('/:id', [
     if (status) updateData.status = status;
     if (permissions) updateData.permissions = permissions;
     
-    const updatedUser = await userService.updateUser(req.params.id, updateData, req.user);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
+    const updatedUser = await userService.updateUser(req.params.id, updateData, req.user, tenantId);
     
     res.json({
       success: true,
@@ -92,10 +109,15 @@ router.put('/:id', [
 // @route   PATCH /api/auth/users/:id/reset-password
 // @desc    Reset user password (Admin only)
 // @access  Private (Admin only)
-router.patch('/:id/reset-password', auth, requirePermission('manage_users'), async (req, res) => {
+router.patch('/:id/reset-password', auth, tenantMiddleware, requirePermission('manage_users'), async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
     const { newPassword } = req.body;
-    const result = await userService.resetPassword(req.params.id, newPassword);
+    const result = await userService.resetPassword(req.params.id, newPassword, tenantId);
     
     res.json({
       success: true,
@@ -116,7 +138,7 @@ router.patch('/:id/reset-password', auth, requirePermission('manage_users'), asy
 // @route   GET /api/auth/users/:id/activity
 // @desc    Get user activity data
 // @access  Private (Admin only)
-router.get('/:id/activity', auth, requirePermission('manage_users'), async (req, res) => {
+router.get('/:id/activity', auth, tenantMiddleware, requirePermission('manage_users'), async (req, res) => {
   try {
     const activity = await userService.getUserActivity(req.params.id);
     
@@ -136,7 +158,7 @@ router.get('/:id/activity', auth, requirePermission('manage_users'), async (req,
 // @route   PATCH /api/auth/users/update-role-permissions
 // @desc    Update permissions for all users with a specific role
 // @access  Private (Admin only)
-router.patch('/update-role-permissions', auth, requirePermission('manage_users'), async (req, res) => {
+router.patch('/update-role-permissions', auth, tenantMiddleware, requirePermission('manage_users'), async (req, res) => {
   try {
     const { role, permissions } = req.body;
     const result = await userService.updateRolePermissions(role, permissions);
@@ -158,9 +180,14 @@ router.patch('/update-role-permissions', auth, requirePermission('manage_users')
 // @route   DELETE /api/auth/users/:id
 // @desc    Delete user
 // @access  Private (Admin only)
-router.delete('/:id', auth, requirePermission('manage_users'), async (req, res) => {
+router.delete('/:id', auth, tenantMiddleware, requirePermission('manage_users'), async (req, res) => {
   try {
-    const result = await userService.deleteUser(req.params.id, req.user.userId || req.user._id);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
+    const result = await userService.deleteUser(req.params.id, req.user.userId || req.user._id, tenantId);
     
     res.json({
       success: true,
@@ -181,9 +208,14 @@ router.delete('/:id', auth, requirePermission('manage_users'), async (req, res) 
 // @route   PATCH /api/auth/users/:id/toggle-status
 // @desc    Toggle user status
 // @access  Private (Admin only)
-router.patch('/:id/toggle-status', auth, requirePermission('manage_users'), async (req, res) => {
+router.patch('/:id/toggle-status', auth, tenantMiddleware, requirePermission('manage_users'), async (req, res) => {
   try {
-    const result = await userService.toggleUserStatus(req.params.id, req.user.userId || req.user._id);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
+    const result = await userService.toggleUserStatus(req.params.id, req.user.userId || req.user._id, tenantId);
     
     res.json({
       success: true,

@@ -26,10 +26,18 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     const options = {
       startDate: req.query.startDate ? new Date(req.query.startDate) : undefined,
       endDate: req.query.endDate ? new Date(req.query.endDate) : undefined,
-      minSeverity: req.query.minSeverity || 'low'
+      minSeverity: req.query.minSeverity || 'low',
+      tenantId
     };
 
     const result = await AnomalyDetectionService.getAllAnomalies(options);
@@ -80,10 +88,18 @@ router.get('/sales', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     const options = {
       startDate: req.query.startDate ? new Date(req.query.startDate) : undefined,
       endDate: req.query.endDate ? new Date(req.query.endDate) : undefined,
-      minSeverity: req.query.minSeverity || 'low'
+      minSeverity: req.query.minSeverity || 'low',
+      tenantId
     };
 
     const anomalies = await AnomalyDetectionService.detectSalesAnomalies(options);
@@ -108,10 +124,18 @@ router.get('/sales', [
 // @access  Private
 router.get('/inventory', [
   auth,
+  tenantMiddleware,
   requirePermission('view_inventory')
 ], async (req, res) => {
   try {
-    const anomalies = await AnomalyDetectionService.detectInventoryAnomalies();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const anomalies = await AnomalyDetectionService.detectInventoryAnomalies(tenantId);
 
     res.json({
       success: true,
@@ -144,9 +168,17 @@ router.get('/payments', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     const options = {
       startDate: req.query.startDate ? new Date(req.query.startDate) : undefined,
-      endDate: req.query.endDate ? new Date(req.query.endDate) : undefined
+      endDate: req.query.endDate ? new Date(req.query.endDate) : undefined,
+      tenantId
     };
 
     const anomalies = await AnomalyDetectionService.detectPaymentAnomalies(options);
@@ -171,11 +203,20 @@ router.get('/payments', [
 // @access  Private
 router.get('/summary', [
   auth,
+  tenantMiddleware,
   requirePermission('view_anomaly_detection')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     const result = await AnomalyDetectionService.getAllAnomalies({
-      minSeverity: 'low'
+      minSeverity: 'low',
+      tenantId
     });
 
     res.json({

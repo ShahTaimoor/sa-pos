@@ -19,7 +19,11 @@ router.get('/:customerId', [
 ], async (req, res) => {
   try {
     const { customerId } = req.params;
-    const summary = await CustomerBalanceService.getBalanceSummary(customerId);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const summary = await CustomerBalanceService.getBalanceSummary(customerId, tenantId);
     
     res.json({
       success: true,
@@ -105,7 +109,8 @@ router.post('/:customerId/refund', [
 
 // Recalculate customer balance
 router.post('/:customerId/recalculate', [
-  auth, 
+  auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('manage_customers'),
   param('customerId').isMongoId().withMessage('Invalid customer ID')
 ], async (req, res) => {
@@ -163,22 +168,29 @@ router.get('/reports/balance-issues', [
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    // Find customers with pending balances
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    // Find customers with pending balances (tenant-scoped)
     const customersWithPendingBalances = await customerRepository.findAll({
+      tenantId,
       pendingBalance: { $gt: 0 }
     }, {
       select: 'name businessName email phone pendingBalance advanceBalance creditLimit'
     });
 
-    // Find customers with advance balances
+    // Find customers with advance balances (tenant-scoped)
     const customersWithAdvanceBalances = await customerRepository.findAll({
+      tenantId,
       advanceBalance: { $gt: 0 }
     }, {
       select: 'name businessName email phone pendingBalance advanceBalance creditLimit'
     });
 
-    // Find customers over credit limit
+    // Find customers over credit limit (tenant-scoped)
     const customersOverCreditLimit = await customerRepository.findAll({
+      tenantId,
       $expr: { $gt: ['$currentBalance', '$creditLimit'] }
     }, {
       select: 'name businessName email phone currentBalance creditLimit'
@@ -211,11 +223,13 @@ router.get('/reports/balance-issues', [
 
 // Fix all customer balances (recalculate from orders)
 router.post('/fix-all-balances', [
-  auth, 
+  auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('manage_customers')
 ], async (req, res) => {
   try {
-    const customers = await customerRepository.findAll({});
+    const tenantId = req.tenantId;
+    const customers = await customerRepository.findAll({ tenantId });
     const results = [];
 
     for (const customer of customers) {

@@ -3,6 +3,7 @@ const { body, query, param } = require('express-validator');
 const { auth, requireAnyPermission } = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const investorService = require('../services/investorService');
+const profitDistributionService = require('../services/profitDistributionService');
 const InvestorRepository = require('../repositories/InvestorRepository');
 const Investor = require('../models/Investor');
 const logger = require('../utils/logger'); // Still needed for some operations
@@ -147,11 +148,19 @@ router.put('/:id', [
 // Delete investor
 router.delete('/:id', [
   auth,
+  tenantMiddleware,
   requireAnyPermission(['manage_investors']),
   param('id').isMongoId().withMessage('Invalid investor ID')
 ], async (req, res) => {
   try {
-    const result = await investorService.deleteInvestor(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const result = await investorService.deleteInvestor(req.params.id, tenantId);
     
     res.json({
       success: true,
@@ -188,7 +197,14 @@ router.post('/:id/payout', [
   body('amount').isFloat({ min: 0.01 }).withMessage('Payout amount must be greater than 0')
 ], async (req, res) => {
   try {
-    const investor = await investorService.recordPayout(req.params.id, req.body.amount);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const investor = await investorService.recordPayout(req.params.id, req.body.amount, tenantId);
     
     res.json({
       success: true,
@@ -227,7 +243,14 @@ router.post('/:id/investment', [
   body('notes').optional().isString().trim().isLength({ max: 500 }).withMessage('Notes too long')
 ], async (req, res) => {
   try {
-    const investor = await investorService.recordInvestment(req.params.id, req.body.amount);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const investor = await investorService.recordInvestment(req.params.id, req.body.amount, tenantId);
     
     res.json({
       success: true,
@@ -289,9 +312,17 @@ router.get('/profit-shares/summary', [
   query('endDate').optional().isISO8601()
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     const summary = await profitDistributionService.getProfitSummary(
       req.query.startDate,
-      req.query.endDate
+      req.query.endDate,
+      tenantId
     );
     
     res.json({
@@ -316,7 +347,14 @@ router.get('/profit-shares/order/:orderId', [
   param('orderId').isMongoId().withMessage('Invalid order ID')
 ], async (req, res) => {
   try {
-    const profitShares = await profitDistributionService.getProfitSharesForOrder(req.params.orderId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const profitShares = await profitDistributionService.getProfitSharesForOrder(req.params.orderId, tenantId);
     
     res.json({
       success: true,

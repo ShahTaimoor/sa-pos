@@ -74,6 +74,10 @@ const requireRole = (roles) => {
   const roleArray = Array.isArray(roles) ? roles : [roles];
   
   return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    
     if (!roleArray.includes(req.user.role)) {
       return res.status(403).json({ 
         message: 'Access denied. Insufficient role privileges.' 
@@ -83,9 +87,35 @@ const requireRole = (roles) => {
   };
 };
 
+/**
+ * Middleware to handle Super Admin tenant context
+ * Super Admin can access any tenant, but regular users are restricted to their tenant
+ */
+const handleTenantContext = (req, res, next) => {
+  // Super Admin can access any tenant (for tenant management)
+  // But for regular operations, they should still have a tenantId
+  if (req.user.role === 'super_admin') {
+    // Super Admin can optionally specify a tenantId in query for tenant management
+    // But for their own operations, use their tenantId
+    if (!req.tenantId && req.user.tenantId) {
+      req.tenantId = req.user.tenantId;
+    }
+  }
+  
+  // For all other users, tenantId is required and must match their tenantId
+  if (req.user.role !== 'super_admin' && !req.tenantId) {
+    return res.status(403).json({ 
+      message: 'Tenant ID is required. Please log in again.' 
+    });
+  }
+  
+  next();
+};
+
 module.exports = {
   auth,
   requirePermission,
   requireAnyPermission,
-  requireRole
+  requireRole,
+  handleTenantContext
 };

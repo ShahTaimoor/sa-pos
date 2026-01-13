@@ -29,9 +29,13 @@ class CategoryService {
   /**
    * Get categories with filtering and pagination
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getCategories(queryParams) {
+  async getCategories(queryParams, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getCategories');
+    }
     const page = parseInt(queryParams.page) || 1;
     const limit = parseInt(queryParams.limit) || 50;
     const isActive = queryParams.isActive !== undefined 
@@ -41,6 +45,7 @@ class CategoryService {
     const filter = this.buildFilter({ ...queryParams, isActive });
 
     const result = await categoryRepository.findWithPagination(filter, {
+      tenantId, // CRITICAL: Include tenantId for multi-tenant isolation
       page,
       limit,
       sort: { sortOrder: 1, name: 1 },
@@ -62,10 +67,14 @@ class CategoryService {
   /**
    * Get single category by ID
    * @param {string} id - Category ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<Category>}
    */
-  async getCategoryById(id) {
-    const category = await categoryRepository.findById(id);
+  async getCategoryById(id, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getCategoryById');
+    }
+    const category = await categoryRepository.findById(id, { tenantId });
     
     if (!category) {
       throw new Error('Category not found');

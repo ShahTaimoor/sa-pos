@@ -25,7 +25,11 @@ router.get('/sales', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const report = await reportsService.getSalesReport(req.query);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await reportsService.getSalesReport(req.query, tenantId);
     
     res.json(report);
   } catch (error) {
@@ -51,7 +55,11 @@ router.get('/products', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const report = await reportsService.getProductReport(req.query);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await reportsService.getProductReport(req.query, tenantId);
     
     res.json(report);
   } catch (error) {
@@ -78,7 +86,11 @@ router.get('/customers', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const report = await reportsService.getCustomerReport(req.query);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await reportsService.getCustomerReport(req.query, tenantId);
     
     res.json(report);
   } catch (error) {
@@ -103,7 +115,11 @@ router.get('/inventory', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const report = await reportsService.getInventoryReport(req.query);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await reportsService.getInventoryReport(req.query, tenantId);
     
     res.json(report);
   } catch (error) {

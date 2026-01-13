@@ -6,6 +6,7 @@ const inventoryService = require('../services/inventoryService');
 const purchaseOrderService = require('../services/purchaseOrderService');
 const supplierRepository = require('../repositories/SupplierRepository');
 const PurchaseOrder = require('../models/PurchaseOrder'); // Still needed for generatePONumber static method
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -49,8 +50,9 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId;
     // Call service to get purchase orders
-    const result = await purchaseOrderService.getPurchaseOrders(req.query);
+    const result = await purchaseOrderService.getPurchaseOrders(req.query, tenantId);
     
     res.json({
       purchaseOrders: result.purchaseOrders,
@@ -67,7 +69,8 @@ router.get('/', [
 // @access  Private
 router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const purchaseOrder = await purchaseOrderService.getPurchaseOrderById(req.params.id);
+    const tenantId = req.tenantId;
+    const purchaseOrder = await purchaseOrderService.getPurchaseOrderById(req.params.id, tenantId);
     res.json({ purchaseOrder });
   } catch (error) {
     if (error.message === 'Purchase order not found') {
@@ -83,6 +86,7 @@ router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('create_purchase_orders'),
   body('supplier').isMongoId().withMessage('Valid supplier is required'),
   body('items').isArray({ min: 1 }).withMessage('At least one item is required'),
@@ -99,7 +103,8 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const purchaseOrder = await purchaseOrderService.createPurchaseOrder(req.body, req.user._id);
+    const tenantId = req.tenantId;
+    const purchaseOrder = await purchaseOrderService.createPurchaseOrder(req.body, req.user._id, tenantId);
     
     // Transform names to uppercase
     if (purchaseOrder.supplier) {
@@ -154,10 +159,12 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
     
+    const tenantId = req.tenantId;
     const updatedPO = await purchaseOrderService.updatePurchaseOrder(
       req.params.id,
       req.body,
-      req.user._id
+      req.user._id,
+      tenantId
     );
     
     // Store old items for comparison (for inventory updates)
@@ -259,7 +266,8 @@ router.put('/:id/confirm', [
   requirePermission('confirm_purchase_orders')
 ], async (req, res) => {
   try {
-    const purchaseOrder = await purchaseOrderService.confirmPurchaseOrder(req.params.id);
+    const tenantId = req.tenantId;
+    const purchaseOrder = await purchaseOrderService.confirmPurchaseOrder(req.params.id, tenantId);
     
     // Update inventory for each item in the purchase order
     const inventoryUpdates = [];
@@ -373,14 +381,16 @@ router.put('/:id/confirm', [
 // @access  Private
 router.put('/:id/cancel', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('cancel_purchase_orders')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
     // Get purchase order before cancellation to check status
-    const purchaseOrderBeforeCancel = await purchaseOrderService.getPurchaseOrderById(req.params.id);
+    const purchaseOrderBeforeCancel = await purchaseOrderService.getPurchaseOrderById(req.params.id, tenantId);
     const wasConfirmed = purchaseOrderBeforeCancel.status === 'confirmed';
     
-    const purchaseOrder = await purchaseOrderService.cancelPurchaseOrder(req.params.id, req.user._id);
+    const purchaseOrder = await purchaseOrderService.cancelPurchaseOrder(req.params.id, req.user._id, tenantId);
     
     // If the purchase order was confirmed, reduce inventory
     const inventoryUpdates = [];
@@ -476,7 +486,8 @@ router.put('/:id/close', [
   requirePermission('close_purchase_orders')
 ], async (req, res) => {
   try {
-    const purchaseOrder = await purchaseOrderService.closePurchaseOrder(req.params.id, req.user._id);
+    const tenantId = req.tenantId;
+    const purchaseOrder = await purchaseOrderService.closePurchaseOrder(req.params.id, req.user._id, tenantId);
     
     res.json({
       message: 'Purchase order closed successfully',
@@ -501,11 +512,12 @@ router.delete('/:id', [
 ], async (req, res) => {
   try {
     // Get purchase order before deletion to check status
-    const purchaseOrder = await purchaseOrderService.getPurchaseOrderById(req.params.id);
+    const tenantId = req.tenantId;
+    const purchaseOrder = await purchaseOrderService.getPurchaseOrderById(req.params.id, tenantId);
     const wasConfirmed = purchaseOrder.status === 'confirmed';
     
     // Delete the purchase order (service handles validation and supplier balance)
-    await purchaseOrderService.deletePurchaseOrder(req.params.id);
+    await purchaseOrderService.deletePurchaseOrder(req.params.id, tenantId);
     
     // Restore inventory if PO was confirmed (but we only allow deletion of draft orders, so this shouldn't run)
     // Keeping this for safety in case the status check is bypassed
@@ -535,7 +547,7 @@ router.delete('/:id', [
       }
     }
     
-    await purchaseOrderService.deletePurchaseOrder(req.params.id);
+    await purchaseOrderService.deletePurchaseOrder(req.params.id, tenantId);
     
     res.json({ message: 'Purchase order deleted successfully' });
   } catch (error) {
@@ -547,9 +559,10 @@ router.delete('/:id', [
 // @route   GET /api/purchase-orders/:id/convert
 // @desc    Get purchase order items available for conversion
 // @access  Private
-router.get('/:id/convert', auth, async (req, res) => {
+router.get('/:id/convert', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const result = await purchaseOrderService.getPurchaseOrderForConversion(req.params.id);
+    const tenantId = req.tenantId;
+    const result = await purchaseOrderService.getPurchaseOrderForConversion(req.params.id, tenantId);
     res.json(result);
   } catch (error) {
     logger.error('Get conversion data error:', { error: error });
@@ -575,14 +588,14 @@ router.post('/:id/convert', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const purchaseOrder = await purchaseOrderService.getPurchaseOrderById(req.params.id);
+    const tenantId = req.tenantId;
+    const purchaseOrder = await purchaseOrderService.getPurchaseOrderById(req.params.id, tenantId);
 
     if (purchaseOrder.status === 'cancelled' || purchaseOrder.status === 'closed') {
       return res.status(400).json({ message: 'Cannot convert cancelled or closed purchase order' });
     }
 
     const Inventory = require('../models/Inventory');
-const logger = require('../utils/logger');
     const { items } = req.body;
     const conversionResults = [];
 

@@ -110,4 +110,36 @@ cashPaymentSchema.index({ tenantId: 1, date: -1 });
 cashPaymentSchema.index({ tenantId: 1, voucherCode: 1 }, { unique: true, sparse: true });
 cashPaymentSchema.index({ tenantId: 1, createdBy: 1, date: -1 });
 
+// Post-save hook to handle accounting entries and supplier balance
+cashPaymentSchema.post('save', async function(doc) {
+  // Only process new cash payments (not updates)
+  if (!doc.isNew) {
+    return;
+  }
+
+  const logger = require('../utils/logger');
+
+  // 1. Create accounting entries
+  try {
+    const accountingService = require('../services/accountingService');
+    await accountingService.recordCashPayment(doc);
+    logger.debug(`Accounting entries created for cash payment: ${doc.voucherCode || doc._id}`);
+  } catch (error) {
+    // Log error but don't fail the save
+    logger.error(`Error creating accounting entries for cash payment ${doc.voucherCode || doc._id}:`, error);
+  }
+
+  // 2. Update supplier balance (if supplier provided)
+  if (doc.supplier && doc.amount > 0) {
+    try {
+      const supplierBalanceService = require('../services/supplierBalanceService');
+      await supplierBalanceService.recordPayment(doc.supplier, doc.amount, doc.order || null);
+      logger.debug(`Supplier balance updated for cash payment: ${doc.voucherCode || doc._id}`);
+    } catch (error) {
+      // Log error but don't fail the save
+      logger.error(`Error updating supplier balance for cash payment ${doc.voucherCode || doc._id}:`, error);
+    }
+  }
+});
+
 module.exports = mongoose.model('CashPayment', cashPaymentSchema);

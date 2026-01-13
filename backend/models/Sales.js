@@ -306,5 +306,74 @@ orderSchema.methods.canBeReturned = function() {
          this.payment.status === 'paid';
 };
 
+// Post-save hook to handle stock updates, accounting entries, and customer balance
+orderSchema.post('save', async function(doc) {
+  // Only process new sales (not updates)
+  if (!doc.isNew) {
+    return;
+  }
+
+  const logger = require('../utils/logger');
+
+  // 1. Update inventory stock (decrease for sales)
+  if (doc.items && doc.items.length > 0) {
+    try {
+      const inventoryService = require('../services/inventoryService');
+      
+      for (const item of doc.items) {
+        if (item.product && item.quantity > 0) {
+          await inventoryService.updateStock({
+            productId: item.product,
+            type: 'out',
+            quantity: item.quantity,
+            reason: 'Sales Order',
+            reference: doc.orderNumber || 'Sales',
+            referenceId: doc._id,
+            referenceModel: 'Sales',
+            performedBy: doc.createdBy,
+            notes: `Stock reduced due to sales order: ${doc.orderNumber || doc._id}`
+          });
+        }
+      }
+      logger.debug(`Stock updated for sales order: ${doc.orderNumber || doc._id}`);
+    } catch (error) {
+      // Log error but don't fail the save
+      logger.error(`Error updating stock for sales order ${doc.orderNumber || doc._id}:`, error);
+    }
+  }
+
+  // 2. Create accounting entries
+  try {
+    const accountingService = require('../services/accountingService');
+    await accountingService.recordSale(doc);
+    logger.debug(`Accounting entries created for sales order: ${doc.orderNumber || doc._id}`);
+  } catch (error) {
+    // Log error but don't fail the save
+    logger.error(`Error creating accounting entries for sales order ${doc.orderNumber || doc._id}:`, error);
+  }
+
+  // 3. Update customer balance (if credit sale or account payment)
+  if (doc.customer && doc.pricing && doc.pricing.total > 0) {
+    const isCreditSale = doc.payment && (doc.payment.status === 'credit' || doc.payment.method === 'account');
+    
+    if (isCreditSale) {
+      try {
+        const customerBalanceService = require('../services/customerBalanceService');
+        await customerBalanceService.recordInvoice(
+          doc.customer,
+          doc.pricing.total,
+          doc._id,
+          doc.createdBy,
+          { orderNumber: doc.orderNumber, invoiceDate: doc.createdAt }
+        );
+        logger.debug(`Customer balance updated for sales order: ${doc.orderNumber || doc._id}`);
+      } catch (error) {
+        // Log error but don't fail the save
+        logger.error(`Error updating customer balance for sales order ${doc.orderNumber || doc._id}:`, error);
+      }
+    }
+  }
+});
+
 // Export as 'Sales' model but keep collection name as 'orders' for database compatibility
 module.exports = mongoose.model('Sales', orderSchema, 'orders');

@@ -59,6 +59,7 @@ router.get('/', [
 // @access  Private (requires 'close_accounting_periods' permission)
 router.get('/validate', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('close_accounting_periods'),
   sanitizeRequest,
   query('asOfDate').isISO8601().toDate().withMessage('Valid date format required (YYYY-MM-DD)'),
@@ -66,10 +67,11 @@ router.get('/validate', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
     const asOfDate = new Date(req.query.asOfDate);
     const periodId = req.query.periodId;
 
-    const validation = await trialBalanceService.validateTrialBalance(asOfDate, periodId);
+    const validation = await trialBalanceService.validateTrialBalance(asOfDate, periodId, tenantId);
 
     res.json({
       success: true,

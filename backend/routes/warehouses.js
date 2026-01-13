@@ -116,6 +116,7 @@ router.get(
   '/',
   [
     auth,
+    tenantMiddleware, // Enforce tenant isolation
     requirePermission('view_inventory'),
     sanitizeRequest,
     ...baseFilters,
@@ -168,7 +169,14 @@ router.get(
   ],
   async (req, res) => {
     try {
-      const warehouse = await warehouseService.getWarehouseById(req.params.id);
+      const tenantId = req.tenantId || req.user?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Tenant ID is required'
+        });
+      }
+      const warehouse = await warehouseService.getWarehouseById(req.params.id, tenantId);
 
       res.json({
         success: true,

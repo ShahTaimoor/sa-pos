@@ -64,6 +64,11 @@ router.get('/', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
     // Filter out empty string values
     const cleanedQuery = Object.keys(req.query).reduce((acc, key) => {
       if (req.query[key] !== '' && req.query[key] != null) {
@@ -72,7 +77,7 @@ router.get('/', [
       return acc;
     }, {});
 
-    const result = await discountService.getDiscounts(cleanedQuery);
+    const result = await discountService.getDiscounts(cleanedQuery, tenantId);
     
     res.json({
       discounts: result.discounts,
@@ -96,9 +101,13 @@ router.get('/:discountId', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const { discountId } = req.params;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     
-    const discount = await discountService.getDiscountById(discountId);
+    const { discountId } = req.params;
+    const discount = await discountService.getDiscountById(discountId, tenantId);
     res.json(discount);
   } catch (error) {
     logger.error('Error fetching discount:', error);
@@ -158,9 +167,13 @@ router.delete('/:discountId', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const { discountId } = req.params;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     
-    const result = await discountService.deleteDiscount(discountId, req.user._id);
+    const { discountId } = req.params;
+    const result = await discountService.deleteDiscount(discountId, req.user._id, tenantId);
     res.json(result);
   } catch (error) {
     logger.error('Error deleting discount:', error);
@@ -184,9 +197,13 @@ router.put('/:discountId/toggle-status', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const { discountId } = req.params;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     
-    const discount = await discountService.toggleDiscountStatus(discountId, req.user._id);
+    const { discountId } = req.params;
+    const discount = await discountService.toggleDiscountStatus(discountId, req.user._id, tenantId);
     
     res.json({
       message: `Discount ${discount.isActive ? 'activated' : 'deactivated'} successfully`,
@@ -315,9 +332,13 @@ router.get('/code/:code', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const { code } = req.params;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     
-    const discount = await discountService.getDiscountByCode(code);
+    const { code } = req.params;
+    const discount = await discountService.getDiscountByCode(code, tenantId);
     if (!discount) {
       return res.status(404).json({ message: 'Discount not found' });
     }
@@ -334,15 +355,20 @@ router.get('/code/:code', [
 // @access  Private (requires 'view_discounts' permission)
 router.get('/code/:code/availability', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('view_discounts'),
   sanitizeRequest,
   param('code').trim().isLength({ min: 1, max: 20 }).withMessage('Valid discount code is required'),
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const { code } = req.params;
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     
-    const isAvailable = await discountService.isDiscountCodeAvailable(code);
+    const { code } = req.params;
+    const isAvailable = await discountService.isDiscountCodeAvailable(code, tenantId);
     
     res.json({
       code: code.toUpperCase(),

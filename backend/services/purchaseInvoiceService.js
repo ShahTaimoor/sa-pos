@@ -34,10 +34,15 @@ class PurchaseInvoiceService {
   /**
    * Build filter query from request parameters
    * @param {object} queryParams - Request query parameters
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>} - MongoDB filter object
    */
-  async buildFilter(queryParams) {
-    const filter = {};
+  async buildFilter(queryParams, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required for query filtering');
+    }
+    
+    const filter = { tenantId }; // Always include tenantId for isolation
 
     // Search filter
     if (queryParams.search) {
@@ -49,8 +54,8 @@ class PurchaseInvoiceService {
         { 'supplierInfo.name': { $regex: searchTerm, $options: 'i' } }
       ];
 
-      // Search in Supplier collection and match by supplier ID
-      const supplierMatches = await supplierRepository.search(searchTerm, { limit: 1000 });
+      // Search in Supplier collection and match by supplier ID (scoped to tenant)
+      const supplierMatches = await supplierRepository.search(searchTerm, { limit: 1000 }, tenantId);
       
       if (supplierMatches.length > 0) {
         const supplierIds = supplierMatches.map(s => s._id);
@@ -102,13 +107,18 @@ class PurchaseInvoiceService {
   /**
    * Get purchase invoices with filtering and pagination
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getPurchaseInvoices(queryParams) {
+  async getPurchaseInvoices(queryParams, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
     const page = parseInt(queryParams.page) || 1;
     const limit = parseInt(queryParams.limit) || 20;
 
-    const filter = await this.buildFilter(queryParams);
+    const filter = await this.buildFilter(queryParams, tenantId);
 
     const result = await purchaseInvoiceRepository.findWithPagination(filter, {
       page,
@@ -117,7 +127,8 @@ class PurchaseInvoiceService {
       populate: [
         { path: 'supplier', select: 'name companyName email phone' },
         { path: 'items.product', select: 'name description pricing' }
-      ]
+      ],
+      tenantId // Pass tenantId to repository
     });
 
     // Transform names to uppercase
@@ -140,10 +151,15 @@ class PurchaseInvoiceService {
   /**
    * Get single purchase invoice by ID
    * @param {string} id - Invoice ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getPurchaseInvoiceById(id) {
-    const invoice = await purchaseInvoiceRepository.findById(id);
+  async getPurchaseInvoiceById(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
+    const invoice = await purchaseInvoiceRepository.findOne({ _id: id, tenantId });
     
     if (!invoice) {
       throw new Error('Purchase invoice not found');

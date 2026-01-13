@@ -35,10 +35,15 @@ class PurchaseOrderService {
   /**
    * Build filter query from request parameters
    * @param {object} queryParams - Request query parameters
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {object} - MongoDB filter object
    */
-  buildFilter(queryParams) {
-    const filter = {};
+  buildFilter(queryParams, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required for query filtering');
+    }
+    
+    const filter = { tenantId }; // Always include tenantId for isolation
 
     // Search filter
     if (queryParams.search) {
@@ -80,16 +85,21 @@ class PurchaseOrderService {
   /**
    * Get purchase orders with filtering and pagination
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getPurchaseOrders(queryParams) {
+  async getPurchaseOrders(queryParams, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
     const getAllPurchaseOrders = queryParams.all === 'true' || queryParams.all === true ||
                                 (queryParams.limit && parseInt(queryParams.limit) >= 999999);
 
     const page = getAllPurchaseOrders ? 1 : (parseInt(queryParams.page) || 1);
     const limit = getAllPurchaseOrders ? 999999 : (parseInt(queryParams.limit) || 20);
 
-    const filter = this.buildFilter(queryParams);
+    const filter = this.buildFilter(queryParams, tenantId);
 
     const result = await purchaseOrderRepository.findWithPagination(filter, {
       page,
@@ -101,7 +111,8 @@ class PurchaseOrderService {
         { path: 'items.product', select: 'name description pricing inventory' },
         { path: 'createdBy', select: 'firstName lastName email' },
         { path: 'lastModifiedBy', select: 'firstName lastName email' }
-      ]
+      ],
+      tenantId // Pass tenantId to repository
     });
 
     // Transform names to uppercase
@@ -124,10 +135,15 @@ class PurchaseOrderService {
   /**
    * Get single purchase order by ID
    * @param {string} id - Purchase order ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getPurchaseOrderById(id) {
-    const purchaseOrder = await purchaseOrderRepository.findById(id);
+  async getPurchaseOrderById(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
+    const purchaseOrder = await purchaseOrderRepository.findOne({ _id: id, tenantId });
     
     if (!purchaseOrder) {
       throw new Error('Purchase order not found');
@@ -163,23 +179,28 @@ class PurchaseOrderService {
    * @param {string} userId - User ID creating the order
    * @returns {Promise<PurchaseOrder>}
    */
-  async createPurchaseOrder(poData, userId) {
+  async createPurchaseOrder(poData, userId, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
     const purchaseOrderData = {
       ...poData,
+      tenantId, // Ensure tenantId is set
       poNumber: PurchaseOrder.generatePONumber(),
       createdBy: userId
     };
 
-    const purchaseOrder = await purchaseOrderRepository.create(purchaseOrderData);
+    const purchaseOrder = await purchaseOrderRepository.create(purchaseOrderData, { tenantId });
 
     // Update supplier pending balance for unpaid purchase orders
     if (purchaseOrder.supplier && purchaseOrder.total > 0) {
       try {
-        const supplier = await supplierRepository.findById(purchaseOrder.supplier);
+        const supplier = await supplierRepository.findOne({ _id: purchaseOrder.supplier, tenantId });
         if (supplier) {
-          await supplierRepository.update(purchaseOrder.supplier, {
+          await supplierRepository.updateById(purchaseOrder.supplier, {
             $inc: { pendingBalance: purchaseOrder.total }
-          });
+          }, { tenantId });
         }
       } catch (error) {
         // Don't fail the purchase order creation if supplier update fails
@@ -204,8 +225,12 @@ class PurchaseOrderService {
    * @param {string} userId - User ID performing the update
    * @returns {Promise<PurchaseOrder>}
    */
-  async updatePurchaseOrder(id, updateData, userId) {
-    const purchaseOrder = await purchaseOrderRepository.findById(id);
+  async updatePurchaseOrder(id, updateData, userId, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
+    const purchaseOrder = await purchaseOrderRepository.findOne({ _id: id, tenantId });
     if (!purchaseOrder) {
       throw new Error('Purchase order not found');
     }
@@ -224,18 +249,19 @@ class PurchaseOrderService {
       lastModifiedBy: userId
     };
 
-    const updatedPO = await purchaseOrderRepository.update(id, updatedData, {
+    const updatedPO = await purchaseOrderRepository.updateById(id, updatedData, {
       new: true,
-      runValidators: true
+      runValidators: true,
+      tenantId
     });
 
     // Handle supplier balance updates if supplier or total changed
     if (oldSupplier && oldTotal > 0) {
       try {
         // Reduce old supplier balance
-        await supplierRepository.update(oldSupplier, {
+        await supplierRepository.updateById(oldSupplier, {
           $inc: { pendingBalance: -oldTotal }
-        });
+        }, { tenantId });
       } catch (error) {
         logger.error('Error reducing old supplier balance:', error);
       }
@@ -244,9 +270,9 @@ class PurchaseOrderService {
     if (updatedPO.supplier && updatedPO.total > 0) {
       try {
         // Add new supplier balance
-        await supplierRepository.update(updatedPO.supplier, {
+        await supplierRepository.updateById(updatedPO.supplier, {
           $inc: { pendingBalance: updatedPO.total }
-        });
+        }, { tenantId });
       } catch (error) {
         logger.error('Error updating new supplier balance:', error);
       }
@@ -268,8 +294,12 @@ class PurchaseOrderService {
    * @param {string} id - Purchase order ID
    * @returns {Promise<PurchaseOrder>}
    */
-  async confirmPurchaseOrder(id) {
-    const purchaseOrder = await purchaseOrderRepository.findById(id);
+  async confirmPurchaseOrder(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
+    const purchaseOrder = await purchaseOrderRepository.findOne({ _id: id, tenantId });
     if (!purchaseOrder) {
       throw new Error('Purchase order not found');
     }
@@ -291,8 +321,12 @@ class PurchaseOrderService {
    * @param {string} userId - User ID performing the cancellation
    * @returns {Promise<PurchaseOrder>}
    */
-  async cancelPurchaseOrder(id, userId) {
-    const purchaseOrder = await purchaseOrderRepository.findById(id);
+  async cancelPurchaseOrder(id, userId, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
+    const purchaseOrder = await purchaseOrderRepository.findOne({ _id: id, tenantId });
     if (!purchaseOrder) {
       throw new Error('Purchase order not found');
     }
@@ -304,9 +338,9 @@ class PurchaseOrderService {
     // If confirmed, reduce supplier balance
     if (purchaseOrder.status === 'confirmed' && purchaseOrder.supplier && purchaseOrder.total > 0) {
       try {
-        await supplierRepository.update(purchaseOrder.supplier, {
+        await supplierRepository.updateById(purchaseOrder.supplier, {
           $inc: { pendingBalance: -purchaseOrder.total }
-        });
+        }, { tenantId });
       } catch (error) {
         logger.error('Error reducing supplier balance on cancellation:', error);
       }
@@ -326,8 +360,12 @@ class PurchaseOrderService {
    * @param {string} userId - User ID performing the closure
    * @returns {Promise<PurchaseOrder>}
    */
-  async closePurchaseOrder(id, userId) {
-    const purchaseOrder = await purchaseOrderRepository.findById(id);
+  async closePurchaseOrder(id, userId, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
+    const purchaseOrder = await purchaseOrderRepository.findOne({ _id: id, tenantId });
     if (!purchaseOrder) {
       throw new Error('Purchase order not found');
     }
@@ -348,8 +386,12 @@ class PurchaseOrderService {
    * @param {string} id - Purchase order ID
    * @returns {Promise<void>}
    */
-  async deletePurchaseOrder(id) {
-    const purchaseOrder = await purchaseOrderRepository.findById(id);
+  async deletePurchaseOrder(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
+    const purchaseOrder = await purchaseOrderRepository.findOne({ _id: id, tenantId });
     if (!purchaseOrder) {
       throw new Error('Purchase order not found');
     }
@@ -362,15 +404,15 @@ class PurchaseOrderService {
     // Reduce supplier balance if order was created
     if (purchaseOrder.supplier && purchaseOrder.total > 0) {
       try {
-        await supplierRepository.update(purchaseOrder.supplier, {
+        await supplierRepository.updateById(purchaseOrder.supplier, {
           $inc: { pendingBalance: -purchaseOrder.total }
-        });
+        }, { tenantId });
       } catch (error) {
         logger.error('Error reducing supplier balance on deletion:', error);
       }
     }
 
-    await purchaseOrderRepository.softDelete(id);
+    await purchaseOrderRepository.softDelete(id, { tenantId });
   }
 
   /**
@@ -378,8 +420,12 @@ class PurchaseOrderService {
    * @param {string} id - Purchase order ID
    * @returns {Promise<object>}
    */
-  async getPurchaseOrderForConversion(id) {
-    const purchaseOrder = await purchaseOrderRepository.findById(id, {
+  async getPurchaseOrderForConversion(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required');
+    }
+    
+    const purchaseOrder = await purchaseOrderRepository.findOne({ _id: id, tenantId }, {
       populate: [
         { path: 'items.product', select: 'name description pricing inventory' },
         { path: 'supplier', select: 'companyName contactPerson email phone businessType' }

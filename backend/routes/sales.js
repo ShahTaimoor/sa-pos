@@ -19,6 +19,7 @@ const { auth, requirePermission } = require('../middleware/auth');
 const { preventPOSDuplicates } = require('../middleware/duplicatePrevention');
 const { tenantMiddleware, validateDateRange } = require('../middleware/tenantMiddleware');
 const journalEntryService = require('../services/journalEntryService');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -138,15 +139,17 @@ router.get('/:id', auth, tenantMiddleware, async (req, res) => {
 // @route   GET /api/orders/customer/:customerId/last-prices
 // @desc    Get last order prices for a customer (product prices from most recent order)
 // @access  Private
-router.get('/customer/:customerId/last-prices', auth, async (req, res) => {
+router.get('/customer/:customerId/last-prices', [auth, tenantMiddleware], async (req, res) => {
   try {
     const { customerId } = req.params;
+    const tenantId = req.tenantId;
     
-    // Find the most recent order for this customer
+    // Find the most recent order for this customer (scoped to tenant)
     const lastOrder = await salesRepository.findByCustomer(customerId, {
       sort: { createdAt: -1 },
       limit: 1,
-      populate: [{ path: 'items.product', select: 'name _id' }]
+      populate: [{ path: 'items.product', select: 'name _id' }],
+      filter: { tenantId }
     });
     
     const lastOrderDoc = lastOrder && lastOrder.length > 0 ? lastOrder[0] : null;
@@ -742,6 +745,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id/status', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('edit_orders'),
   body('status').isIn(['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled', 'returned']).withMessage('Invalid status')
 ], async (req, res) => {
@@ -751,7 +755,8 @@ router.put('/:id/status', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const order = await Sales.findById(req.params.id);
+    const tenantId = req.tenantId;
+    const order = await Sales.findOne({ _id: req.params.id, tenantId });
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
@@ -857,6 +862,7 @@ router.put('/:id/status', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('edit_orders'),
   preventPOSDuplicates, // Backend safety net for duplicate prevention
   body('customer').optional().isMongoId().withMessage('Valid customer is required'),
@@ -873,7 +879,8 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const order = await Sales.findById(req.params.id);
+    const tenantId = req.tenantId;
+    const order = await Sales.findOne({ _id: req.params.id, tenantId });
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
@@ -881,6 +888,7 @@ router.put('/:id', [
     // CRITICAL: Block edits if journal entries are posted
     const JournalEntry = require('../models/JournalEntry');
     const hasJournalEntries = await JournalEntry.exists({
+      tenantId,
       referenceType: 'sale',
       referenceId: order._id,
       status: 'posted'
@@ -1219,6 +1227,7 @@ router.put('/:id', [
 // @access  Private
 router.post('/:id/payment', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('edit_orders'),
   body('method').isIn(['cash', 'credit_card', 'debit_card', 'check', 'account']).withMessage('Invalid payment method'),
   body('amount').isFloat({ min: 0.01 }).withMessage('Amount must be greater than 0'),
@@ -1230,7 +1239,8 @@ router.post('/:id/payment', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const order = await Sales.findById(req.params.id);
+    const tenantId = req.tenantId;
+    const order = await Sales.findOne({ _id: req.params.id, tenantId });
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
@@ -1296,10 +1306,12 @@ router.post('/:id/payment', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('delete_orders')
 ], async (req, res) => {
   try {
-    const order = await Sales.findById(req.params.id);
+    const tenantId = req.tenantId;
+    const order = await Sales.findOne({ _id: req.params.id, tenantId });
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
@@ -1307,6 +1319,7 @@ router.delete('/:id', [
     // CRITICAL: Check if journal entries exist - if posted, block deletion
     const JournalEntry = require('../models/JournalEntry');
     const journalEntry = await JournalEntry.findOne({
+      tenantId,
       referenceType: 'sale',
       referenceId: order._id,
       status: 'posted'
@@ -1399,7 +1412,6 @@ router.delete('/:id', [
     // Restore inventory for items in the order using inventoryService for audit trail
     try {
       const inventoryService = require('../services/inventoryService');
-const logger = require('../utils/logger');
       for (const item of order.items) {
         try {
           await inventoryService.updateStock({
@@ -1509,6 +1521,8 @@ router.get('/today/summary', [
 // @access  Private
 router.get('/period/summary', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
+  validateDateRange, // Validate date range (max 2 years)
   query('dateFrom').isISO8601().withMessage('Invalid start date'),
   query('dateTo').isISO8601().withMessage('Invalid end date')
 ], async (req, res) => {
@@ -1518,43 +1532,24 @@ router.get('/period/summary', [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const tenantId = req.tenantId;
     const dateFrom = new Date(req.query.dateFrom);
     dateFrom.setHours(0, 0, 0, 0);
     const dateTo = new Date(req.query.dateTo);
     dateTo.setDate(dateTo.getDate() + 1);
     dateTo.setHours(0, 0, 0, 0);
     
-    const orders = await Sales.find({
-      createdAt: { $gte: dateFrom, $lt: dateTo }
-    });
-    
-    const totalRevenue = orders.reduce((sum, order) => sum + (order.pricing?.total || 0), 0);
-    const totalOrders = orders.length;
-    const totalItems = orders.reduce((sum, order) => 
-      sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0), 0);
-    const averageOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
-    
-    // Calculate discounts
-    const totalDiscounts = orders.reduce((sum, order) => 
-      sum + (order.pricing?.discountAmount || 0), 0);
-    
-    // Calculate by order type
-    const revenueByType = {
-      retail: orders.filter(o => o.orderType === 'retail')
-        .reduce((sum, order) => sum + (order.pricing?.total || 0), 0),
-      wholesale: orders.filter(o => o.orderType === 'wholesale')
-        .reduce((sum, order) => sum + (order.pricing?.total || 0), 0)
-    };
+    const result = await salesService.getPeriodSummary(dateFrom, dateTo, tenantId);
     
     const summary = {
-      total: totalRevenue,
-      totalRevenue,
-      totalOrders,
-      totalItems,
-      averageOrderValue,
-      totalDiscounts,
-      netRevenue: totalRevenue - totalDiscounts,
-      revenueByType,
+      total: result.totalRevenue,
+      totalRevenue: result.totalRevenue,
+      totalOrders: result.totalOrders,
+      totalItems: result.totalItems,
+      averageOrderValue: result.averageOrderValue,
+      totalDiscounts: result.totalDiscounts,
+      netRevenue: result.totalRevenue - result.totalDiscounts,
+      revenueByType: result.revenueByType,
       period: {
         start: req.query.dateFrom,
         end: req.query.dateTo
@@ -1571,12 +1566,13 @@ router.get('/period/summary', [
 // @route   POST /api/orders/export/excel
 // @desc    Export orders to Excel
 // @access  Private
-router.post('/export/excel', [auth, requirePermission('view_orders')], async (req, res) => {
+router.post('/export/excel', [auth, tenantMiddleware, requirePermission('view_orders')], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
     const { filters = {} } = req.body;
     
     // Build query based on filters
-    const filter = {};
+    const filter = { tenantId }; // Always include tenantId for isolation
     
     if (filters.search) {
       filter.$or = [
@@ -1724,12 +1720,13 @@ router.post('/export/excel', [auth, requirePermission('view_orders')], async (re
 // @route   POST /api/orders/export/csv
 // @desc    Export orders to CSV
 // @access  Private
-router.post('/export/csv', [auth, requirePermission('view_orders')], async (req, res) => {
+router.post('/export/csv', [auth, tenantMiddleware, requirePermission('view_orders')], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
     const { filters = {} } = req.body;
     
     // Build query based on filters (same as Excel export)
-    const filter = {};
+    const filter = { tenantId }; // Always include tenantId for isolation
     
     if (filters.search) {
       filter.$or = [
@@ -1846,12 +1843,13 @@ router.post('/export/csv', [auth, requirePermission('view_orders')], async (req,
 // @route   POST /api/orders/export/pdf
 // @desc    Export orders to PDF
 // @access  Private
-router.post('/export/pdf', [auth, requirePermission('view_orders')], async (req, res) => {
+router.post('/export/pdf', [auth, tenantMiddleware, requirePermission('view_orders')], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
     const { filters = {} } = req.body;
     
     // Build query based on filters (same as Excel export)
-    const filter = {};
+    const filter = { tenantId }; // Always include tenantId for isolation
     
     if (filters.search) {
       filter.$or = [
@@ -2447,12 +2445,13 @@ router.post('/export/pdf', [auth, requirePermission('view_orders')], async (req,
 // @route   POST /api/orders/export/json
 // @desc    Export orders to JSON
 // @access  Private
-router.post('/export/json', [auth, requirePermission('view_orders')], async (req, res) => {
+router.post('/export/json', [auth, tenantMiddleware, requirePermission('view_orders')], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
     const { filters = {} } = req.body;
     
     // Build query based on filters (same as Excel export)
-    const filter = {};
+    const filter = { tenantId }; // Always include tenantId for isolation
     
     if (filters.search) {
       filter.$or = [

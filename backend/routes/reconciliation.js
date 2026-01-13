@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const reconciliationService = require('../services/reconciliationService');
 const { param, query } = require('express-validator');
 const logger = require('../utils/logger');
@@ -10,11 +11,16 @@ const logger = require('../utils/logger');
 // @access  Private
 router.post('/customers/:customerId', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('reconcile_balances'),
   param('customerId').isMongoId().withMessage('Valid customer ID is required'),
   query('autoCorrect').optional().isBoolean().withMessage('autoCorrect must be boolean')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const options = {
       autoCorrect: req.query.autoCorrect === 'true',
       alertOnDiscrepancy: req.query.alertOnDiscrepancy !== 'false'
@@ -22,7 +28,8 @@ router.post('/customers/:customerId', [
 
     const reconciliation = await reconciliationService.reconcileCustomerBalance(
       req.params.customerId,
-      options
+      options,
+      tenantId
     );
 
     res.json({
@@ -40,18 +47,23 @@ router.post('/customers/:customerId', [
 // @access  Private
 router.post('/customers', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('reconcile_balances'),
   query('autoCorrect').optional().isBoolean().withMessage('autoCorrect must be boolean'),
   query('batchSize').optional().isInt({ min: 1, max: 1000 }).withMessage('batchSize must be between 1 and 1000')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const options = {
       autoCorrect: req.query.autoCorrect === 'true',
       alertOnDiscrepancy: req.query.alertOnDiscrepancy !== 'false',
       batchSize: parseInt(req.query.batchSize) || 100
     };
 
-    const results = await reconciliationService.reconcileAllCustomerBalances(options);
+    const results = await reconciliationService.reconcileAllCustomerBalances(options, tenantId);
 
     res.json({
       success: true,
@@ -68,12 +80,17 @@ router.post('/customers', [
 // @access  Private
 router.get('/customers/:customerId/report', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('view_reconciliation_reports'),
   param('customerId').isMongoId().withMessage('Valid customer ID is required'),
   query('startDate').optional().isISO8601().withMessage('startDate must be valid ISO date'),
   query('endDate').optional().isISO8601().withMessage('endDate must be valid ISO date')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const startDate = req.query.startDate ? new Date(req.query.startDate) : new Date();
     startDate.setMonth(startDate.getMonth() - 1); // Default to last month
 
@@ -82,7 +99,8 @@ router.get('/customers/:customerId/report', [
     const report = await reconciliationService.getReconciliationReport(
       req.params.customerId,
       startDate,
-      endDate
+      endDate,
+      tenantId
     );
 
     res.json({

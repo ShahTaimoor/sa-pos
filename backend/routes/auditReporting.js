@@ -50,11 +50,19 @@ router.get('/dashboard', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/pending-approvals', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest
 ], async (req, res) => {
   try {
-    const pendingApprovals = await auditReportingService.getPendingApprovals();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const pendingApprovals = await auditReportingService.getPendingApprovals(tenantId);
 
     res.json({
       success: true,
@@ -75,6 +83,7 @@ router.get('/pending-approvals', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/reconciliation-discrepancies', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest
 ], async (req, res) => {

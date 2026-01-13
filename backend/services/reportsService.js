@@ -28,16 +28,21 @@ class ReportsService {
   /**
    * Get sales report
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<object>}
    */
-  async getSalesReport(queryParams) {
+  async getSalesReport(queryParams, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getSalesReport');
+    }
     const dateFrom = queryParams.dateFrom ? new Date(queryParams.dateFrom) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const dateTo = queryParams.dateTo ? new Date(queryParams.dateTo) : new Date();
     const groupBy = queryParams.groupBy || 'day';
     const orderType = queryParams.orderType;
 
-    // Build filter
+    // Build filter (include tenantId)
     const filter = {
+      tenantId, // CRITICAL: Include tenantId for multi-tenant isolation
       createdAt: { $gte: dateFrom, $lte: dateTo },
       status: { $nin: ['cancelled'] }
     };
@@ -108,14 +113,19 @@ class ReportsService {
   /**
    * Get product performance report
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<object>}
    */
-  async getProductReport(queryParams) {
+  async getProductReport(queryParams, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getProductReport');
+    }
     const dateFrom = queryParams.dateFrom ? new Date(queryParams.dateFrom) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const dateTo = queryParams.dateTo ? new Date(queryParams.dateTo) : new Date();
     const limit = parseInt(queryParams.limit) || 20;
 
     const orders = await salesRepository.findAll({
+      tenantId, // CRITICAL: Include tenantId for multi-tenant isolation
       createdAt: { $gte: dateFrom, $lte: dateTo },
       status: { $nin: ['cancelled'] }
     }, {
@@ -168,15 +178,20 @@ class ReportsService {
   /**
    * Get customer performance report
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<object>}
    */
-  async getCustomerReport(queryParams) {
+  async getCustomerReport(queryParams, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getCustomerReport');
+    }
     const dateFrom = queryParams.dateFrom ? new Date(queryParams.dateFrom) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const dateTo = queryParams.dateTo ? new Date(queryParams.dateTo) : new Date();
     const limit = parseInt(queryParams.limit) || 20;
     const businessType = queryParams.businessType;
 
     const filter = {
+      tenantId, // CRITICAL: Include tenantId for multi-tenant isolation
       createdAt: { $gte: dateFrom, $lte: dateTo },
       status: { $nin: ['cancelled'] },
       customer: { $exists: true, $ne: null }
@@ -247,10 +262,14 @@ class ReportsService {
   /**
    * Get inventory report
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<object>}
    */
-  async getInventoryReport(queryParams) {
-    const filter = { status: 'active' };
+  async getInventoryReport(queryParams, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getInventoryReport');
+    }
+    const filter = { tenantId, status: 'active' }; // CRITICAL: Include tenantId
 
     if (queryParams.lowStock === 'true') {
       filter.$expr = {

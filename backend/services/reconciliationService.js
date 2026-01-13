@@ -8,19 +8,24 @@ class ReconciliationService {
    * Reconcile a single customer's balance
    * @param {String} customerId - Customer ID
    * @param {Object} options - Reconciliation options
+   * @param {String} tenantId - Tenant ID (required)
    * @returns {Promise<Object>}
    */
-  async reconcileCustomerBalance(customerId, options = {}) {
+  async reconcileCustomerBalance(customerId, options = {}, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for reconcileCustomerBalance');
+    }
     const { autoCorrect = false, alertOnDiscrepancy = true } = options;
     
-    const customer = await Customer.findById(customerId);
+    const customer = await Customer.findOne({ _id: customerId, tenantId });
     if (!customer) {
       throw new Error('Customer not found');
     }
 
-    // Get all transactions (excluding reversed)
+    // Get all transactions (excluding reversed) - tenant-scoped
     const transactions = await CustomerTransaction.find({
       customer: customerId,
+      tenantId,
       status: { $ne: 'reversed' }
     }).sort({ transactionDate: 1 });
 
@@ -332,13 +337,18 @@ class ReconciliationService {
    * @param {String} customerId - Customer ID
    * @param {Date} startDate - Start date
    * @param {Date} endDate - End date
+   * @param {String} tenantId - Tenant ID (required)
    * @returns {Promise<Object>}
    */
-  async getReconciliationReport(customerId, startDate, endDate) {
-    const reconciliation = await this.reconcileCustomerBalance(customerId);
+  async getReconciliationReport(customerId, startDate, endDate, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getReconciliationReport');
+    }
+    const reconciliation = await this.reconcileCustomerBalance(customerId, {}, tenantId);
     
     const transactions = await CustomerTransaction.find({
       customer: customerId,
+      tenantId,
       transactionDate: {
         $gte: startDate,
         $lte: endDate

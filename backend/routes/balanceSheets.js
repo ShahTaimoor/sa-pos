@@ -4,6 +4,7 @@ const { auth, requirePermission } = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const balanceSheetService = require('../services/balanceSheetService');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -21,11 +22,19 @@ router.post('/generate', [
 ], async (req, res) => {
   try {
     const { statementDate, periodType = 'monthly' } = req.body;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    if (!tenantId) {
+      return res.status(400).json({ 
+        message: 'Tenant ID is required' 
+      });
+    }
 
     const balanceSheet = await balanceSheetService.generateBalanceSheet(
       statementDate,
       periodType,
-      req.user._id
+      req.user._id,
+      tenantId
     );
 
     res.status(201).json({
@@ -56,6 +65,14 @@ router.get('/', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    
+    if (!tenantId) {
+      return res.status(400).json({ 
+        message: 'Tenant ID is required' 
+      });
+    }
+
     const {
       page = 1,
       limit = 10,
@@ -74,7 +91,7 @@ router.get('/', [
       startDate,
       endDate,
       search
-    });
+    }, tenantId);
 
     res.json({
       balanceSheets: result.balanceSheets,
@@ -463,7 +480,6 @@ router.get('/:balanceSheetId/versions', [
 ], async (req, res) => {
   try {
     const BalanceSheet = require('../models/BalanceSheet');
-const logger = require('../utils/logger');
     const balanceSheet = await BalanceSheet.findById(req.params.balanceSheetId)
       .populate('auditTrail.performedBy', 'firstName lastName email');
 

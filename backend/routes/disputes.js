@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const disputeManagementService = require('../services/disputeManagementService');
 const { body, param, query } = require('express-validator');
 const logger = require('../utils/logger');
@@ -10,6 +11,7 @@ const logger = require('../utils/logger');
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('create_disputes'),
   body('transactionId').isMongoId().withMessage('Valid transaction ID is required'),
   body('customerId').isMongoId().withMessage('Valid customer ID is required'),
@@ -32,6 +34,7 @@ router.post('/', [
 // @access  Private
 router.post('/:id/resolve', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('resolve_disputes'),
   param('id').isMongoId().withMessage('Valid dispute ID is required'),
   body('resolution').isIn(['refund_full', 'refund_partial', 'credit_note', 'adjustment', 'rejected', 'other']).withMessage('Valid resolution is required'),
@@ -56,6 +59,7 @@ router.post('/:id/resolve', [
 // @access  Private
 router.get('/customers/:customerId', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('view_disputes'),
   param('customerId').isMongoId().withMessage('Valid customer ID is required'),
   query('status').optional().isIn(['open', 'under_review', 'resolved', 'rejected', 'escalated']),
@@ -83,6 +87,7 @@ router.get('/customers/:customerId', [
 // @access  Private
 router.get('/open', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('view_disputes'),
   query('priority').optional().isIn(['low', 'medium', 'high', 'urgent']),
   query('assignedTo').optional().isMongoId(),

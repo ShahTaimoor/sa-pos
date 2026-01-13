@@ -4,12 +4,14 @@ const { auth, requirePermission } = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const accountingPeriodService = require('../services/accountingPeriodService');
 const { body, param, query } = require('express-validator');
+const logger = require('../utils/logger');
 
 // @route   POST /api/accounting-periods
 // @desc    Create a new accounting period
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('manage_accounting_periods'),
   body('periodName').trim().isLength({ min: 1 }).withMessage('Period name is required'),
   body('periodType').isIn(['monthly', 'quarterly', 'yearly']).withMessage('Valid period type is required'),
@@ -17,7 +19,14 @@ router.post('/', [
   body('periodEnd').isISO8601().withMessage('Valid end date is required')
 ], async (req, res) => {
   try {
-    const period = await accountingPeriodService.createPeriod(req.body, req.user);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const period = await accountingPeriodService.createPeriod(req.body, req.user, tenantId);
     res.status(201).json({ success: true, data: period });
   } catch (error) {
     logger.error('Create accounting period error:', { error: error });
@@ -30,11 +39,19 @@ router.post('/', [
 // @access  Private
 router.get('/current', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('view_accounting_periods'),
   query('periodType').optional().isIn(['monthly', 'quarterly', 'yearly'])
 ], async (req, res) => {
   try {
-    const period = await accountingPeriodService.getCurrentPeriod(req.query.periodType || 'monthly');
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const period = await accountingPeriodService.getCurrentPeriod(req.query.periodType || 'monthly', tenantId);
     res.json({ success: true, data: period });
   } catch (error) {
     logger.error('Get current period error:', { error: error });
@@ -81,15 +98,24 @@ router.post('/:id/close', [
 // @access  Private
 router.post('/:id/lock', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('lock_accounting_periods'),
   param('id').isMongoId().withMessage('Valid period ID is required'),
   body('reason').optional().trim().isLength({ max: 500 })
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     const period = await accountingPeriodService.lockPeriod(
       req.params.id,
       req.user,
-      req.body.reason || ''
+      req.body.reason || '',
+      tenantId
     );
     res.json({ success: true, data: period, message: 'Period locked successfully' });
   } catch (error) {
@@ -103,11 +129,19 @@ router.post('/:id/lock', [
 // @access  Private
 router.post('/:id/unlock', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('lock_accounting_periods'),
   param('id').isMongoId().withMessage('Valid period ID is required')
 ], async (req, res) => {
   try {
-    const period = await accountingPeriodService.unlockPeriod(req.params.id, req.user);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const period = await accountingPeriodService.unlockPeriod(req.params.id, req.user, tenantId);
     res.json({ success: true, data: period, message: 'Period unlocked successfully' });
   } catch (error) {
     logger.error('Unlock period error:', { error: error });
@@ -264,7 +298,6 @@ router.get('/:id/closing-entries', [
       });
     }
     const JournalVoucher = require('../models/JournalVoucher');
-const logger = require('../utils/logger');
     const closingEntries = await JournalVoucher.find({
       tenantId: tenantId,
       'metadata.periodId': req.params.id,

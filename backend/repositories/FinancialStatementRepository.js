@@ -137,20 +137,28 @@ class FinancialStatementRepository extends BaseRepository {
    * Get latest statement by type and period type
    * @param {string} type - Statement type
    * @param {string} periodType - Period type
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<FinancialStatement|null>}
    */
-  async getLatestStatement(type, periodType) {
-    return await this.Model.getLatestStatement(type, periodType);
+  async getLatestStatement(type, periodType, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get latest statement');
+    }
+    return await this.Model.getLatestStatement(type, periodType, tenantId);
   }
 
   /**
    * Get statement comparison
    * @param {string} statementId - Statement ID
    * @param {string} type - Comparison type
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<object>}
    */
-  async getStatementComparison(statementId, type) {
-    return await this.Model.getStatementComparison(statementId, type);
+  async getStatementComparison(statementId, type, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get statement comparison');
+    }
+    return await this.Model.getStatementComparison(statementId, type, tenantId);
   }
 }
 

@@ -146,9 +146,10 @@ class AccountingPeriodService {
    * @param {String} periodId - Period ID
    * @param {Object} user - User locking period
    * @param {String} reason - Lock reason
+   * @param {String} tenantId - Tenant ID (for consistency, even though AccountingPeriod doesn't have tenantId)
    * @returns {Promise<AccountingPeriod>}
    */
-  async lockPeriod(periodId, user, reason = '') {
+  async lockPeriod(periodId, user, reason = '', tenantId = null) {
     const period = await AccountingPeriod.findById(periodId);
     if (!period) {
       throw new Error('Period not found');
@@ -171,9 +172,10 @@ class AccountingPeriodService {
    * Unlock an accounting period
    * @param {String} periodId - Period ID
    * @param {Object} user - User unlocking period
+   * @param {String} tenantId - Tenant ID (for consistency, even though AccountingPeriod doesn't have tenantId)
    * @returns {Promise<AccountingPeriod>}
    */
-  async unlockPeriod(periodId, user) {
+  async unlockPeriod(periodId, user, tenantId = null) {
     const period = await AccountingPeriod.findById(periodId);
     if (!period) {
       throw new Error('Period not found');
@@ -238,7 +240,7 @@ class AccountingPeriodService {
    * @param {String} periodType - Period type
    * @returns {Promise<AccountingPeriod>}
    */
-  async getCurrentPeriod(periodType = 'monthly') {
+  async getCurrentPeriod(periodType = 'monthly', tenantId = null) {
     return await AccountingPeriod.getCurrentPeriod(periodType);
   }
 

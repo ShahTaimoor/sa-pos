@@ -15,7 +15,10 @@ class DiscountService {
   }
 
   // Create a new discount
-  async createDiscount(discountData, createdBy) {
+  async createDiscount(discountData, createdBy, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for createDiscount');
+    }
     try {
       // Validate discount data
       const validation = await this.validateDiscountData(discountData);
@@ -23,8 +26,8 @@ class DiscountService {
         throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
       }
 
-      // Check if discount code already exists
-      const existingDiscount = await DiscountRepository.findByCode(discountData.code);
+      // Check if discount code already exists (within tenant)
+      const existingDiscount = await DiscountRepository.findByCode(discountData.code, tenantId);
       if (existingDiscount) {
         throw new Error('Discount code already exists');
       }
@@ -32,6 +35,7 @@ class DiscountService {
       // Create the discount
       const discountDataWithAudit = {
         ...discountData,
+        tenantId, // CRITICAL: Include tenantId for multi-tenant isolation
         createdBy,
         auditTrail: [{
           action: 'created',
@@ -41,7 +45,7 @@ class DiscountService {
         }]
       };
 
-      const discount = await DiscountRepository.create(discountDataWithAudit);
+      const discount = await DiscountRepository.create(discountDataWithAudit, { tenantId });
       return discount;
     } catch (error) {
       logger.error('Error creating discount:', error);
@@ -50,9 +54,12 @@ class DiscountService {
   }
 
   // Update an existing discount
-  async updateDiscount(discountId, updateData, modifiedBy) {
+  async updateDiscount(discountId, updateData, modifiedBy, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for updateDiscount');
+    }
     try {
-      const discount = await DiscountRepository.findById(discountId);
+      const discount = await DiscountRepository.findById(discountId, { tenantId });
       if (!discount) {
         throw new Error('Discount not found');
       }
@@ -63,10 +70,10 @@ class DiscountService {
         throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
       }
 
-      // Check if code is being changed and if it already exists
+      // Check if code is being changed and if it already exists (within tenant)
       if (updateData.code && updateData.code !== discount.code) {
-        const codeExists = await DiscountRepository.codeExists(updateData.code, discountId);
-        if (codeExists) {
+        const existingCode = await DiscountRepository.findByCode(updateData.code, tenantId);
+        if (existingCode && existingCode._id.toString() !== discountId) {
           throw new Error('Discount code already exists');
         }
       }
@@ -82,10 +89,10 @@ class DiscountService {
 
       // Get existing audit trail and add new entry
       const existingAuditTrail = discount.auditTrail || [];
-      const updatedDiscount = await DiscountRepository.update(discountId, updateDataWithAudit);
+      const updatedDiscount = await DiscountRepository.update(discountId, updateDataWithAudit, { tenantId });
       
       // Add audit trail entry (need to update the document after getting it)
-      const updatedDiscountDoc = await DiscountRepository.findById(discountId);
+      const updatedDiscountDoc = await DiscountRepository.findById(discountId, { tenantId });
       updatedDiscountDoc.auditTrail = existingAuditTrail;
       updatedDiscountDoc.auditTrail.push({
         action: 'updated',
@@ -104,7 +111,10 @@ class DiscountService {
   }
 
   // Get all discounts with filters
-  async getDiscounts(filters = {}) {
+  async getDiscounts(filters = {}, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getDiscounts');
+    }
     try {
       const {
         page = 1,
@@ -120,7 +130,7 @@ class DiscountService {
       } = filters;
 
       const skip = (page - 1) * limit;
-      const query = {};
+      const query = { tenantId }; // CRITICAL: Include tenantId for multi-tenant isolation
 
       // Apply filters
       if (search) {
@@ -152,6 +162,7 @@ class DiscountService {
       ];
 
       const { discounts, total } = await DiscountRepository.findWithPagination(query, {
+        tenantId, // CRITICAL: Include tenantId in options
         page,
         limit,
         sort: sortObj,
@@ -181,7 +192,10 @@ class DiscountService {
   }
 
   // Get discount by ID
-  async getDiscountById(discountId) {
+  async getDiscountById(discountId, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getDiscountById');
+    }
     try {
       const populate = [
         { path: 'createdBy', select: 'firstName lastName email' },
@@ -193,7 +207,7 @@ class DiscountService {
         { path: 'analytics.usageHistory.customerId', select: 'displayName email' }
       ];
 
-      const discount = await DiscountRepository.findById(discountId, populate);
+      const discount = await DiscountRepository.findById(discountId, { tenantId, populate });
 
       if (!discount) {
         throw new Error('Discount not found');
@@ -207,7 +221,10 @@ class DiscountService {
   }
 
   // Get discount by code
-  async getDiscountByCode(code) {
+  async getDiscountByCode(code, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getDiscountByCode');
+    }
     try {
       const populate = [
         { path: 'applicableProducts', select: 'name description' },
@@ -215,7 +232,7 @@ class DiscountService {
         { path: 'applicableCustomers', select: 'displayName email' }
       ];
 
-      const discount = await DiscountRepository.findByCode(code.toUpperCase(), { populate });
+      const discount = await DiscountRepository.findByCode(code.toUpperCase(), tenantId, { populate });
 
       return discount;
     } catch (error) {
@@ -461,9 +478,12 @@ class DiscountService {
   }
 
   // Toggle discount active status
-  async toggleDiscountStatus(discountId, modifiedBy) {
+  async toggleDiscountStatus(discountId, modifiedBy, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for toggleDiscountStatus');
+    }
     try {
-      const discount = await DiscountRepository.findById(discountId);
+      const discount = await DiscountRepository.findById(discountId, { tenantId });
       if (!discount) {
         throw new Error('Discount not found');
       }
@@ -475,10 +495,10 @@ class DiscountService {
       const updatedDiscount = await DiscountRepository.update(discountId, {
         isActive: newStatus,
         lastModifiedBy: modifiedBy
-      });
+      }, { tenantId });
 
       // Add audit trail entry
-      const discountDoc = await DiscountRepository.findById(discountId);
+      const discountDoc = await DiscountRepository.findById(discountId, { tenantId });
       discountDoc.auditTrail = discountDoc.auditTrail || [];
       discountDoc.auditTrail.push({
         action: newStatus ? 'activated' : 'deactivated',
@@ -496,9 +516,12 @@ class DiscountService {
   }
 
   // Delete discount
-  async deleteDiscount(discountId, deletedBy) {
+  async deleteDiscount(discountId, deletedBy, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for deleteDiscount');
+    }
     try {
-      const discount = await DiscountRepository.findById(discountId);
+      const discount = await DiscountRepository.findById(discountId, { tenantId });
       if (!discount) {
         throw new Error('Discount not found');
       }
@@ -542,9 +565,12 @@ class DiscountService {
   }
 
   // Check discount code availability
-  async isDiscountCodeAvailable(code) {
+  async isDiscountCodeAvailable(code, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for isDiscountCodeAvailable');
+    }
     try {
-      const existingDiscount = await DiscountRepository.findByCode(code.toUpperCase());
+      const existingDiscount = await DiscountRepository.findByCode(code.toUpperCase(), tenantId);
       return !existingDiscount;
     } catch (error) {
       logger.error('Error checking discount code availability:', error);

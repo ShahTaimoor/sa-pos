@@ -150,13 +150,15 @@ router.post('/', [
       inventory
     } = req.body;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     // Check if base product exists
-    const baseProductDoc = await productRepository.findById(baseProduct);
+    const baseProductDoc = await productRepository.findById(baseProduct, { tenantId });
     if (!baseProductDoc) {
       return res.status(404).json({ message: 'Base product not found' });
     }
-
-    const tenantId = req.tenantId || req.user?.tenantId;
     
     // Check if variant already exists
     const variantCheckQuery = {
@@ -191,7 +193,8 @@ router.post('/', [
       sku,
       inventory: inventory || { currentStock: 0, minStock: 0 },
       createdBy: req.user._id,
-      lastModifiedBy: req.user._id
+      lastModifiedBy: req.user._id,
+      tenantId
     });
 
     await variant.save();
@@ -202,11 +205,12 @@ router.post('/', [
       currentStock: variant.inventory.currentStock || 0,
       reorderPoint: variant.inventory.minStock || 10,
       reorderQuantity: 50,
-      status: 'active'
+      status: 'active',
+      tenantId
     });
     await variantInventory.save();
 
-    const populatedVariant = await productVariantRepository.findById(variant._id, {
+    const populatedVariant = await productVariantRepository.findById(variant._id, { tenantId }, {
       populate: [
         { path: 'baseProduct', select: 'name description pricing' },
         { path: 'createdBy', select: 'firstName lastName' }
@@ -238,14 +242,18 @@ router.put('/:id', [
   body('pricing.retail').optional().isFloat({ min: 0 }),
   body('pricing.wholesale').optional().isFloat({ min: 0 }),
   body('transformationCost').optional().isFloat({ min: 0 })
-], async (req, res) => {
+  ], async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const variant = await productVariantRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const variant = await productVariantRepository.findById(req.params.id, { tenantId });
     if (!variant) {
       return res.status(404).json({ message: 'Product variant not found' });
     }
@@ -261,7 +269,7 @@ router.put('/:id', [
     variant.lastModifiedBy = req.user._id;
     await variant.save();
 
-    const updatedVariant = await productVariantRepository.findById(variant._id, {
+    const updatedVariant = await productVariantRepository.findById(variant._id, { tenantId }, { tenantId }, {
       populate: [
         { path: 'baseProduct', select: 'name description pricing' },
         { path: 'lastModifiedBy', select: 'firstName lastName' }
@@ -294,7 +302,11 @@ router.delete('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const variant = await productVariantRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const variant = await productVariantRepository.findById(req.params.id, { tenantId });
     if (!variant) {
       return res.status(404).json({ message: 'Product variant not found' });
     }
@@ -307,7 +319,7 @@ router.delete('/:id', [
     }
 
     // Delete inventory record
-    const inventoryRecord = await inventoryRepository.findOne({ product: variant._id });
+    const inventoryRecord = await inventoryRepository.findOne({ product: variant._id, tenantId });
     if (inventoryRecord) {
       await inventoryRepository.hardDelete(inventoryRecord._id);
     }

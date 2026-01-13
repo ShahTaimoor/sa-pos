@@ -9,6 +9,7 @@ const chartOfAccountsService = require('../services/chartOfAccountsService');
 const accountBalanceService = require('../services/accountBalanceService');
 const accountCodeGenerationService = require('../services/accountCodeGenerationService');
 const { body, param, query } = require('express-validator');
+const logger = require('../utils/logger');
 
 // @route   GET /api/chart-of-accounts
 // @desc    Get all accounts with optional filters
@@ -423,6 +424,7 @@ router.post('/:id/lock-reconciliation', [
 // @access  Private (requires 'reconcile_accounts' permission)
 router.post('/:id/unlock-reconciliation', [
   auth,
+  tenantMiddleware,
   requirePermission('reconcile_accounts'),
   param('id').isMongoId().withMessage('Valid account ID is required'),
   body('reconciled').optional().isBoolean().withMessage('Reconciled must be a boolean'),
@@ -678,7 +680,6 @@ router.get('/:id/balance', [
     }
 
     const ChartOfAccounts = require('../models/ChartOfAccounts');
-const logger = require('../utils/logger');
     const account = await ChartOfAccounts.findOne({ 
       _id: id,
       tenantId: tenantId,

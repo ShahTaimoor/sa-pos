@@ -173,7 +173,11 @@ class ProductService {
    * @param {object} queryParams - Query parameters
    * @returns {Promise<object>}
    */
-  async getProducts(queryParams) {
+  async getProducts(queryParams, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get products');
+    }
+    
     const getAllProducts = queryParams.all === 'true' || queryParams.all === true ||
                           (queryParams.limit && parseInt(queryParams.limit) >= 999999);
 
@@ -181,8 +185,11 @@ class ProductService {
     const limit = getAllProducts ? 999999 : (parseInt(queryParams.limit) || 20);
 
     const filter = this.buildFilter(queryParams);
+    // Ensure tenantId is in filter
+    filter.tenantId = tenantId;
 
     const result = await productRepository.findWithPagination(filter, {
+      tenantId: tenantId,
       page,
       limit,
       getAll: getAllProducts,
@@ -205,8 +212,13 @@ class ProductService {
    * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<Product>}
    */
-  async getProductById(id, tenantId = null) {
+  async getProductById(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get product');
+    }
+    
     const product = await productRepository.findById(id, {
+      tenantId: tenantId,
       populate: [
         { path: 'category', select: 'name' },
         { path: 'investors.investor', select: 'name email' }
@@ -214,11 +226,6 @@ class ProductService {
     });
 
     if (!product) {
-      throw new Error('Product not found');
-    }
-
-    // Verify tenantId matches (if provided)
-    if (tenantId && product.tenantId && product.tenantId.toString() !== tenantId.toString()) {
       throw new Error('Product not found');
     }
 
@@ -347,14 +354,15 @@ class ProductService {
       tenantId = req.user.tenantId;
     }
 
-    // Get current product for optimistic locking check
-    const currentProduct = await productRepository.findById(id);
-    if (!currentProduct) {
-      throw new Error('Product not found');
+    if (!tenantId) {
+      throw new Error('tenantId is required to update product');
     }
 
-    // Verify tenantId matches (if provided)
-    if (tenantId && currentProduct.tenantId && currentProduct.tenantId.toString() !== tenantId.toString()) {
+    // Get current product for optimistic locking check
+    const currentProduct = await productRepository.findById(id, {
+      tenantId: tenantId
+    });
+    if (!currentProduct) {
       throw new Error('Product not found');
     }
 
@@ -363,8 +371,10 @@ class ProductService {
       throw new Error('Product was modified by another user. Please refresh and try again.');
     }
 
-    // Use tenantId from current product if not provided
-    const finalTenantId = tenantId || currentProduct.tenantId;
+    const finalTenantId = tenantId;
+    
+    // Prevent tenantId from being changed
+    delete updateData.tenantId;
 
     // Check if product name already exists (excluding current product, within same tenant)
     if (updateData.name) {
@@ -399,8 +409,9 @@ class ProductService {
     };
 
     // Use findOneAndUpdate with version check for atomic update
+    // Include tenantId in filter for security
     const updatedProduct = await productRepository.Model.findOneAndUpdate(
-      { _id: id, __v: currentProduct.__v }, // Include version in filter
+      { _id: id, tenantId: finalTenantId, __v: currentProduct.__v }, // Include tenantId and version in filter
       { $set: dataWithUser, $inc: { __v: 1 } }, // Increment version
       { new: true, runValidators: true }
     );
@@ -435,16 +446,25 @@ class ProductService {
   /**
    * Delete product (soft delete)
    * @param {string} id - Product ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @param {object} req - Express request object (for audit logging)
    * @returns {Promise<{message: string}>}
    */
-  async deleteProduct(id, req = null) {
-    const product = await productRepository.findById(id);
+  async deleteProduct(id, tenantId, req = null) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to delete product');
+    }
+    
+    const product = await productRepository.findById(id, {
+      tenantId: tenantId
+    });
     if (!product) {
       throw new Error('Product not found');
     }
 
-    await productRepository.softDelete(id);
+    await productRepository.softDelete(id, {
+      tenantId: tenantId
+    });
 
     // Log audit trail
     try {
@@ -600,10 +620,16 @@ class ProductService {
    * @param {object} filters - Filter criteria
    * @returns {Promise<Array>}
    */
-  async getProductsForExport(filters = {}) {
+  async getProductsForExport(filters = {}, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to export products');
+    }
+    
     const filter = this.buildFilter(filters);
+    filter.tenantId = tenantId;
     
     return await productRepository.findAll(filter, {
+      tenantId: tenantId,
       populate: { path: 'category', select: 'name' },
       lean: true
     });
@@ -612,14 +638,20 @@ class ProductService {
   /**
    * Search products by name
    * @param {string} searchTerm - Search term
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @param {number} limit - Maximum results
    * @returns {Promise<Array>}
    */
-  async searchProducts(searchTerm, limit = 10) {
+  async searchProducts(searchTerm, tenantId, limit = 10) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to search products');
+    }
+    
     const products = await productRepository.findAll({
       name: { $regex: searchTerm, $options: 'i' },
       status: 'active'
     }, {
+      tenantId: tenantId,
       select: 'name pricing inventory status',
       limit,
       sort: { name: 1 }
@@ -635,8 +667,14 @@ class ProductService {
    * @param {number} quantity - Quantity
    * @returns {Promise<object>}
    */
-  async getPriceForCustomerType(productId, customerType, quantity) {
-    const product = await productRepository.findById(productId);
+  async getPriceForCustomerType(productId, customerType, quantity, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get product price');
+    }
+    
+    const product = await productRepository.findById(productId, {
+      tenantId: tenantId
+    });
     if (!product) {
       throw new Error('Product not found');
     }

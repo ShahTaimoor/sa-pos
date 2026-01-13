@@ -13,6 +13,7 @@ const mongoose = require('mongoose');
 const purchaseInvoiceService = require('../services/purchaseInvoiceService');
 const purchaseInvoiceRepository = require('../repositories/PurchaseInvoiceRepository');
 const supplierRepository = require('../repositories/SupplierRepository');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -41,6 +42,7 @@ const transformProductToUppercase = (product) => {
 // @access  Private
 router.get('/', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   query('page').optional().isInt({ min: 1 }),
   query('limit').optional().isInt({ min: 1, max: 100 }),
   query('search').optional().trim(),
@@ -56,8 +58,9 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
     
+    const tenantId = req.tenantId;
     // Call service to get purchase invoices
-    const result = await purchaseInvoiceService.getPurchaseInvoices(req.query);
+    const result = await purchaseInvoiceService.getPurchaseInvoices(req.query, tenantId);
     
     res.json({
       invoices: result.invoices,
@@ -74,10 +77,12 @@ router.get('/', [
 // @access  Private
 router.get('/:id', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   query('id').isMongoId().withMessage('Invalid invoice ID')
 ], async (req, res) => {
   try {
-    const invoice = await purchaseInvoiceService.getPurchaseInvoiceById(req.params.id);
+    const tenantId = req.tenantId;
+    const invoice = await purchaseInvoiceService.getPurchaseInvoiceById(req.params.id, tenantId);
     
     res.json({ invoice });
   } catch (error) {
@@ -320,6 +325,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   body('supplier').optional().isMongoId().withMessage('Valid supplier is required'),
   body('invoiceType').optional().isIn(['purchase', 'return', 'adjustment']).withMessage('Invalid invoice type'),
   body('notes').optional().trim().isLength({ max: 1000 }).withMessage('Notes too long'),
@@ -330,7 +336,8 @@ router.put('/:id', [
   handleValidationErrors
 ], async (req, res) => {
   try {
-    const invoice = await purchaseInvoiceRepository.findById(req.params.id);
+    const tenantId = req.tenantId;
+    const invoice = await purchaseInvoiceRepository.findOne({ _id: req.params.id, tenantId });
     if (!invoice) {
       return res.status(404).json({ message: 'Purchase invoice not found' });
     }
@@ -338,6 +345,7 @@ router.put('/:id', [
     // CRITICAL: Block edits if journal entries are posted
     const JournalEntry = require('../models/JournalEntry');
     const hasJournalEntries = await JournalEntry.exists({
+      tenantId,
       referenceType: 'purchase',
       referenceId: invoice._id,
       status: 'posted'
@@ -576,10 +584,12 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('delete_purchase_invoices')
 ], async (req, res) => {
   try {
-    const invoice = await purchaseInvoiceRepository.findById(req.params.id);
+    const tenantId = req.tenantId;
+    const invoice = await purchaseInvoiceRepository.findOne({ _id: req.params.id, tenantId });
     if (!invoice) {
       return res.status(404).json({ message: 'Purchase invoice not found' });
     }
@@ -587,6 +597,7 @@ router.delete('/:id', [
     // CRITICAL: Check if journal entries exist - if posted, block deletion
     const JournalEntry = require('../models/JournalEntry');
     const journalEntry = await JournalEntry.findOne({
+      tenantId,
       referenceType: 'purchase',
       referenceId: invoice._id,
       status: 'posted'
@@ -675,7 +686,6 @@ router.delete('/:id', [
     if (invoice.supplier && invoice.pricing && invoice.pricing.total > 0) {
       try {
         const Supplier = require('../models/Supplier');
-const logger = require('../utils/logger');
         const supplierExists = await supplierRepository.findById(invoice.supplier);
         
         if (supplierExists) {
@@ -724,10 +734,12 @@ const logger = require('../utils/logger');
 // @desc    Confirm purchase invoice (DEPRECATED - Purchase invoices are now auto-confirmed)
 // @access  Private
 router.put('/:id/confirm', [
-  auth
+  auth,
+  tenantMiddleware // Enforce tenant isolation
 ], async (req, res) => {
   try {
-    const invoice = await purchaseInvoiceRepository.findById(req.params.id);
+    const tenantId = req.tenantId;
+    const invoice = await purchaseInvoiceRepository.findOne({ _id: req.params.id, tenantId });
     if (!invoice) {
       return res.status(404).json({ message: 'Purchase invoice not found' });
     }
@@ -748,10 +760,12 @@ router.put('/:id/confirm', [
 // @desc    Cancel purchase invoice
 // @access  Private
 router.put('/:id/cancel', [
-  auth
+  auth,
+  tenantMiddleware // Enforce tenant isolation
 ], async (req, res) => {
   try {
-    const invoice = await purchaseInvoiceRepository.findById(req.params.id);
+    const tenantId = req.tenantId;
+    const invoice = await purchaseInvoiceRepository.findOne({ _id: req.params.id, tenantId });
     if (!invoice) {
       return res.status(404).json({ message: 'Purchase invoice not found' });
     }
@@ -778,12 +792,13 @@ router.put('/:id/cancel', [
 // @route   POST /api/purchase-invoices/export/pdf
 // @desc    Export purchase invoices to PDF
 // @access  Private
-router.post('/export/pdf', [auth, requirePermission('view_purchase_invoices')], async (req, res) => {
+router.post('/export/pdf', [auth, tenantMiddleware, requirePermission('view_purchase_invoices')], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
     const { filters = {} } = req.body;
     
     // Build query based on filters
-    const filter = {};
+    const filter = { tenantId }; // Always include tenantId for isolation
     
     if (filters.search) {
       filter.$or = [

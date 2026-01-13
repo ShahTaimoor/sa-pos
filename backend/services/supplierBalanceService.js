@@ -8,11 +8,15 @@ class SupplierBalanceService {
    * @param {String} supplierId - Supplier ID
    * @param {Number} paymentAmount - Amount paid
    * @param {String} purchaseOrderId - Purchase Order ID (optional)
+   * @param {String} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<Object>}
    */
-  static async recordPayment(supplierId, paymentAmount, purchaseOrderId = null) {
+  static async recordPayment(supplierId, paymentAmount, purchaseOrderId = null, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for recordPayment');
+    }
     try {
-      const supplier = await Supplier.findById(supplierId);
+      const supplier = await Supplier.findOne({ _id: supplierId, tenantId }); // CRITICAL: Include tenantId filter
       if (!supplier) {
         throw new Error('Supplier not found');
       }
@@ -141,17 +145,21 @@ class SupplierBalanceService {
   /**
    * Get supplier balance summary
    * @param {String} supplierId - Supplier ID
+   * @param {String} tenantId - Tenant ID (required)
    * @returns {Promise<Object>}
    */
-  static async getBalanceSummary(supplierId) {
+  static async getBalanceSummary(supplierId, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getBalanceSummary');
+    }
     try {
-      const supplier = await Supplier.findById(supplierId);
+      const supplier = await Supplier.findOne({ _id: supplierId, tenantId });
       if (!supplier) {
         throw new Error('Supplier not found');
       }
 
-      // Get recent purchase orders for this supplier
-      const recentPurchaseOrders = await PurchaseOrder.find({ supplier: supplierId })
+      // Get recent purchase orders for this supplier (tenant-scoped)
+      const recentPurchaseOrders = await PurchaseOrder.find({ supplier: supplierId, tenantId })
         .sort({ createdAt: -1 })
         .limit(10)
         .select('poNumber pricing.total status createdAt');

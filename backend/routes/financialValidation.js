@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const financialValidationService = require('../services/financialValidationService');
 const { handleValidationErrors } = require('../middleware/validation');
 const logger = require('../utils/logger');
@@ -13,6 +14,7 @@ const logger = require('../utils/logger');
  */
 router.get('/balance-sheet', [
   auth,
+  tenantMiddleware,
   requirePermission('view_financials'),
   query('asOfDate').optional().isISO8601().withMessage('Invalid date format'),
   handleValidationErrors
@@ -50,6 +52,7 @@ router.get('/balance-sheet', [
  */
 router.get('/account-balances', [
   auth,
+  tenantMiddleware,
   requirePermission('view_financials'),
   handleValidationErrors
 ], async (req, res) => {
@@ -89,6 +92,7 @@ router.get('/account-balances', [
  */
 router.post('/transaction', [
   auth,
+  tenantMiddleware,
   requirePermission('create_transactions'),
   handleValidationErrors
 ], async (req, res) => {
@@ -133,12 +137,20 @@ router.post('/transaction', [
  */
 router.post('/journal-entry', [
   auth,
+  tenantMiddleware,
   requirePermission('create_journal_entries'),
   handleValidationErrors
 ], async (req, res) => {
   try {
     const { entries } = req.body;
-    const issues = await financialValidationService.validateJournalEntryBalances(entries);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const issues = await financialValidationService.validateJournalEntryBalances(entries, tenantId);
     
     if (issues.length > 0) {
       return res.status(400).json({

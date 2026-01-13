@@ -174,6 +174,11 @@ router.get('/', [
       search
     } = req.query;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
     const result = await returnManagementService.getReturns({
       page,
       limit,
@@ -183,7 +188,8 @@ router.get('/', [
       startDate,
       endDate,
       priority,
-      search
+      search,
+      tenantId
     });
 
     // Transform names to uppercase
@@ -239,6 +245,7 @@ router.get('/', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/stats', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_reports'),
   sanitizeRequest,
   query('startDate').optional({ checkFalsy: true }).customSanitizer((value) => {
@@ -263,7 +270,8 @@ router.get('/stats', [
       period.endDate = endDate instanceof Date ? endDate : new Date(endDate);
     }
     
-    const stats = await returnManagementService.getReturnStats(period);
+    const tenantId = req.tenantId;
+    const stats = await returnManagementService.getReturnStats(period, tenantId);
     
     // Ensure stats object has all required fields
     const response = {
@@ -289,14 +297,16 @@ router.get('/stats', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/trends', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_reports'),
   sanitizeRequest,
   query('periods').optional({ checkFalsy: true }).isInt({ min: 1, max: 24 }),
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
     const { periods = 12 } = req.query;
-    const trends = await returnManagementService.getReturnTrends(parseInt(periods));
+    const trends = await returnManagementService.getReturnTrends(parseInt(periods), tenantId);
 
     res.json({
       trends,
@@ -313,15 +323,17 @@ router.get('/trends', [
 // @access  Private (requires 'view_orders' permission)
 router.get('/:returnId', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_orders'),
   sanitizeRequest,
   param('returnId').isMongoId().withMessage('Valid Return ID is required'),
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
     const { returnId } = req.params;
     
-    const returnRequest = await returnManagementService.getReturnById(returnId);
+    const returnRequest = await returnManagementService.getReturnById(returnId, tenantId);
     
     // Additional population if needed
     await returnRequest.populate([
@@ -472,6 +484,7 @@ router.put('/:returnId/status', [
 // @access  Private (requires 'edit_orders' permission)
 router.put('/:returnId/inspection', [
   auth,
+  tenantMiddleware,
   requirePermission('edit_orders'),
   sanitizeRequest,
   param('returnId').isMongoId().withMessage('Valid Return ID is required'),
@@ -536,6 +549,7 @@ router.post('/:returnId/notes', [
 // @access  Private (requires 'view_orders' permission)
 router.post('/:returnId/communication', [
   auth,
+  tenantMiddleware,
   requirePermission('view_orders'),
   sanitizeRequest,
   param('returnId').isMongoId().withMessage('Valid Return ID is required'),
@@ -573,14 +587,18 @@ router.get('/order/:orderId/eligible-items', [
 ], async (req, res) => {
   try {
     const { orderId } = req.params;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     
     // Try to find in Sales first, then SalesOrder
-    let order = await Sales.findById(orderId)
+    let order = await Sales.findOne({ _id: orderId, tenantId })
       .populate('customer')
       .populate('items.product');
     
     if (!order) {
-      order = await SalesOrder.findById(orderId)
+      order = await SalesOrder.findOne({ _id: orderId, tenantId })
         .populate('customer')
         .populate('items.product');
     }
@@ -641,6 +659,7 @@ router.get('/order/:orderId/eligible-items', [
 // @access  Private (requires 'view_orders' permission)
 router.get('/purchase-order/:orderId/eligible-items', [
   auth,
+  tenantMiddleware,
   requirePermission('view_orders'),
   sanitizeRequest,
   param('orderId').isMongoId().withMessage('Valid Order ID is required'),
@@ -648,14 +667,18 @@ router.get('/purchase-order/:orderId/eligible-items', [
 ], async (req, res) => {
   try {
     const { orderId } = req.params;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     
     // Try to find in PurchaseInvoice first, then PurchaseOrder
-    let order = await PurchaseInvoice.findById(orderId)
+    let order = await PurchaseInvoice.findOne({ _id: orderId, tenantId })
       .populate('supplier')
       .populate('items.product');
     
     if (!order) {
-      order = await PurchaseOrder.findById(orderId)
+      order = await PurchaseOrder.findOne({ _id: orderId, tenantId })
         .populate('supplier')
         .populate('items.product');
     }

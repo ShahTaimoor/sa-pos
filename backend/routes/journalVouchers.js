@@ -76,6 +76,9 @@ router.get('/', [
       ];
     }
 
+    const tenantId = req.tenantId;
+    filter.tenantId = tenantId; // Always include tenantId for isolation
+    
     const result = await journalVoucherRepository.findWithPagination(filter, {
       page: parseInt(page, 10),
       limit: parseInt(limit, 10),
@@ -84,7 +87,8 @@ router.get('/', [
         { path: 'createdBy', select: 'firstName lastName email' },
         { path: 'approvedBy', select: 'firstName lastName email' }
       ],
-      lean: true
+      lean: true,
+      tenantId // Pass tenantId to repository
     });
     
     const vouchers = result.vouchers;
@@ -119,7 +123,8 @@ router.get('/:id', [
   param('id').isMongoId().withMessage('Invalid voucher ID')
 ], withValidation, async (req, res) => {
   try {
-    const voucher = await journalVoucherRepository.findById(req.params.id, {
+    const tenantId = req.tenantId;
+    const voucher = await journalVoucherRepository.findOne({ _id: req.params.id, tenantId }, {
       populate: [
         { path: 'entries.account', select: 'accountCode accountName accountType' },
         { path: 'createdBy', select: 'firstName lastName email' },
@@ -298,13 +303,15 @@ router.post('/', [
 // @access  Private (requires 'approve_journal_vouchers' permission)
 router.post('/:id/approve', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('approve_journal_vouchers'),
   checkSegregationOfDuties('manage_reports', 'approve_journal_vouchers'),
   param('id').isMongoId().withMessage('Valid voucher ID is required'),
   body('notes').optional().isString().trim().isLength({ max: 500 }).withMessage('Notes too long')
 ], withValidation, async (req, res) => {
   try {
-    const voucher = await journalVoucherRepository.findById(req.params.id);
+    const tenantId = req.tenantId;
+    const voucher = await journalVoucherRepository.findOne({ _id: req.params.id, tenantId });
     
     if (!voucher) {
       return res.status(404).json({
@@ -359,7 +366,7 @@ router.post('/:id/approve', [
     res.json({
       success: true,
       message: 'Journal voucher approved successfully',
-      data: await journalVoucherRepository.findById(req.params.id, {
+      data: await journalVoucherRepository.findOne({ _id: req.params.id, tenantId }, {
         populate: [
           { path: 'createdBy', select: 'firstName lastName email' },
           { path: 'approvedBy', select: 'firstName lastName email' },
@@ -389,7 +396,8 @@ router.post('/:id/reject', [
   body('reason').trim().isLength({ min: 1, max: 500 }).withMessage('Rejection reason is required (max 500 characters)')
 ], withValidation, async (req, res) => {
   try {
-    const voucher = await journalVoucherRepository.findById(req.params.id);
+    const tenantId = req.tenantId;
+    const voucher = await journalVoucherRepository.findOne({ _id: req.params.id, tenantId });
     
     if (!voucher) {
       return res.status(404).json({
@@ -425,7 +433,7 @@ router.post('/:id/reject', [
     res.json({
       success: true,
       message: 'Journal voucher rejected',
-      data: await journalVoucherRepository.findById(req.params.id, {
+      data: await journalVoucherRepository.findOne({ _id: req.params.id, tenantId }, {
         populate: [
           { path: 'createdBy', select: 'firstName lastName email' },
           { path: 'approvalWorkflow.approvedBy', select: 'firstName lastName email' }
@@ -452,7 +460,8 @@ router.get('/:id/approval-status', [
   param('id').isMongoId().withMessage('Valid voucher ID is required')
 ], withValidation, async (req, res) => {
   try {
-    const voucher = await journalVoucherRepository.findById(req.params.id, {
+    const tenantId = req.tenantId;
+    const voucher = await journalVoucherRepository.findOne({ _id: req.params.id, tenantId }, {
       populate: [
         { path: 'createdBy', select: 'firstName lastName email' },
         { path: 'approvedBy', select: 'firstName lastName email' },

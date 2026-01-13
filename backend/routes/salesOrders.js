@@ -168,7 +168,12 @@ router.get('/', [
 // @access  Private
 router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const salesOrder = await salesOrderRepository.findById(req.params.id, {
+      tenantId,
       populate: [
         { path: 'customer', select: 'businessName name firstName lastName email phone businessType customerTier paymentTerms currentBalance pendingBalance' },
         { path: 'items.product', select: 'name description pricing inventory' },
@@ -290,7 +295,11 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
     
-    const salesOrder = await salesOrderRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const salesOrder = await salesOrderRepository.findById(req.params.id, { tenantId });
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
     }
@@ -350,7 +359,11 @@ router.put('/:id/confirm', [
   requirePermission('confirm_sales_orders')
 ], async (req, res) => {
   try {
-    const salesOrder = await salesOrderRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const salesOrder = await salesOrderRepository.findById(req.params.id, { tenantId });
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
     }
@@ -448,7 +461,11 @@ router.put('/:id/cancel', [
   requirePermission('cancel_sales_orders')
 ], async (req, res) => {
   try {
-    const salesOrder = await salesOrderRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const salesOrder = await salesOrderRepository.findById(req.params.id, { tenantId });
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
     }
@@ -521,10 +538,15 @@ router.put('/:id/cancel', [
 // @access  Private
 router.put('/:id/close', [
   auth,
+  tenantMiddleware,
   requirePermission('close_sales_orders')
 ], async (req, res) => {
   try {
-    const salesOrder = await salesOrderRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const salesOrder = await salesOrderRepository.findById(req.params.id, { tenantId });
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
     }
@@ -559,7 +581,11 @@ router.delete('/:id', [
   requirePermission('delete_sales_orders')
 ], async (req, res) => {
   try {
-    const salesOrder = await salesOrderRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const salesOrder = await salesOrderRepository.findById(req.params.id, { tenantId });
     if (!salesOrder) {
       return res.status(404).json({ message: 'Sales order not found' });
     }
@@ -585,7 +611,12 @@ router.delete('/:id', [
 // @access  Private
 router.get('/:id/convert', [auth, tenantMiddleware], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const salesOrder = await salesOrderRepository.findById(req.params.id, {
+      tenantId,
       populate: [
         { path: 'items.product', select: 'name description pricing inventory' },
         { path: 'customer', select: 'displayName firstName lastName email phone businessType customerTier' }

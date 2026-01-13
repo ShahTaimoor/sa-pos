@@ -1,6 +1,7 @@
 const express = require('express');
 const { body, param, query } = require('express-validator');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const backupService = require('../services/backupService');
 const backupScheduler = require('../services/backupScheduler');
@@ -15,6 +16,7 @@ const router = express.Router();
 // @access  Private (requires 'create_backups' permission)
 router.post('/create', [
   auth,
+  tenantMiddleware,
   requirePermission('create_backups'),
   sanitizeRequest,
   body('type').optional().isIn(['full', 'incremental', 'differential', 'schema_only', 'data_only']),
@@ -37,6 +39,10 @@ router.post('/create', [
       notes,
     } = req.body;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const backup = await backupService.createFullBackup({
       userId: req.user.id,
       schedule,
@@ -45,6 +51,7 @@ router.post('/create', [
       encryption,
       collections,
       excludeCollections,
+      tenantId
     });
 
     if (notes) {
@@ -73,6 +80,7 @@ router.post('/create', [
 // @access  Private (requires 'view_backups' permission)
 router.get('/', [
   auth,
+  tenantMiddleware,
   requirePermission('view_backups'),
   sanitizeRequest,
   query('page').optional().isInt({ min: 1 }),
@@ -96,8 +104,12 @@ router.get('/', [
     } = req.query;
     const skip = (page - 1) * limit;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     // Build filter object
-    const filter = {};
+    const filter = { tenantId };
     if (status) filter.status = status;
     if (type) filter.type = type;
     if (schedule) filter.schedule = schedule;
@@ -130,6 +142,7 @@ router.get('/', [
 // @access  Private (requires 'view_backups' permission)
 router.get('/stats', [
   auth,
+  tenantMiddleware,
   requirePermission('view_backups'),
   sanitizeRequest,
   query('days').optional().isInt({ min: 1, max: 365 }),
@@ -137,7 +150,11 @@ router.get('/stats', [
 ], async (req, res) => {
   try {
     const { days = 30 } = req.query;
-    const stats = await backupService.getBackupStats(parseInt(days));
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const stats = await backupService.getBackupStats(parseInt(days), tenantId);
     
     res.json(stats);
   } catch (error) {
@@ -151,6 +168,7 @@ router.get('/stats', [
 // @access  Private (requires 'view_backups' permission)
 router.get('/:backupId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_backups'),
   sanitizeRequest,
   param('backupId').isMongoId().withMessage('Valid Backup ID is required'),
@@ -158,8 +176,11 @@ router.get('/:backupId', [
 ], async (req, res) => {
   try {
     const { backupId } = req.params;
-    
-    const backup = await backupRepository.findById(backupId, {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const backup = await backupRepository.findById(backupId, { tenantId }, {
       populate: [
         { path: 'triggeredBy', select: 'firstName lastName email' },
         { path: 'verification.verifiedBy', select: 'firstName lastName email' }
@@ -182,6 +203,7 @@ router.get('/:backupId', [
 // @access  Private (requires 'restore_backups' permission)
 router.post('/:backupId/restore', [
   auth,
+  tenantMiddleware,
   requirePermission('restore_backups'),
   sanitizeRequest,
   param('backupId').isMongoId().withMessage('Valid Backup ID is required'),
@@ -198,10 +220,15 @@ router.post('/:backupId/restore', [
       return res.status(400).json({ message: 'Restore confirmation is required' });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const result = await backupService.restoreBackup(backupId, {
       userId: req.user.id,
       collections,
       dropExisting,
+      tenantId
     });
 
     res.json({
@@ -219,6 +246,7 @@ router.post('/:backupId/restore', [
 // @access  Private (requires 'delete_backups' permission)
 router.delete('/:backupId', [
   auth,
+  tenantMiddleware,
   requirePermission('delete_backups'),
   sanitizeRequest,
   param('backupId').isMongoId().withMessage('Valid Backup ID is required'),
@@ -228,12 +256,16 @@ router.delete('/:backupId', [
   try {
     const { backupId } = req.params;
     const { confirmDelete } = req.body;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
 
     if (!confirmDelete) {
       return res.status(400).json({ message: 'Delete confirmation is required' });
     }
 
-    const backup = await backupRepository.findById(backupId);
+    const backup = await backupRepository.findById(backupId, { tenantId });
     if (!backup) {
       return res.status(404).json({ message: 'Backup not found' });
     }
@@ -263,6 +295,7 @@ router.delete('/:backupId', [
 // @access  Private (requires 'view_backups' permission)
 router.post('/:backupId/verify', [
   auth,
+  tenantMiddleware,
   requirePermission('view_backups'),
   sanitizeRequest,
   param('backupId').isMongoId().withMessage('Valid Backup ID is required'),
@@ -293,6 +326,7 @@ router.post('/:backupId/verify', [
 // @access  Private (requires 'create_backups' permission)
 router.post('/:backupId/retry', [
   auth,
+  tenantMiddleware,
   requirePermission('create_backups'),
   sanitizeRequest,
   param('backupId').isMongoId().withMessage('Valid Backup ID is required'),
@@ -300,8 +334,11 @@ router.post('/:backupId/retry', [
 ], async (req, res) => {
   try {
     const { backupId } = req.params;
-    
-    const backup = await backupRepository.findById(backupId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const backup = await backupRepository.findById(backupId, { tenantId });
     if (!backup) {
       return res.status(404).json({ message: 'Backup not found' });
     }
@@ -318,6 +355,7 @@ router.post('/:backupId/retry', [
       compression: backup.compression.enabled,
       encryption: backup.encryption.enabled,
       triggerReason: 'retry',
+      tenantId
     });
 
     res.json({
@@ -338,6 +376,7 @@ router.post('/:backupId/retry', [
 // @access  Private (requires 'view_backups' permission)
 router.get('/scheduler/status', [
   auth,
+  tenantMiddleware,
   requirePermission('view_backups'),
   sanitizeRequest,
   handleValidationErrors,
@@ -356,6 +395,7 @@ router.get('/scheduler/status', [
 // @access  Private (requires 'manage_backups' permission)
 router.post('/scheduler/start', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_backups'),
   sanitizeRequest,
   handleValidationErrors,
@@ -374,6 +414,7 @@ router.post('/scheduler/start', [
 // @access  Private (requires 'manage_backups' permission)
 router.post('/scheduler/stop', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_backups'),
   sanitizeRequest,
   handleValidationErrors,
@@ -392,6 +433,7 @@ router.post('/scheduler/stop', [
 // @access  Private (requires 'create_backups' permission)
 router.post('/scheduler/trigger', [
   auth,
+  tenantMiddleware,
   requirePermission('create_backups'),
   sanitizeRequest,
   body('schedule').isIn(['hourly', 'daily', 'weekly', 'monthly']).withMessage('Valid schedule is required'),
@@ -401,7 +443,11 @@ router.post('/scheduler/trigger', [
   try {
     const { schedule, type = 'full' } = req.body;
     
-    const backup = await backupScheduler.triggerBackup(schedule, type, req.user.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const backup = await backupScheduler.triggerBackup(schedule, type, req.user.id, tenantId);
 
     res.json({
       message: 'Backup triggered successfully',
@@ -423,12 +469,17 @@ router.post('/scheduler/trigger', [
 // @access  Private (requires 'manage_backups' permission)
 router.post('/cleanup', [
   auth,
+  tenantMiddleware,
   requirePermission('manage_backups'),
   sanitizeRequest,
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const deletedCount = await backupService.cleanupOldBackups();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const deletedCount = await backupService.cleanupOldBackups(tenantId);
     
     res.json({
       message: 'Backup cleanup completed successfully',

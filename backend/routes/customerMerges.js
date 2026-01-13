@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const customerMergeService = require('../services/customerMergeService');
 const { body, param, query } = require('express-validator');
 const logger = require('../utils/logger');
@@ -10,6 +11,7 @@ const logger = require('../utils/logger');
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('merge_customers'),
   body('sourceCustomerId').isMongoId().withMessage('Valid source customer ID is required'),
   body('targetCustomerId').isMongoId().withMessage('Valid target customer ID is required'),
@@ -17,13 +19,18 @@ router.post('/', [
   body('mergeNotes').optional().isBoolean().withMessage('mergeNotes must be boolean')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const result = await customerMergeService.mergeCustomers(
       req.body.sourceCustomerId,
       req.body.targetCustomerId,
       req.user,
       {
         mergeAddresses: req.body.mergeAddresses !== false,
-        mergeNotes: req.body.mergeNotes !== false
+        mergeNotes: req.body.mergeNotes !== false,
+        tenantId
       }
     );
 
@@ -43,14 +50,20 @@ router.post('/', [
 // @access  Private
 router.get('/duplicates', [
   auth,
+  tenantMiddleware,
   requirePermission('view_customers'),
   query('threshold').optional().isFloat({ min: 0, max: 1 }).withMessage('threshold must be between 0 and 1'),
   query('minSimilarity').optional().isFloat({ min: 0, max: 1 }).withMessage('minSimilarity must be between 0 and 1')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const duplicates = await customerMergeService.findPotentialDuplicates({
       threshold: parseFloat(req.query.threshold) || 0.8,
-      minSimilarity: parseFloat(req.query.minSimilarity) || 0.7
+      minSimilarity: parseFloat(req.query.minSimilarity) || 0.7,
+      tenantId
     });
 
     res.json({

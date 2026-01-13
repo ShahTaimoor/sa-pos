@@ -10,9 +10,16 @@ const logger = require('../utils/logger');
 
 // Get all account categories grouped by type
 // This route must come before /:id to avoid matching "grouped" as an ID
-router.get('/grouped', auth, async (req, res) => {
+router.get('/grouped', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const categories = await accountCategoryRepository.getAllCategoriesGrouped();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const categories = await accountCategoryRepository.getAllCategoriesGrouped(tenantId);
     
     res.json({
       success: true,
@@ -29,17 +36,24 @@ router.get('/grouped', auth, async (req, res) => {
 });
 
 // Get all account categories
-router.get('/', auth, async (req, res) => {
+router.get('/', [auth, tenantMiddleware], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     const { accountType, grouped } = req.query;
     
     let categories;
     if (grouped === 'true') {
-      categories = await accountCategoryRepository.getAllCategoriesGrouped();
+      categories = await accountCategoryRepository.getAllCategoriesGrouped(tenantId);
     } else if (accountType) {
-      categories = await accountCategoryRepository.getCategoriesByType(accountType);
+      categories = await accountCategoryRepository.getCategoriesByType(accountType, tenantId);
     } else {
-      categories = await accountCategoryRepository.findActive();
+      categories = await accountCategoryRepository.findActive({ tenantId });
     }
     
     res.json({
@@ -57,9 +71,16 @@ router.get('/', auth, async (req, res) => {
 });
 
 // Get single account category
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const category = await accountCategoryRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const category = await accountCategoryRepository.findById(req.params.id, { tenantId });
     
     if (!category) {
       return res.status(404).json({
@@ -83,10 +104,18 @@ router.get('/:id', auth, async (req, res) => {
 });
 
 // Create new account category
-router.post('/', auth, validateAccountCategory, async (req, res) => {
+router.post('/', [auth, tenantMiddleware, validateAccountCategory], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     const categoryData = {
       ...req.body,
+      tenantId,
       createdBy: req.user.id
     };
     
@@ -128,9 +157,16 @@ router.post('/', auth, validateAccountCategory, async (req, res) => {
 });
 
 // Update account category
-router.put('/:id', auth, validateAccountCategory, async (req, res) => {
+router.put('/:id', [auth, tenantMiddleware, validateAccountCategory], async (req, res) => {
   try {
-    const category = await accountCategoryRepository.findById(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+    const category = await accountCategoryRepository.findById(req.params.id, { tenantId });
     
     if (!category) {
       return res.status(404).json({

@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { auth } = require('../middleware/auth');
+const { auth, requireRole } = require('../middleware/auth');
 const authService = require('../services/authService');
 const userRepository = require('../repositories/UserRepository');
 const logger = require('../utils/logger');
@@ -243,8 +243,11 @@ router.post('/create-superadmin', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    // Check if any super admin already exists
-    const existingSuperAdmin = await userRepository.findOne({ role: 'super_admin' });
+    // Check if any super admin already exists (global check - only one super admin system-wide)
+    const existingSuperAdmin = await userRepository.findOne(
+      { role: 'super_admin' },
+      { allowNoTenantId: true }
+    );
     if (existingSuperAdmin) {
       return res.status(403).json({ 
         message: 'Super admin already exists. Only one super admin can be created via this endpoint.' 
@@ -253,8 +256,8 @@ router.post('/create-superadmin', [
 
     const { firstName, lastName, email, password, tenantId } = req.body;
 
-    // Check if email already exists
-    const emailExists = await userRepository.findByEmail(email);
+    // Check if email already exists (global check - emails must be unique across all tenants)
+    const emailExists = await userRepository.findByEmail(email, { allowNoTenantId: true });
     if (emailExists) {
       return res.status(400).json({ message: 'User with this email already exists' });
     }
@@ -302,6 +305,94 @@ router.post('/create-superadmin', [
     }
     
     logger.error('❌ Superadmin creation error:', { error: {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    } });
+    res.status(500).json({ 
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// @route   POST /api/auth/create-admin
+// @desc    Create Admin user with new tenant (Super Admin only)
+// @access  Private (Super Admin only)
+router.post('/create-admin', [
+  auth,
+  requireRole('super_admin'),
+  body('firstName').trim().isLength({ min: 1 }).withMessage('First name is required'),
+  body('lastName').trim().isLength({ min: 1 }).withMessage('Last name is required'),
+  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('tenantData.name').optional().trim(),
+  body('tenantData.businessName').optional().trim(),
+  body('tenantData.businessType').optional().isIn(['retail', 'wholesale', 'manufacturing', 'service', 'other']),
+  body('tenantData.email').optional().isEmail(),
+  body('tenantData.phone').optional().trim()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+
+    // Verify user is Super Admin
+    if (req.user.role !== 'super_admin') {
+      return res.status(403).json({ 
+        message: 'Access denied. Only Super Admin can create Admin users with tenants.' 
+      });
+    }
+
+    const { firstName, lastName, email, password, phone, department, tenantData = {} } = req.body;
+
+    // Check if email already exists (globally, as email should be unique across all tenants)
+    const emailExists = await userRepository.findByEmail(email, { allowNoTenantId: true });
+    if (emailExists) {
+      return res.status(400).json({ message: 'User with this email already exists' });
+    }
+
+    // Use tenantService to create tenant with Admin user
+    const tenantService = require('../services/tenantService');
+    
+    const adminUserData = {
+      firstName,
+      lastName,
+      email,
+      password,
+      phone,
+      department,
+      status: 'active'
+    };
+
+    const result = await tenantService.createTenantWithAdmin(
+      tenantData,
+      adminUserData,
+      req.user
+    );
+
+    logger.info('✅ Admin user and tenant created successfully:', { 
+      tenantId: result.tenant._id,
+      adminUserId: result.adminUser._id,
+      createdBy: req.user._id
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Admin user and tenant created successfully',
+      data: {
+        tenant: result.tenant,
+        adminUser: result.adminUser
+      }
+    });
+  } catch (error) {
+    // Handle duplicate email error
+    if (error.message === 'User already exists' || error.code === 11000) {
+      return res.status(400).json({ message: 'User already exists' });
+    }
+    
+    logger.error('❌ Admin creation error:', { error: {
       message: error.message,
       stack: error.stack,
       name: error.name

@@ -7,22 +7,30 @@ class BalanceSheetService {
    * @param {Date} statementDate - Statement date
    * @param {string} periodType - Period type
    * @param {string} userId - User ID
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<object>}
    */
-  async generateBalanceSheet(statementDate, periodType, userId) {
-    return await balanceSheetCalculationService.generateBalanceSheet(statementDate, periodType, userId);
+  async generateBalanceSheet(statementDate, periodType, userId, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for generateBalanceSheet');
+    }
+    return await balanceSheetCalculationService.generateBalanceSheet(statementDate, periodType, userId, tenantId);
   }
 
   /**
    * Get balance sheets with filters and pagination
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<object>}
    */
-  async getBalanceSheets(queryParams) {
+  async getBalanceSheets(queryParams, tenantId) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getBalanceSheets');
+    }
     const page = parseInt(queryParams.page) || 1;
     const limit = parseInt(queryParams.limit) || 10;
 
-    const filter = {};
+    const filter = { tenantId }; // CRITICAL: Always include tenantId
 
     // Apply filters
     if (queryParams.status) filter.status = queryParams.status;

@@ -21,11 +21,16 @@ router.post('/clock-in', [
   body('employeeId').optional().isMongoId(), // For managers clocking in other employees
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
     let employee;
     
     // If employeeId is provided (manager clocking in someone else)
     if (req.body.employeeId) {
-      employee = await employeeRepository.findById(req.body.employeeId);
+      employee = await employeeRepository.findById(req.body.employeeId, { tenantId });
       if (!employee) {
         return res.status(404).json({ message: 'Employee not found' });
       }
@@ -34,7 +39,7 @@ router.post('/clock-in', [
       }
     } else {
       // Find employee linked to current user
-      employee = await employeeRepository.findByUserAccount(req.user._id);
+      employee = await employeeRepository.findByUserAccount(req.user._id, { tenantId });
       if (!employee) {
         return res.status(400).json({ 
           message: 'No employee record found. Please contact administrator to link your user account to an employee record.' 
@@ -46,7 +51,7 @@ router.post('/clock-in', [
     }
     
     // Check for open session
-    const open = await attendanceRepository.findOpenSession(employee._id);
+    const open = await attendanceRepository.findOpenSession(employee._id, { tenantId });
     if (open) {
       return res.status(400).json({ message: 'Employee is already clocked in' });
     }
@@ -61,8 +66,9 @@ router.post('/clock-in', [
         deviceId: req.body.deviceId || null,
         clockInAt: new Date(),
         notesIn: req.body.notesIn || '',
-        status: 'open'
-      });
+        status: 'open',
+        tenantId // CRITICAL: Include tenantId for multi-tenant isolation
+      }, { tenantId });
     } catch (err) {
       if (err.code === 11000) {
         return res.status(400).json({
@@ -90,21 +96,26 @@ router.post('/clock-out', [
   body('employeeId').optional().isMongoId(), // For managers clocking out other employees
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
     let employee;
     
     if (req.body.employeeId) {
-      employee = await employeeRepository.findById(req.body.employeeId);
+      employee = await employeeRepository.findById(req.body.employeeId, { tenantId });
       if (!employee) {
         return res.status(404).json({ message: 'Employee not found' });
       }
     } else {
-      employee = await employeeRepository.findByUserAccount(req.user._id);
+      employee = await employeeRepository.findByUserAccount(req.user._id, { tenantId });
       if (!employee) {
         return res.status(400).json({ message: 'No employee record found' });
       }
     }
     
-    const session = await attendanceRepository.findOpenSession(employee._id);
+    const session = await attendanceRepository.findOpenSession(employee._id, { tenantId });
     if (!session) {
       return res.status(400).json({ message: 'Employee is not clocked in' });
     }
@@ -121,16 +132,22 @@ router.post('/clock-out', [
 // Start break
 router.post('/breaks/start', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requireAnyPermission(['manage_attendance_breaks', 'clock_attendance']),
   body('type').optional().isIn(['break', 'lunch', 'other'])
 ], async (req, res) => {
   try {
-    const employee = await employeeRepository.findByUserAccount(req.user._id);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const employee = await employeeRepository.findByUserAccount(req.user._id, { tenantId });
     if (!employee) {
       return res.status(400).json({ message: 'No employee record found' });
     }
     
-    const session = await attendanceRepository.findOpenSession(employee._id);
+    const session = await attendanceRepository.findOpenSession(employee._id, { tenantId });
     if (!session) {
       return res.status(400).json({ message: 'You are not clocked in' });
     }
@@ -150,15 +167,21 @@ router.post('/breaks/start', [
 // End break
 router.post('/breaks/end', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requireAnyPermission(['manage_attendance_breaks', 'clock_attendance']),
 ], async (req, res) => {
   try {
-    const employee = await employeeRepository.findByUserAccount(req.user._id);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const employee = await employeeRepository.findByUserAccount(req.user._id, { tenantId });
     if (!employee) {
       return res.status(400).json({ message: 'No employee record found' });
     }
     
-    const session = await attendanceRepository.findOpenSession(employee._id);
+    const session = await attendanceRepository.findOpenSession(employee._id, { tenantId });
     if (!session) {
       return res.status(400).json({ message: 'You are not clocked in' });
     }
@@ -178,15 +201,22 @@ router.post('/breaks/end', [
 // Get current status
 router.get('/status', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requireAnyPermission(['view_own_attendance', 'clock_attendance']),
 ], async (req, res) => {
   try {
-    const employee = await employeeRepository.findByUserAccount(req.user._id);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const employee = await employeeRepository.findByUserAccount(req.user._id, { tenantId });
     if (!employee) {
       return res.json({ success: true, data: null }); // No employee record, no attendance
     }
     
     const session = await attendanceRepository.findOpenSession(employee._id, {
+      tenantId,
       populate: [
         { path: 'employee', select: 'firstName lastName employeeId position department' },
         { path: 'user', select: 'firstName lastName email' }
@@ -202,13 +232,19 @@ router.get('/status', [
 // My attendance list
 router.get('/me', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requireAnyPermission(['view_own_attendance', 'clock_attendance']),
   query('limit').optional().isInt({ min: 1, max: 100 }),
   query('startDate').optional().isISO8601(),
   query('endDate').optional().isISO8601(),
 ], async (req, res) => {
   try {
-    const employee = await employeeRepository.findByUserAccount(req.user._id);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const employee = await employeeRepository.findByUserAccount(req.user._id, { tenantId });
     if (!employee) {
       return res.json({ success: true, data: [] }); // No employee record, no attendance
     }
@@ -229,6 +265,7 @@ router.get('/me', [
     }
     
     const result = await attendanceRepository.findWithPagination(query, {
+      tenantId,
       page: 1,
       limit,
       sort: { createdAt: -1 },
@@ -248,6 +285,7 @@ router.get('/me', [
 // Team attendance (for managers)
 router.get('/team', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   (req, res, next) => {
     // Allow super_admins, admins or users with view_team_attendance permission
     if (req.user.role === 'super_admin' || req.user.role === 'admin' || req.user.hasPermission('view_team_attendance')) {
@@ -283,6 +321,11 @@ router.get('/team', [
   }
 
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
     const limit = parseInt(req.query.limit || '50');
     const filterQuery = {};
     
@@ -322,10 +365,12 @@ router.get('/team', [
     logger.debug('Fetching team attendance', {
       filterQuery,
       limit,
-      userId: req.user._id
+      userId: req.user._id,
+      tenantId
     });
 
     const result = await attendanceRepository.findWithPagination(filterQuery, {
+      tenantId,
       page: 1,
       limit,
       sort: { createdAt: -1 },

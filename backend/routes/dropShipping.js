@@ -117,10 +117,14 @@ router.get('/', [auth, tenantMiddleware], async (req, res) => {
 // @route   GET /api/drop-shipping/stats
 // @desc    Get drop shipping statistics
 // @access  Private
-router.get('/stats', auth, async (req, res) => {
+router.get('/stats', [auth, tenantMiddleware], async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    const filter = {};
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const filter = { tenantId };
     
     if (startDate || endDate) {
       filter.transactionDate = {};
@@ -143,7 +147,7 @@ router.get('/stats', auth, async (req, res) => {
     ]);
 
     const statusBreakdown = await dropShippingRepository.aggregate([
-      { $match: filter },
+      { $match: { tenantId, ...filter } },
       {
         $group: {
           _id: '$status',
@@ -219,26 +223,28 @@ router.post('/', [
   handleValidationErrors
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     // Verify supplier and customer exist
-    const supplier = await supplierRepository.findById(req.body.supplier);
+    const supplier = await supplierRepository.findById(req.body.supplier, { tenantId });
     if (!supplier) {
       return res.status(400).json({ message: 'Supplier not found' });
     }
 
-    const customer = await customerRepository.findById(req.body.customer);
+    const customer = await customerRepository.findById(req.body.customer, { tenantId });
     if (!customer) {
       return res.status(400).json({ message: 'Customer not found' });
     }
 
     // Verify all products exist
     const productIds = req.body.items.map(item => item.product);
-    const products = await productRepository.findAll({ _id: { $in: productIds } });
+    const products = await productRepository.findAll({ tenantId, _id: { $in: productIds } });
     
     if (products.length !== productIds.length) {
       return res.status(400).json({ message: 'One or more products not found' });
     }
-
-    const tenantId = req.tenantId || req.user?.tenantId;
 
     // Build transaction data
     const transactionData = {
@@ -348,7 +354,7 @@ router.put('/:id', [
 
     // If supplier info changed, update it
     if (req.body.supplier && req.body.supplier !== transaction.supplier.toString()) {
-      const supplier = await supplierRepository.findById(req.body.supplier);
+      const supplier = await supplierRepository.findById(req.body.supplier, { tenantId });
       if (supplier) {
         updateData.supplierInfo = {
           companyName: supplier.companyName,
@@ -361,7 +367,7 @@ router.put('/:id', [
 
     // If customer info changed, update it
     if (req.body.customer && req.body.customer !== transaction.customer.toString()) {
-      const customer = await customerRepository.findById(req.body.customer);
+      const customer = await customerRepository.findById(req.body.customer, { tenantId });
       if (customer) {
         updateData.customerInfo = {
           displayName: customer.displayName || customer.name,

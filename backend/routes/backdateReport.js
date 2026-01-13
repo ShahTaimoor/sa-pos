@@ -58,6 +58,7 @@ router.get('/', [auth, tenantMiddleware], async (req, res) => {
     ] = await Promise.all([
       // Sales Orders - check orderDate vs createdAt
       salesOrderRepository.findAll({
+        tenantId: req.tenantId || req.user?.tenantId,
         $or: [
           { orderDate: { $lt: thirtyDaysAgo } },
           { orderDate: { $gt: thirtyDaysFuture } }
@@ -71,6 +72,7 @@ router.get('/', [auth, tenantMiddleware], async (req, res) => {
 
       // Purchase Orders - check orderDate vs createdAt  
       purchaseOrderRepository.findAll({
+        tenantId: req.tenantId || req.user?.tenantId,
         $or: [
           { orderDate: { $lt: thirtyDaysAgo } },
           { orderDate: { $gt: thirtyDaysFuture } }
@@ -84,6 +86,7 @@ router.get('/', [auth, tenantMiddleware], async (req, res) => {
 
       // Cash Receipts - check date vs createdAt
       cashReceiptRepository.findAll({
+        tenantId: req.tenantId || req.user?.tenantId,
         $or: [
           { date: { $lt: thirtyDaysAgo } },
           { date: { $gt: thirtyDaysFuture } }
@@ -97,6 +100,7 @@ router.get('/', [auth, tenantMiddleware], async (req, res) => {
 
       // Cash Payments - check date vs createdAt
       cashPaymentRepository.findAll({
+        tenantId: req.tenantId || req.user?.tenantId,
         $or: [
           { date: { $lt: thirtyDaysAgo } },
           { date: { $gt: thirtyDaysFuture } }
@@ -110,6 +114,7 @@ router.get('/', [auth, tenantMiddleware], async (req, res) => {
 
       // Bank Receipts - check date vs createdAt
       bankReceiptRepository.findAll({
+        tenantId: req.tenantId || req.user?.tenantId,
         $or: [
           { date: { $lt: thirtyDaysAgo } },
           { date: { $gt: thirtyDaysFuture } }
@@ -123,6 +128,7 @@ router.get('/', [auth, tenantMiddleware], async (req, res) => {
 
       // Bank Payments - check date vs createdAt
       bankPaymentRepository.findAll({
+        tenantId: req.tenantId || req.user?.tenantId,
         $or: [
           { date: { $lt: thirtyDaysAgo } },
           { date: { $gt: thirtyDaysFuture } }
@@ -138,6 +144,7 @@ router.get('/', [auth, tenantMiddleware], async (req, res) => {
       // Note: Sales model doesn't have a separate transaction date field,
       // so we can only detect entries created recently (potential backdated entries)
       salesRepository.findAll({
+        tenantId: req.tenantId || req.user?.tenantId,
         createdAt: { $gte: thirtyDaysAgo }
       }, {
         populate: [
@@ -150,6 +157,7 @@ router.get('/', [auth, tenantMiddleware], async (req, res) => {
       // Note: PurchaseInvoice model doesn't have a separate invoice date field,
       // so we can only detect entries created recently (potential backdated entries)
       purchaseInvoiceRepository.findAll({
+        tenantId: req.tenantId || req.user?.tenantId,
         createdAt: { $gte: thirtyDaysAgo }
       }, {
         populate: [

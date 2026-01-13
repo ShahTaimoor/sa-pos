@@ -8,6 +8,7 @@ const router = express.Router();
 
 router.post('/open', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requireAnyPermission(['open_till']),
   body('openingAmount').isFloat({ min: 0 }).withMessage('openingAmount must be >= 0'),
   body('storeId').optional().isString(),
@@ -63,6 +64,7 @@ router.post('/close', [
 
 router.get('/variance', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requireAnyPermission(['view_till', 'close_till', 'open_till']),
   query('limit').optional().isInt({ min: 1, max: 100 })
 ], async (req, res) => {

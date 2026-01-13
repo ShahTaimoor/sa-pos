@@ -1,13 +1,14 @@
 const express = require('express');
 const router = express.Router();
 const { auth } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const settingsService = require('../services/settingsService');
 const logger = require('../utils/logger');
 
 // @route   GET /api/settings/company
 // @desc    Get company settings
 // @access  Private
-router.get('/company', auth, async (req, res) => {
+router.get('/company', auth, tenantMiddleware, async (req, res) => {
   try {
     const settings = await settingsService.getCompanySettings();
     res.json({
@@ -27,7 +28,7 @@ router.get('/company', auth, async (req, res) => {
 // @route   PUT /api/settings/company
 // @desc    Update company settings
 // @access  Private (Admin only)
-router.put('/company', auth, async (req, res) => {
+router.put('/company', auth, tenantMiddleware, async (req, res) => {
   try {
     
     const {
@@ -71,7 +72,7 @@ router.put('/company', auth, async (req, res) => {
 // @route   GET /api/settings/preferences
 // @desc    Get user preferences
 // @access  Private
-router.get('/preferences', auth, async (req, res) => {
+router.get('/preferences', auth, tenantMiddleware, async (req, res) => {
   try {
     const preferences = await settingsService.getUserPreferences(req.user.id);
     
@@ -98,7 +99,7 @@ router.get('/preferences', auth, async (req, res) => {
 // @route   PUT /api/settings/preferences
 // @desc    Update user preferences
 // @access  Private
-router.put('/preferences', auth, async (req, res) => {
+router.put('/preferences', auth, tenantMiddleware, async (req, res) => {
   try {
     const preferences = await settingsService.updateUserPreferences(req.user.id, req.body);
 

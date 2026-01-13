@@ -11,7 +11,8 @@
     "create-superadmin": "node scripts/create-superadmin.js",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "test:system": "node scripts/comprehensiveSystemTest.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

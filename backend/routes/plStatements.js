@@ -7,6 +7,7 @@ const plCalculationService = require('../services/plCalculationService');
 const plExportService = require('../services/plExportService');
 const plStatementService = require('../services/plStatementService');
 const path = require('path');
+const logger = require('../utils/logger');
 
 const router = express.Router();
 
@@ -27,6 +28,7 @@ const normalizeDateRange = (startDate, endDate) => {
 // @access  Private (requires 'view_reports' permission)
 router.post('/generate', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_reports'),
   sanitizeRequest,
   body('startDate').isISO8601().toDate().withMessage('Valid start date is required'),
@@ -55,14 +57,7 @@ router.post('/generate', [
       return res.status(400).json({ message: 'Start date must be before end date' });
     }
 
-    const tenantId = req.tenantId || req.user?.tenantId;
-    
-    if (!tenantId) {
-      return res.status(400).json({ 
-        success: false,
-        message: 'Tenant ID is required' 
-      });
-    }
+    const tenantId = req.tenantId;
 
     const period = {
       startDate: normalizedDates.startDate,
@@ -247,8 +242,15 @@ router.get('/:statementId', [
 ], async (req, res) => {
   try {
     const { statementId } = req.params;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Tenant ID is required' 
+      });
+    }
     
-    const statement = await plStatementService.getStatementById(statementId);
+    const statement = await plStatementService.getStatementById(statementId, tenantId);
 
     res.json(statement);
   } catch (error) {
@@ -280,8 +282,15 @@ router.put('/:statementId', [
   try {
     const { statementId } = req.params;
     const updates = req.body || {};
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Tenant ID is required' 
+      });
+    }
 
-    const statement = await plStatementService.updateStatement(statementId, updates);
+    const statement = await plStatementService.updateStatement(statementId, updates, tenantId);
 
     res.json({
       message: 'P&L statement updated successfully',
@@ -312,8 +321,15 @@ router.put('/:statementId/status', [
   try {
     const { statementId } = req.params;
     const { status, notes } = req.body;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Tenant ID is required' 
+      });
+    }
     
-    const statement = await plStatementService.updateStatementStatus(statementId, status, req.user._id, notes);
+    const statement = await plStatementService.updateStatementStatus(statementId, status, req.user._id, notes, tenantId);
 
     res.json({
       message: 'P&L statement status updated successfully',
@@ -341,8 +357,15 @@ router.delete('/:statementId', [
 ], async (req, res) => {
   try {
     const { statementId } = req.params;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Tenant ID is required' 
+      });
+    }
     
-    const result = await plStatementService.deleteStatement(statementId);
+    const result = await plStatementService.deleteStatement(statementId, tenantId);
 
     res.json({ message: result.message });
   } catch (error) {
@@ -438,7 +461,15 @@ router.get('/:statementId/comparison', [
     const { statementId } = req.params;
     const { type = 'previous' } = req.query;
     
-    const comparison = await plStatementService.getStatementComparison(statementId, type);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Tenant ID is required' 
+      });
+    }
+    
+    const comparison = await plStatementService.getStatementComparison(statementId, type, tenantId);
 
     res.json(comparison);
   } catch (error) {
@@ -452,6 +483,7 @@ router.get('/:statementId/comparison', [
 // @access  Private (requires 'view_reports' permission)
 router.post('/:statementId/export', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('statementId').isMongoId().withMessage('Valid Statement ID is required'),
@@ -465,7 +497,15 @@ router.post('/:statementId/export', [
     const { statementId } = req.params;
     const { format = 'pdf', includeDetails = true, purpose, recipient } = req.body;
     
-    const statement = await plStatementService.getStatementById(statementId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Tenant ID is required' 
+      });
+    }
+    
+    const statement = await plStatementService.getStatementById(statementId, tenantId);
     if (!statement) {
       return res.status(404).json({ message: 'P&L statement not found' });
     }
@@ -476,6 +516,7 @@ router.post('/:statementId/export', [
       statementId: statement._id,
       statementType: 'profit_loss',
       exportedBy: req.user._id,
+      tenantId: tenantId,
       format: format.toLowerCase(),
       ipAddress: req.ip || req.connection.remoteAddress,
       userAgent: req.get('user-agent'),
@@ -561,19 +602,25 @@ router.get('/:statementId/exports', [
   query('limit').optional().isInt({ min: 1, max: 100 })
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
     const FinancialStatementExport = require('../models/FinancialStatementExport');
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const exports = await FinancialStatementExport.find({ statementId: req.params.statementId })
+    const query = { statementId: req.params.statementId };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+
+    const exports = await FinancialStatementExport.find(query)
       .populate('exportedBy', 'firstName lastName email')
       .populate('approvedBy', 'firstName lastName email')
       .sort({ exportedAt: -1 })
       .skip(skip)
       .limit(limit);
 
-    const total = await FinancialStatementExport.countDocuments({ statementId: req.params.statementId });
+    const total = await FinancialStatementExport.countDocuments(query);
 
     res.json({
       success: true,
@@ -600,13 +647,19 @@ router.get('/:statementId/exports', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/exports/:exportId', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('exportId').isMongoId().withMessage('Valid export ID is required')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
     const FinancialStatementExport = require('../models/FinancialStatementExport');
-    const exportRecord = await FinancialStatementExport.findById(req.params.exportId)
+    const query = { _id: req.params.exportId };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    const exportRecord = await FinancialStatementExport.findOne(query)
       .populate('exportedBy', 'firstName lastName email')
       .populate('approvedBy', 'firstName lastName email')
       .populate('statementId', 'statementId period status');
@@ -643,8 +696,13 @@ router.get('/:statementId/versions', [
   param('statementId').isMongoId().withMessage('Valid Statement ID is required')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
     const FinancialStatement = require('../models/FinancialStatement');
-    const statement = await FinancialStatement.findById(req.params.statementId)
+    const query = { _id: req.params.statementId };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    const statement = await FinancialStatement.findOne(query)
       .populate('versionHistory.changedBy', 'firstName lastName email')
       .populate('previousVersion');
 
@@ -679,14 +737,20 @@ router.get('/:statementId/versions', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/:statementId/versions/:versionNumber', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   param('statementId').isMongoId().withMessage('Valid Statement ID is required'),
   param('versionNumber').isInt({ min: 1 }).withMessage('Valid version number is required')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
     const FinancialStatement = require('../models/FinancialStatement');
-    const statement = await FinancialStatement.findById(req.params.statementId);
+    const query = { _id: req.params.statementId };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    const statement = await FinancialStatement.findOne(query);
     
     if (!statement) {
       return res.status(404).json({
@@ -740,8 +804,13 @@ router.get('/:statementId/compare', [
   query('version2').optional().isInt({ min: 1 }).withMessage('Valid version number required')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
     const FinancialStatement = require('../models/FinancialStatement');
-    const statement = await FinancialStatement.findById(req.params.statementId);
+    const query = { _id: req.params.statementId };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+    const statement = await FinancialStatement.findOne(query);
     
     if (!statement) {
       return res.status(404).json({
@@ -803,6 +872,7 @@ router.get('/:statementId/compare', [
 // @access  Private (requires 'view_reports' permission)
 router.get('/latest', [
   auth,
+  tenantMiddleware,
   requirePermission('view_reports'),
   sanitizeRequest,
   query('periodType').optional().isIn(['monthly', 'quarterly', 'yearly', 'custom']),
@@ -810,8 +880,9 @@ router.get('/latest', [
 ], async (req, res) => {
   try {
     const { periodType = 'monthly' } = req.query;
+    const tenantId = req.tenantId || req.user?.tenantId;
     
-    const statement = await plStatementService.getLatestStatement(periodType);
+    const statement = await plStatementService.getLatestStatement(periodType, tenantId);
 
     if (!statement) {
       return res.status(404).json({ message: 'No P&L statements found' });
@@ -839,8 +910,15 @@ router.get('/:statementId/download', [
   try {
     const { statementId } = req.params;
     const { format = 'pdf' } = req.query;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ 
+        success: false,
+        message: 'Tenant ID is required' 
+      });
+    }
     
-    const statement = await plStatementService.getStatementById(statementId);
+    const statement = await plStatementService.getStatementById(statementId, tenantId);
     if (!statement) {
       return res.status(404).json({ message: 'P&L statement not found' });
     }
@@ -855,7 +933,6 @@ router.get('/:statementId/download', [
     
     // Check if file exists
     const fs = require('fs');
-const logger = require('../utils/logger');
     if (!fs.existsSync(filepath)) {
       return res.status(404).json({ message: 'Export file not found. Please generate the export first.' });
     }

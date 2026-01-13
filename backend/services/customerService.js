@@ -173,9 +173,14 @@ class CustomerService {
   /**
    * Get customers with filtering and pagination
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getCustomers(queryParams) {
+  async getCustomers(queryParams, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get customers');
+    }
+    
     const getAllCustomers = queryParams.all === 'true' || queryParams.all === true ||
                           (queryParams.limit && parseInt(queryParams.limit) >= 999999);
 
@@ -183,8 +188,11 @@ class CustomerService {
     const limit = getAllCustomers ? 999999 : (parseInt(queryParams.limit) || 20);
 
     const filter = this.buildFilter(queryParams);
+    // Ensure tenantId is in filter
+    filter.tenantId = tenantId;
 
     const result = await customerRepository.findWithPagination(filter, {
+      tenantId: tenantId,
       page,
       limit,
       getAll: getAllCustomers,
@@ -200,10 +208,17 @@ class CustomerService {
   /**
    * Get single customer by ID
    * @param {string} id - Customer ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<Customer>}
    */
-  async getCustomerById(id) {
-    const customer = await customerRepository.findById(id);
+  async getCustomerById(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get customer');
+    }
+    
+    const customer = await customerRepository.findById(id, {
+      tenantId: tenantId
+    });
     if (!customer) {
       throw new Error('Customer not found');
     }
@@ -358,11 +373,20 @@ class CustomerService {
     const { openingBalance, useTransaction = true, tenantId = null } = options;
     
     // Get current customer to verify tenantId
-    const currentCustomer = await customerRepository.findById(id);
+    const finalTenantId = tenantId || updateData.tenantId;
+    if (!finalTenantId) {
+      throw new Error('tenantId is required to update customer');
+    }
+    
+    const currentCustomer = await customerRepository.findById(id, {
+      tenantId: finalTenantId
+    });
     if (!currentCustomer) {
       throw new Error('Customer not found');
     }
-    const finalTenantId = tenantId || updateData.tenantId || currentCustomer.tenantId;
+    
+    // Prevent tenantId from being changed
+    delete updateData.tenantId;
 
     // Check if name already exists (excluding current customer, within same tenant)
     if (updateData.name) {
@@ -455,12 +479,20 @@ class CustomerService {
    * Delete customer (soft delete)
    * @param {string} id - Customer ID
    * @param {string} userId - User ID deleting the customer
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @param {string} reason - Reason for deletion
    * @returns {Promise<{message: string}>}
    */
-  async deleteCustomer(id, userId, reason = 'Customer deleted') {
+  async deleteCustomer(id, userId, tenantId, reason = 'Customer deleted') {
+    if (!tenantId) {
+      throw new Error('tenantId is required to delete customer');
+    }
+    
     const deletionResult = await runWithOptionalTransaction(async (session) => {
-      const customer = await customerRepository.findById(id, { session });
+      const customer = await customerRepository.findById(id, { 
+        tenantId: tenantId,
+        session 
+      });
 
       if (!customer) {
         return null;

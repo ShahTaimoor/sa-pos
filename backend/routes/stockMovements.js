@@ -242,10 +242,10 @@ router.get('/product/:productId', [
     const movements = await StockMovement.getProductMovements(productId, options);
     
     // Get stock summary
-    const summary = await StockMovement.getStockSummary(productId);
+    const summary = await StockMovement.getStockSummary(productId, tenantId);
     
     // Get current stock from product
-    const product = await productRepository.findById(productId, {
+    const product = await productRepository.findById(productId, { tenantId }, {
       select: 'inventory.currentStock'
     });
 
@@ -344,8 +344,15 @@ router.post('/adjustment', [
       location = 'main_warehouse'
     } = req.body;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     // Get product
-    const product = await productRepository.findById(productId);
+    const product = await productRepository.findById(productId, { tenantId });
     if (!product) {
       return res.status(404).json({
         success: false,
@@ -364,8 +371,6 @@ router.post('/adjustment', [
         message: 'Insufficient stock for adjustment'
       });
     }
-
-    const tenantId = req.tenantId || req.user?.tenantId;
     
     // Create stock movement
     const movement = new StockMovement({
@@ -446,7 +451,7 @@ router.post('/:id/reverse', [
     const reversedMovement = await movement.reverse(req.user._id, req.body.reason);
     
     // Update product stock
-    const product = await productRepository.findById(movement.product);
+    const product = await productRepository.findById(movement.product, { tenantId });
     if (product) {
       product.inventory.currentStock = reversedMovement.newStock;
       await product.save();

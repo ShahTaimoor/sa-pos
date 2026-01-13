@@ -109,4 +109,42 @@ cashReceiptSchema.index({ tenantId: 1, date: -1 });
 cashReceiptSchema.index({ tenantId: 1, voucherCode: 1 }, { unique: true, sparse: true });
 cashReceiptSchema.index({ tenantId: 1, createdBy: 1, date: -1 });
 
+// Post-save hook to handle accounting entries and customer balance
+cashReceiptSchema.post('save', async function(doc) {
+  // Only process new cash receipts (not updates)
+  if (!doc.isNew) {
+    return;
+  }
+
+  const logger = require('../utils/logger');
+
+  // 1. Create accounting entries
+  try {
+    const accountingService = require('../services/accountingService');
+    await accountingService.recordCashReceipt(doc);
+    logger.debug(`Accounting entries created for cash receipt: ${doc.voucherCode || doc._id}`);
+  } catch (error) {
+    // Log error but don't fail the save
+    logger.error(`Error creating accounting entries for cash receipt ${doc.voucherCode || doc._id}:`, error);
+  }
+
+  // 2. Update customer balance (if customer provided)
+  if (doc.customer && doc.amount > 0) {
+    try {
+      const customerBalanceService = require('../services/customerBalanceService');
+      await customerBalanceService.recordPayment(
+        doc.customer,
+        doc.amount,
+        doc.order || null,
+        doc.createdBy,
+        { voucherCode: doc.voucherCode, paymentMethod: doc.paymentMethod }
+      );
+      logger.debug(`Customer balance updated for cash receipt: ${doc.voucherCode || doc._id}`);
+    } catch (error) {
+      // Log error but don't fail the save
+      logger.error(`Error updating customer balance for cash receipt ${doc.voucherCode || doc._id}:`, error);
+    }
+  }
+});
+
 module.exports = mongoose.model('CashReceipt', cashReceiptSchema);

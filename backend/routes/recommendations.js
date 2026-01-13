@@ -68,10 +68,14 @@ router.post('/generate', [
       // Continue with recommendation generation even if tracking fails
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const recommendations = await recommendationEngine.generateRecommendations(
       userId,
       sessionId,
-      { ...context, limit },
+      { ...context, limit, tenantId },
       algorithm
     );
 
@@ -103,7 +107,11 @@ router.get('/:recommendationId', [
     const { recommendationId } = req.params;
     const userId = req.user?.id;
 
-    const recommendation = await recommendationRepository.findById(recommendationId, {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const recommendation = await recommendationRepository.findById(recommendationId, { tenantId }, {
       populate: [
         { path: 'recommendations.product' },
         { path: 'user', select: 'firstName lastName email' },
@@ -189,6 +197,8 @@ router.post('/:recommendationId/interact', [
 // @desc    Get trending products
 // @access  Public (for anonymous users)
 router.get('/trending', [
+  auth,
+  tenantMiddleware,
   sanitizeRequest,
   query('limit').optional().isInt({ min: 1, max: 50 }),
   query('days').optional().isInt({ min: 1, max: 30 }),
@@ -196,8 +206,11 @@ router.get('/trending', [
 ], async (req, res) => {
   try {
     const { limit = 10, days = 7 } = req.query;
-
-    const trendingProducts = await UserBehavior.getPopularProducts(days, limit);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const trendingProducts = await UserBehavior.getPopularProducts(days, limit, tenantId);
 
     res.json({
       trending: trendingProducts.map(item => ({
@@ -223,6 +236,8 @@ router.get('/trending', [
 // @desc    Get products frequently bought together
 // @access  Public
 router.get('/frequently-bought/:productId', [
+  auth,
+  tenantMiddleware,
   sanitizeRequest,
   param('productId').isMongoId().withMessage('Valid Product ID is required'),
   query('limit').optional().isInt({ min: 1, max: 20 }),
@@ -231,8 +246,11 @@ router.get('/frequently-bought/:productId', [
   try {
     const { productId } = req.params;
     const { limit = 10 } = req.query;
-
-    const frequentlyBought = await UserBehavior.getFrequentlyBoughtTogether(productId, limit);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const frequentlyBought = await UserBehavior.getFrequentlyBoughtTogether(productId, limit, tenantId);
 
     res.json({
       product: productId,
@@ -252,6 +270,8 @@ router.get('/frequently-bought/:productId', [
 // @desc    Get similar products
 // @access  Public
 router.get('/similar/:productId', [
+  auth,
+  tenantMiddleware,
   sanitizeRequest,
   param('productId').isMongoId().withMessage('Valid Product ID is required'),
   query('limit').optional().isInt({ min: 1, max: 20 }),
@@ -260,11 +280,15 @@ router.get('/similar/:productId', [
   try {
     const { productId } = req.params;
     const { limit = 10 } = req.query;
-
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const similarProducts = await recommendationEngine.similarProducts(
       null,
       null,
-      { currentProduct: productId, limit }
+      { currentProduct: productId, limit, tenantId },
+      tenantId
     );
 
     res.json({
@@ -349,7 +373,11 @@ router.get('/performance', [
     }
     if (algorithm) filter.algorithm = algorithm;
 
-    const recommendations = await recommendationRepository.findWithFilter(filter, {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const recommendations = await recommendationRepository.findWithFilter({ ...filter, tenantId }, {
       sort: { createdAt: -1 },
       populate: [
         { path: 'recommendations.product' }
@@ -439,8 +467,12 @@ router.get('/user/:userId', [
       return res.status(403).json({ message: 'Access denied' });
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const recommendations = await recommendationRepository.findWithFilter(
-      { user: userId },
+      { user: userId, tenantId },
       {
         sort: { createdAt: -1 },
         populate: [

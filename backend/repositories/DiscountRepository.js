@@ -51,11 +51,16 @@ class DiscountRepository extends BaseRepository {
   /**
    * Find discount by code
    * @param {string} code - Discount code
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @param {object} options - Query options
    * @returns {Promise<Discount|null>}
    */
-  async findByCode(code, options = {}) {
-    const query = this.hasSoftDelete ? { code, isDeleted: false } : { code };
+  async findByCode(code, tenantId = null, options = {}) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for findByCode');
+    }
+    const query = { code, tenantId }; // CRITICAL: Include tenantId for multi-tenant isolation
+    if (this.hasSoftDelete) query.isDeleted = false;
     return this.Model.findOne(query, null, options);
   }
 

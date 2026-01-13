@@ -160,7 +160,7 @@ router.get('/', [
     }
     
     // Call service to get customers with tenantId
-    const result = await customerService.getCustomers({ ...req.query, tenantId });
+    const result = await customerService.getCustomers(req.query, tenantId);
     
     res.json({
       data: {
@@ -244,9 +244,14 @@ router.get('/by-cities', [
 // @route   GET /api/customers/:id
 // @desc    Get single customer
 // @access  Private
-router.get('/:id', [auth, validateCustomerIdParam], async (req, res) => {
+router.get('/:id', [auth, tenantMiddleware, validateCustomerIdParam], async (req, res) => {
   try {
-    const customer = await customerService.getCustomerById(req.params.id);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
+    const customer = await customerService.getCustomerById(req.params.id, tenantId);
     res.json({ customer });
   } catch (error) {
     if (error.message === 'Customer not found') {
@@ -386,6 +391,7 @@ router.put('/:id/credit-limit', [
 // @access  Private
 router.post('/', [
   auth,
+  tenantMiddleware,
   requirePermission('create_customers'),
   preventDuplicates({ windowMs: 10000 }), // Prevent duplicate submissions within 10 seconds
   body('name').trim().isLength({ min: 1 }).withMessage('Name is required'),
@@ -520,6 +526,7 @@ router.post('/', [
 // @access  Private
 router.put('/:id', [
   auth,
+  tenantMiddleware,
   validateCustomerIdParam,
   requirePermission('edit_customers'),
   blockManualCustomerBalanceEdit, // BLOCK manual balance edits
@@ -646,12 +653,18 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware,
   validateCustomerIdParam,
   requirePermission('delete_customers')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    
     const reason = req.body.reason || 'Customer deleted';
-    const result = await customerService.deleteCustomer(req.params.id, req.user._id, reason);
+    const result = await customerService.deleteCustomer(req.params.id, req.user._id, tenantId, reason);
 
     res.json({ message: result.message });
   } catch (error) {

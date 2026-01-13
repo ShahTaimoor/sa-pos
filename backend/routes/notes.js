@@ -24,7 +24,12 @@ router.get('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { notes, pagination } = await noteService.getNotes(req.query, req.user.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const { notes, pagination } = await noteService.getNotes(req.query, req.user.id, tenantId);
     
     res.json({
       notes,
@@ -41,7 +46,12 @@ router.get('/', [
 // @access  Private
 router.get('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const note = await noteService.getNoteById(req.params.id, req.user.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const note = await noteService.getNoteById(req.params.id, req.user.id, tenantId);
     res.json(note);
   } catch (error) {
     if (error.message === 'Note not found') {
@@ -75,7 +85,12 @@ router.post('/', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const note = await noteService.createNote(req.body, req.user.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const note = await noteService.createNote(req.body, req.user.id, tenantId);
     
     res.status(201).json(note);
   } catch (error) {
@@ -103,7 +118,12 @@ router.put('/:id', [
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const note = await noteService.updateNote(req.params.id, req.body, req.user.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const note = await noteService.updateNote(req.params.id, req.body, req.user.id, tenantId);
     
     res.json(note);
   } catch (error) {
@@ -123,7 +143,12 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const result = await noteService.deleteNote(req.params.id, req.user.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const result = await noteService.deleteNote(req.params.id, req.user.id, tenantId);
     
     res.json(result);
   } catch (error) {
@@ -143,7 +168,12 @@ router.delete('/:id', [auth, tenantMiddleware], async (req, res) => {
 // @access  Private
 router.get('/:id/history', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const history = await noteService.getNoteHistory(req.params.id, req.user.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const history = await noteService.getNoteHistory(req.params.id, req.user.id, tenantId);
     res.json(history);
   } catch (error) {
     if (error.message === 'Note not found') {
@@ -162,7 +192,12 @@ router.get('/:id/history', [auth, tenantMiddleware], async (req, res) => {
 // @access  Private
 router.get('/search/users', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const users = await noteService.searchUsers(req.query.q);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const users = await noteService.searchUsers(req.query.q, tenantId);
     res.json(users);
   } catch (error) {
     logger.error('Search users error:', { error: error });

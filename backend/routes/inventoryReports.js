@@ -51,9 +51,14 @@ router.post('/generate', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const report = await inventoryReportService.generateInventoryReport(
       req.body,
-      req.user._id
+      req.user._id,
+      tenantId
     );
     
     res.status(201).json({
@@ -98,7 +103,11 @@ router.get('/', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const result = await inventoryReportService.getInventoryReports(req.query);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await inventoryReportService.getInventoryReports(req.query, tenantId);
     
     res.json(result);
   } catch (error) {
@@ -122,7 +131,11 @@ router.get('/:reportId', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
-    const report = await inventoryReportService.getInventoryReportById(req.params.reportId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await inventoryReportService.getInventoryReportById(req.params.reportId, tenantId);
     
     // Mark as viewed
     await report.markAsViewed();
@@ -153,9 +166,14 @@ router.delete('/:reportId', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const result = await inventoryReportService.deleteInventoryReport(
       req.params.reportId,
-      req.user._id
+      req.user._id,
+      tenantId
     );
     
     res.json(result);
@@ -187,8 +205,11 @@ router.put('/:reportId/favorite', [
   try {
     const { reportId } = req.params;
     const { isFavorite } = req.body;
-
-    const report = await inventoryReportRepository.findByReportId(reportId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await inventoryReportRepository.findByReportId(reportId, { tenantId });
     if (!report) {
       return res.status(404).json({ message: 'Inventory report not found' });
     }
@@ -224,8 +245,11 @@ router.post('/:reportId/export', [
   try {
     const { reportId } = req.params;
     const { format } = req.body;
-
-    const report = await inventoryReportRepository.findByReportId(reportId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const report = await inventoryReportRepository.findByReportId(reportId, { tenantId });
     if (!report) {
       return res.status(404).json({ message: 'Inventory report not found' });
     }
@@ -263,12 +287,13 @@ router.get('/quick/stock-levels', [
 ], async (req, res) => {
   try {
     const { limit = 10, status } = req.query;
-    
-    const Product = require('../models/Product');
-const logger = require('../utils/logger');
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     
     // Build match criteria
-    const matchCriteria = {};
+    const matchCriteria = { tenantId };
     if (status) {
       // This would need more sophisticated logic based on reorder points
       switch (status) {
@@ -362,10 +387,15 @@ router.get('/quick/turnover-rates', [
         break;
     }
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     // Get sales data for the period
     const salesData = await salesRepository.aggregate([
       {
         $match: {
+          tenantId,
           createdAt: { $gte: startDate, $lte: endDate },
           status: 'delivered'
         }
@@ -450,8 +480,12 @@ router.get('/quick/aging-analysis', [
   try {
     const { limit = 10, threshold = 90 } = req.query;
     
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     // Get products with stock
-    const products = await productRepository.findAll({ 'inventory.currentStock': { $gt: 0 } }, {
+    const products = await productRepository.findAll({ tenantId, 'inventory.currentStock': { $gt: 0 } }, {
       populate: [{ path: 'category', select: 'name' }],
       limit: parseInt(limit) * 2 // Get more to filter by aging
     });
@@ -461,6 +495,7 @@ router.get('/quick/aging-analysis', [
     const lastSoldDates = await salesRepository.aggregate([
       {
         $match: {
+          tenantId,
           status: 'delivered',
           'items.product': { $in: productIds }
         }
@@ -545,14 +580,19 @@ router.get('/quick/summary', [
   sanitizeRequest,
 ], async (req, res) => {
   try {
-    const totalProductsCount = await productRepository.count({});
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const totalProductsCount = await productRepository.count({ tenantId });
     
-    const activeProductsCount = await productRepository.count({ status: 'active' });
+    const activeProductsCount = await productRepository.count({ tenantId, status: 'active' });
 
     // Get overall inventory summary
     const summary = await productRepository.aggregate([
       {
         $match: {
+          tenantId,
           status: { $in: ['active', 'inactive'] } // Include both active and inactive products
         }
       },
@@ -645,11 +685,15 @@ router.get('/stats', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const period = {};
     if (req.query.startDate) period.startDate = new Date(req.query.startDate);
     if (req.query.endDate) period.endDate = new Date(req.query.endDate);
 
-    const stats = await InventoryReport.getReportStats(period);
+    const stats = await InventoryReport.getReportStats(period, tenantId);
     
     res.json(stats);
   } catch (error) {

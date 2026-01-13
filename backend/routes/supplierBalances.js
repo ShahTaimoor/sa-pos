@@ -12,13 +12,18 @@ const router = express.Router();
 
 // Get supplier balance summary
 router.get('/:supplierId', [
-  auth, 
+  auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_suppliers'),
   param('supplierId').isMongoId().withMessage('Invalid supplier ID')
 ], async (req, res) => {
   try {
     const { supplierId } = req.params;
-    const summary = await SupplierBalanceService.getBalanceSummary(supplierId);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const summary = await SupplierBalanceService.getBalanceSummary(supplierId, tenantId);
     
     res.json({
       success: true,
@@ -104,7 +109,8 @@ router.post('/:supplierId/refund', [
 
 // Recalculate supplier balance
 router.post('/:supplierId/recalculate', [
-  auth, 
+  auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('manage_suppliers'),
   param('supplierId').isMongoId().withMessage('Invalid supplier ID')
 ], async (req, res) => {
@@ -162,22 +168,29 @@ router.get('/reports/balance-issues', [
   requirePermission('view_reports')
 ], async (req, res) => {
   try {
-    // Find suppliers with pending balances
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    // Find suppliers with pending balances (tenant-scoped)
     const suppliersWithPendingBalances = await supplierRepository.findAll({
+      tenantId,
       pendingBalance: { $gt: 0 }
     }, {
       select: 'companyName contactPerson email phone pendingBalance advanceBalance creditLimit'
     });
 
-    // Find suppliers with advance balances
+    // Find suppliers with advance balances (tenant-scoped)
     const suppliersWithAdvanceBalances = await supplierRepository.findAll({
+      tenantId,
       advanceBalance: { $gt: 0 }
     }, {
       select: 'companyName contactPerson email phone pendingBalance advanceBalance creditLimit'
     });
 
-    // Find suppliers over credit limit
+    // Find suppliers over credit limit (tenant-scoped)
     const suppliersOverCreditLimit = await supplierRepository.findAll({
+      tenantId,
       $expr: { $gt: ['$currentBalance', '$creditLimit'] }
     }, {
       select: 'companyName contactPerson email phone currentBalance creditLimit'
@@ -210,11 +223,13 @@ router.get('/reports/balance-issues', [
 
 // Fix all supplier balances (recalculate from purchase orders)
 router.post('/fix-all-balances', [
-  auth, 
+  auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('manage_suppliers')
 ], async (req, res) => {
   try {
-    const suppliers = await supplierRepository.findAll({});
+    const tenantId = req.tenantId;
+    const suppliers = await supplierRepository.findAll({ tenantId });
     const results = [];
 
     for (const supplier of suppliers) {

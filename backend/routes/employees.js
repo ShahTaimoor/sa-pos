@@ -28,8 +28,13 @@ router.get('/', [
   try {
     logger.debug('GET /api/employees - Request received', { query: req.query });
 
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+
     // Call service to get employees
-    const result = await employeeService.getEmployees(req.query);
+    const result = await employeeService.getEmployees(req.query, tenantId);
     
     res.json({
       success: true,
@@ -64,12 +69,14 @@ router.get('/', [
 // @access  Private
 router.get('/:id', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('manage_users'),
   param('id').isMongoId().withMessage('Invalid employee ID'),
   handleValidationErrors, // Use as middleware
 ], async (req, res) => {
   try {
-    const employee = await employeeService.getEmployeeById(req.params.id);
+    const tenantId = req.tenantId;
+    const employee = await employeeService.getEmployeeById(req.params.id, tenantId);
 
     res.json({
       success: true,

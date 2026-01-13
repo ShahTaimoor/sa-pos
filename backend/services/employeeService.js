@@ -52,15 +52,20 @@ class EmployeeService {
   /**
    * Get employees with filtering and pagination
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getEmployees(queryParams) {
+  async getEmployees(queryParams, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getEmployees');
+    }
     const page = parseInt(queryParams.page) || 1;
     const limit = parseInt(queryParams.limit) || 20;
 
     const filter = this.buildFilter(queryParams);
 
     const result = await employeeRepository.findWithPagination(filter, {
+      tenantId, // CRITICAL: Include tenantId for multi-tenant isolation
       page,
       limit,
       sort: { createdAt: -1 },

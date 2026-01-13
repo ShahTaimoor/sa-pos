@@ -19,7 +19,11 @@ router.post('/', [
   body('referenceType').isIn(['sales_order', 'payment', 'refund', 'adjustment', 'manual_entry', 'system_generated', 'opening_balance']).withMessage('Valid reference type is required')
 ], async (req, res) => {
   try {
-    const transaction = await customerTransactionService.createTransaction(req.body, req.user);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const transaction = await customerTransactionService.createTransaction(req.body, req.user, tenantId);
     res.status(201).json({ success: true, data: transaction });
   } catch (error) {
     logger.error('Create transaction error:', { error: error });
@@ -37,6 +41,10 @@ router.get('/customer/:customerId', [
   param('customerId').isMongoId().withMessage('Valid customer ID is required')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const options = {
       limit: parseInt(req.query.limit) || 50,
       skip: parseInt(req.query.skip) || 0,
@@ -47,7 +55,7 @@ router.get('/customer/:customerId', [
       includeReversed: req.query.includeReversed === 'true'
     };
 
-    const result = await customerTransactionService.getCustomerTransactions(req.params.customerId, options);
+    const result = await customerTransactionService.getCustomerTransactions(req.params.customerId, options, tenantId);
     res.json({ success: true, ...result });
   } catch (error) {
     logger.error('Get customer transactions error:', { error: error });
@@ -60,6 +68,7 @@ router.get('/customer/:customerId', [
 // @access  Private
 router.post('/apply-payment', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('create_customer_transactions'),
   body('customerId').isMongoId().withMessage('Valid customer ID is required'),
   body('paymentAmount').isFloat({ min: 0.01 }).withMessage('Payment amount must be positive'),
@@ -68,11 +77,16 @@ router.post('/apply-payment', [
   body('applications.*.amount').isFloat({ min: 0.01 }).withMessage('Application amount must be positive')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const paymentApplication = await customerTransactionService.applyPayment(
       req.body.customerId,
       req.body.paymentAmount,
       req.body.applications,
-      req.user
+      req.user,
+      tenantId
     );
     res.status(201).json({ success: true, data: paymentApplication });
   } catch (error) {
@@ -86,15 +100,21 @@ router.post('/apply-payment', [
 // @access  Private
 router.post('/:id/reverse', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('reverse_customer_transactions'),
   param('id').isMongoId().withMessage('Valid transaction ID is required'),
   body('reason').trim().isLength({ min: 1 }).withMessage('Reason is required')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const reversal = await customerTransactionService.reverseTransaction(
       req.params.id,
       req.body.reason,
-      req.user
+      req.user,
+      tenantId
     );
     res.json({ success: true, data: reversal });
   } catch (error) {
@@ -108,17 +128,23 @@ router.post('/:id/reverse', [
 // @access  Private
 router.post('/:id/partial-reverse', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('reverse_customer_transactions'),
   param('id').isMongoId().withMessage('Valid transaction ID is required'),
   body('amount').isFloat({ min: 0.01 }).withMessage('Amount must be positive'),
   body('reason').trim().isLength({ min: 1 }).withMessage('Reason is required')
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const reversal = await customerTransactionService.partialReverseTransaction(
       req.params.id,
       req.body.amount,
       req.body.reason,
-      req.user
+      req.user,
+      tenantId
     );
     res.json({ success: true, data: reversal });
   } catch (error) {
@@ -137,7 +163,11 @@ router.get('/customer/:customerId/overdue', [
   param('customerId').isMongoId().withMessage('Valid customer ID is required')
 ], async (req, res) => {
   try {
-    const overdueInvoices = await customerTransactionService.getOverdueInvoices(req.params.customerId);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const overdueInvoices = await customerTransactionService.getOverdueInvoices(req.params.customerId, tenantId);
     res.json({ success: true, data: overdueInvoices });
   } catch (error) {
     logger.error('Get overdue invoices error:', { error: error });
@@ -150,11 +180,16 @@ router.get('/customer/:customerId/overdue', [
 // @access  Private
 router.get('/customer/:customerId/aging', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_customer_reports'),
   param('customerId').isMongoId().withMessage('Valid customer ID is required')
 ], async (req, res) => {
   try {
-    const aging = await customerTransactionService.getCustomerAging(req.params.customerId);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const aging = await customerTransactionService.getCustomerAging(req.params.customerId, tenantId);
     res.json({ success: true, data: aging });
   } catch (error) {
     logger.error('Get customer aging error:', { error: error });

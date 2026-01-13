@@ -9,7 +9,19 @@
 
 const tenantMiddleware = (req, res, next) => {
   // Get tenantId from request (set by auth middleware)
-  const tenantId = req.tenantId || req.user?.tenantId;
+  let tenantId = req.tenantId || req.user?.tenantId;
+  
+  // Super Admin special handling: can access any tenant for management
+  // But for regular operations, use their own tenantId
+  if (req.user?.role === 'super_admin') {
+    // If Super Admin is managing a specific tenant (via query param), allow it
+    // But only for tenant management endpoints
+    if (req.query?.targetTenantId && req.path.includes('/tenants')) {
+      tenantId = req.query.targetTenantId;
+    } else if (!tenantId && req.user.tenantId) {
+      tenantId = req.user.tenantId;
+    }
+  }
   
   if (!tenantId) {
     return res.status(403).json({ 
@@ -18,11 +30,14 @@ const tenantMiddleware = (req, res, next) => {
   }
   
   // Remove tenantId from request body if present (security: never trust frontend)
-  if (req.body && req.body.tenantId) {
+  // Exception: Super Admin creating tenants can send tenantData
+  if (req.body && req.body.tenantId && req.user?.role !== 'super_admin') {
     delete req.body.tenantId;
   }
   
-  if (req.query && req.query.tenantId) {
+  // Remove tenantId from query (security: never trust frontend)
+  // Exception: Super Admin can use targetTenantId for tenant management
+  if (req.query && req.query.tenantId && req.user?.role !== 'super_admin') {
     delete req.query.tenantId;
   }
   

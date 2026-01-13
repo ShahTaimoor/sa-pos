@@ -149,4 +149,56 @@ bankReceiptSchema.index({ date: -1 });
 bankReceiptSchema.index({ voucherCode: 1 }, { unique: true, sparse: true }); // Sparse allows multiple null values
 bankReceiptSchema.index({ createdBy: 1 });
 
+// Post-save hook to handle accounting entries, customer balance, and bank balance
+bankReceiptSchema.post('save', async function(doc) {
+  // Only process new bank receipts (not updates)
+  if (!doc.isNew) {
+    return;
+  }
+
+  const logger = require('../utils/logger');
+
+  // 1. Create accounting entries
+  try {
+    const accountingService = require('../services/accountingService');
+    await accountingService.recordBankReceipt(doc);
+    logger.debug(`Accounting entries created for bank receipt: ${doc.voucherCode || doc._id}`);
+  } catch (error) {
+    // Log error but don't fail the save
+    logger.error(`Error creating accounting entries for bank receipt ${doc.voucherCode || doc._id}:`, error);
+  }
+
+  // 2. Update customer balance (if customer provided)
+  if (doc.customer && doc.amount > 0) {
+    try {
+      const customerBalanceService = require('../services/customerBalanceService');
+      await customerBalanceService.recordPayment(
+        doc.customer,
+        doc.amount,
+        doc.order || null,
+        doc.createdBy,
+        { voucherCode: doc.voucherCode, paymentMethod: 'bank_transfer' }
+      );
+      logger.debug(`Customer balance updated for bank receipt: ${doc.voucherCode || doc._id}`);
+    } catch (error) {
+      // Log error but don't fail the save
+      logger.error(`Error updating customer balance for bank receipt ${doc.voucherCode || doc._id}:`, error);
+    }
+  }
+
+  // 3. Update bank account balance (increase)
+  if (doc.bank && doc.amount > 0) {
+    try {
+      const Bank = require('./Bank');
+      await Bank.findByIdAndUpdate(doc.bank, {
+        $inc: { currentBalance: doc.amount }
+      });
+      logger.debug(`Bank balance updated for bank receipt: ${doc.voucherCode || doc._id}`);
+    } catch (error) {
+      // Log error but don't fail the save
+      logger.error(`Error updating bank balance for bank receipt ${doc.voucherCode || doc._id}:`, error);
+    }
+  }
+});
+
 module.exports = mongoose.model('BankReceipt', bankReceiptSchema);

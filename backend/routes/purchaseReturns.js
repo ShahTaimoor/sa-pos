@@ -29,10 +29,15 @@ router.post('/', [
   handleValidationErrors,
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
     const { supplier, items, reason = 'Purchase return' } = req.body;
 
     // Validate supplier
-    const supplierDoc = await supplierRepository.findById(supplier);
+    const supplierDoc = await supplierRepository.findById(supplier, { tenantId });
     if (!supplierDoc) {
       return res.status(404).json({ message: 'Supplier not found' });
     }
@@ -40,7 +45,7 @@ router.post('/', [
     // Validate products and perform stock movements
     let totalAmount = 0;
     for (const item of items) {
-      const product = await productRepository.findById(item.product);
+      const product = await productRepository.findById(item.product, { tenantId });
       if (!product) {
         return res.status(404).json({ message: `Product not found: ${item.product}` });
       }
@@ -64,7 +69,7 @@ router.post('/', [
 
     // Adjust supplier balance as a debit note (reduce payables / increase advance)
     try {
-      await SupplierBalanceService.recordPayment(supplierDoc._id, totalAmount, null);
+      await SupplierBalanceService.recordPayment(supplierDoc._id, totalAmount, null, tenantId);
     } catch (balanceErr) {
       // Do not fail entire return; surface warning
       logger.error('Error updating supplier balance for purchase return:', balanceErr);

@@ -34,7 +34,11 @@ router.post('/process', [
       });
     }
 
-    const result = await paymentService.processPayment(req.body, req.user);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await paymentService.processPayment(req.body, req.user, tenantId);
     
     res.json({
       success: true,
@@ -57,6 +61,7 @@ router.post('/process', [
 router.post('/:paymentId/refund', [
   sanitizeRequest,
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('process_refunds'),
   param('paymentId').isMongoId().withMessage('Valid payment ID is required'),
   body('amount').isFloat({ min: 0.01 }).withMessage('Refund amount must be greater than 0'),
@@ -73,8 +78,11 @@ router.post('/:paymentId/refund', [
 
     const { paymentId } = req.params;
     const { amount, reason } = req.body;
-
-    const result = await paymentService.processRefund(paymentId, { amount, reason }, req.user);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await paymentService.processRefund(paymentId, { amount, reason }, req.user, tenantId);
     
     res.json({
       success: true,
@@ -97,6 +105,7 @@ router.post('/:paymentId/refund', [
 router.post('/transactions/:transactionId/void', [
   sanitizeRequest,
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('void_transactions'),
   param('transactionId').isLength({ min: 1 }).withMessage('Valid transaction ID is required'),
   body('reason').optional().isLength({ max: 500 }).withMessage('Reason must be less than 500 characters')
@@ -112,8 +121,11 @@ router.post('/transactions/:transactionId/void', [
 
     const { transactionId } = req.params;
     const { reason } = req.body;
-
-    const result = await paymentService.voidTransaction(transactionId, req.user, reason);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await paymentService.voidTransaction(transactionId, req.user, reason, tenantId);
     
     res.json({
       success: true,
@@ -156,7 +168,11 @@ router.get('/', [
       });
     }
 
-    const result = await paymentService.getPaymentHistory(req.query);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await paymentService.getPaymentHistory(req.query, tenantId);
     
     res.json({
       success: true,
@@ -193,7 +209,11 @@ router.get('/stats', [
     }
 
     const { startDate, endDate } = req.query;
-    const result = await paymentService.getPaymentStats(startDate, endDate);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await paymentService.getPaymentStats(startDate, endDate, tenantId);
     
     res.json({
       success: true,
@@ -214,7 +234,8 @@ router.get('/stats', [
 // @access  Private
 router.get('/methods', [
   sanitizeRequest,
-  auth
+  auth,
+  tenantMiddleware // Enforce tenant isolation (even for static data)
 ], async (req, res) => {
   try {
     const paymentMethods = [
@@ -325,7 +346,11 @@ router.get('/:paymentId', [
       });
     }
 
-    const payment = await paymentService.getPaymentById(req.params.paymentId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const payment = await paymentService.getPaymentById(req.params.paymentId, tenantId);
 
     res.json({
       success: true,
