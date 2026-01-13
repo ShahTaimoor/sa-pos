@@ -461,13 +461,17 @@ InventorySchema.statics.releaseStock = async function(productId, quantity) {
 };
 
 // Static method to get low stock items
-InventorySchema.statics.getLowStockItems = async function() {
+InventorySchema.statics.getLowStockItems = async function(tenantId) {
+  if (!tenantId) {
+    throw new Error('tenantId is required to get low stock items');
+  }
   // Use aggregation pipeline for field comparison
   // Handle polymorphic references: product can reference either 'products' or 'productvariants' collections
   return await this.aggregate([
     {
       $match: {
-        status: 'active'
+        status: 'active',
+        tenantId: tenantId
       }
     },
     {

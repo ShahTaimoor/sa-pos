@@ -140,10 +140,14 @@ router.get('/', [
 // @route   GET /api/products/:id/last-purchase-price
 // @desc    Get last purchase price for a product
 // @access  Private
-router.get('/:id/last-purchase-price', auth, async (req, res) => {
+router.get('/:id/last-purchase-price', [auth, tenantMiddleware], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
     const { id } = req.params;
-    const priceInfo = await productService.getLastPurchasePrice(id);
+    const priceInfo = await productService.getLastPurchasePrice(id, tenantId);
     
     if (!priceInfo) {
       return res.json({
@@ -1113,15 +1117,19 @@ router.delete('/:id/investors/:investorId', [
 // @route   POST /api/products/get-last-purchase-prices
 // @desc    Get last purchase prices for multiple products
 // @access  Private
-router.post('/get-last-purchase-prices', auth, async (req, res) => {
+router.post('/get-last-purchase-prices', [auth, tenantMiddleware], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
     const { productIds } = req.body;
     
     if (!Array.isArray(productIds) || productIds.length === 0) {
       return res.status(400).json({ message: 'Product IDs array is required' });
     }
     
-    const prices = await productService.getLastPurchasePrices(productIds);
+    const prices = await productService.getLastPurchasePrices(productIds, tenantId);
     
     res.json({
       success: true,

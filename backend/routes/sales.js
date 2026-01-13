@@ -228,8 +228,16 @@ router.post('/', [
     
     // Validate customer if provided
     let customerData = null;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+
     if (customer) {
-      customerData = await customerRepository.findById(customer);
+      customerData = await customerRepository.findById(customer, { tenantId });
       if (!customerData) {
         return res.status(400).json({ message: 'Customer not found' });
       }
@@ -242,13 +250,13 @@ router.post('/', [
     let totalTax = 0;
     
     for (const item of items) {
-      const product = await productRepository.findById(item.product);
+      const product = await productRepository.findById(item.product, { tenantId });
       if (!product) {
         return res.status(400).json({ message: `Product ${item.product} not found` });
       }
       
       // Check actual inventory from Inventory model (source of truth) instead of Product model cache
-      let inventoryRecord = await Inventory.findOne({ product: item.product });
+      let inventoryRecord = await Inventory.findOne({ product: item.product, tenantId });
       let availableStock = 0;
       const productStock = Number(product.inventory?.currentStock || 0);
       
@@ -264,7 +272,8 @@ router.post('/', [
             reorderQuantity: product.inventory?.reorderQuantity || 50,
             reservedStock: 0,
             availableStock: productStock,
-            status: productStock > 0 ? 'active' : 'out_of_stock'
+            status: productStock > 0 ? 'active' : 'out_of_stock',
+            tenantId: tenantId
           });
           availableStock = productStock;
         } catch (inventoryError) {
@@ -330,7 +339,7 @@ router.post('/', [
       // First try to get from Inventory (most accurate - reflects actual purchase cost)
       try {
         const Inventory = require('../models/Inventory');
-        const inventory = await Inventory.findOne({ product: product._id });
+        const inventory = await Inventory.findOne({ product: product._id, tenantId });
         if (inventory && inventory.cost) {
           // Use average cost if available, otherwise last purchase cost
           unitCost = inventory.cost.average || inventory.cost.lastPurchase || 0;
@@ -414,13 +423,13 @@ router.post('/', [
     
     for (const item of items) {
       try {
-        const product = await productRepository.findById(item.product);
+        const product = await productRepository.findById(item.product, { tenantId });
         if (!product) {
           return res.status(400).json({ message: `Product ${item.product} not found during inventory update` });
         }
         
         // Check actual inventory from Inventory model (source of truth) instead of Product model cache
-        let inventoryRecord = await Inventory.findOne({ product: item.product });
+        let inventoryRecord = await Inventory.findOne({ product: item.product, tenantId });
         let availableStock = 0;
         const productStock = Number(product.inventory?.currentStock || 0);
         
@@ -435,7 +444,8 @@ router.post('/', [
             reorderQuantity: 50,
             reservedStock: 0,
             availableStock: productStock,
-            status: productStock > 0 ? 'active' : 'out_of_stock'
+            status: productStock > 0 ? 'active' : 'out_of_stock',
+            tenantId: tenantId
           });
           availableStock = productStock;
         } else {
@@ -462,10 +472,11 @@ router.post('/', [
               referenceId: null,
               referenceModel: 'StockAdjustment',
               performedBy: req.user._id,
-              notes: `Syncing Inventory model to match Product model stock (${inventoryCurrentStock} -> ${productStock})`
+              notes: `Syncing Inventory model to match Product model stock (${inventoryCurrentStock} -> ${productStock})`,
+              tenantId: tenantId
             });
             // Refresh inventory record
-            inventoryRecord = await Inventory.findOne({ product: item.product });
+            inventoryRecord = await Inventory.findOne({ product: item.product, tenantId });
             // Recalculate available stock after sync
             const refreshedReservedStock = Number(inventoryRecord.reservedStock || 0);
             availableStock = Math.max(0, productStock - refreshedReservedStock);
@@ -494,7 +505,8 @@ router.post('/', [
           referenceId: null, // Will be updated after order save
           referenceModel: 'SalesOrder',
           performedBy: req.user._id,
-          notes: `Stock reduced due to sales order creation`
+          notes: `Stock reduced due to sales order creation`,
+          tenantId: tenantId
         });
         
         inventoryUpdates.push({
@@ -538,7 +550,8 @@ router.post('/', [
               referenceId: null,
               referenceModel: 'SalesOrder',
               performedBy: req.user._id,
-              notes: `Rollback: Sales order creation failed`
+              notes: `Rollback: Sales order creation failed`,
+              tenantId: tenantId
             });
           } catch (rollbackError) {
             logger.error(`Failed to rollback inventory for product ${successUpdate.productId}:`, rollbackError);
@@ -1001,7 +1014,7 @@ router.put('/:id', [
       order.pricing.total = newSubtotal - newTotalDiscount + newTotalTax;
       
       // Check credit limit for credit sales when order total increases
-      const finalCustomer = customerData || (order.customer ? await Customer.findById(order.customer) : null);
+      const finalCustomer = customerData || (order.customer ? await Customer.findOne({ _id: order.customer, tenantId: req.tenantId || req.user?.tenantId }) : null);
       if (finalCustomer && finalCustomer.creditLimit > 0) {
         const newTotal = order.pricing.total;
         const paymentMethod = order.payment?.method || 'cash';
@@ -1118,9 +1131,10 @@ router.put('/:id', [
               reference: 'Sales Order',
               referenceId: order._id,
               referenceModel: 'SalesOrder',
-                performedBy: req.user._id,
-                notes: `Inventory restored due to order ${order.orderNumber} update - item removed`
-              });
+              performedBy: req.user._id,
+              notes: `Inventory restored due to order ${order.orderNumber} update - item removed`,
+              tenantId: req.tenantId || req.user?.tenantId
+            });
           }
         }
       } catch (error) {
@@ -2527,7 +2541,7 @@ router.post('/export/json', [auth, tenantMiddleware, requirePermission('view_ord
 // @route   GET /api/orders/download/:filename
 // @desc    Download exported file
 // @access  Private
-router.get('/download/:filename', [auth, requirePermission('view_orders')], async (req, res) => {
+router.get('/download/:filename', [auth, tenantMiddleware, requirePermission('view_orders')], async (req, res) => {
   try {
     const { filename } = req.params;
     const filepath = path.join(__dirname, '../exports', filename);

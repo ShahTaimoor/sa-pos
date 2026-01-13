@@ -199,7 +199,7 @@ class ClosingEntriesService {
       
       // Update account balances
       for (const entry of closingEntries) {
-        const account = await ChartOfAccountsRepository.findById(entry.account);
+        const account = await ChartOfAccountsRepository.findById(entry.account, { tenantId });
         if (!account) continue;
         
         const amount = entry.debit > 0 ? entry.debit : entry.credit;
@@ -214,7 +214,8 @@ class ClosingEntriesService {
         
         await ChartOfAccountsRepository.updateBalance(
           account._id,
-          { $inc: { currentBalance: delta } }
+          { $inc: { currentBalance: delta } },
+          { tenantId }
         );
       }
       

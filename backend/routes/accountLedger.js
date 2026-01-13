@@ -51,7 +51,13 @@ router.get('/', [
       page = 1
     } = req.query;
 
-    const tenantId = req.tenantId;
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     // Get account ledger data from service
     const result = await accountLedgerService.getAccountLedger({
       startDate,

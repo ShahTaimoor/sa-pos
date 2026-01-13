@@ -27,7 +27,13 @@ router.get(
   async (req, res) => {
     try {
       const { startDate, endDate } = req.query;
-      const tenantId = req.tenantId;
+      const tenantId = req.tenantId || req.user?.tenantId;
+
+      if (!tenantId) {
+        return res.status(400).json({
+          message: 'Tenant ID is required'
+        });
+      }
 
       if (!startDate || !endDate) {
         return res.status(400).json({
@@ -65,7 +71,13 @@ router.get(
   async (req, res) => {
     try {
       const { asOfDate } = req.query;
-      const tenantId = req.tenantId;
+      const tenantId = req.tenantId || req.user?.tenantId;
+
+      if (!tenantId) {
+        return res.status(400).json({
+          message: 'Tenant ID is required'
+        });
+      }
 
       const balanceSheet = await financialReportingService.generateBalanceSheet({
         tenantId,
@@ -97,7 +109,13 @@ router.get(
   async (req, res) => {
     try {
       const { startDate, endDate } = req.query;
-      const tenantId = req.tenantId;
+      const tenantId = req.tenantId || req.user?.tenantId;
+
+      if (!tenantId) {
+        return res.status(400).json({
+          message: 'Tenant ID is required'
+        });
+      }
 
       const summary = await financialReportingService.getAccountSummary({
         tenantId,

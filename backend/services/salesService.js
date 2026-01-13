@@ -47,7 +47,7 @@ class SalesService {
     // Product search - find orders containing products with matching names
     if (queryParams.productSearch) {
       const productSearchTerm = queryParams.productSearch.trim();
-      const matchingProducts = await productRepository.search(productSearchTerm, 1000);
+      const matchingProducts = await productRepository.search(productSearchTerm, ['name', 'description'], { tenantId, limit: 1000 });
       
       if (matchingProducts.length > 0) {
         const productIds = matchingProducts.map(p => p._id);

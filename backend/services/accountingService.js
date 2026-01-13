@@ -2,6 +2,7 @@ const TransactionRepository = require('../repositories/TransactionRepository');
 const ChartOfAccountsRepository = require('../repositories/ChartOfAccountsRepository');
 const BalanceSheetRepository = require('../repositories/BalanceSheetRepository');
 const Transaction = require('../models/Transaction');
+const logger = require('../utils/logger');
 
 class AccountingService {
   /**
@@ -767,7 +768,6 @@ class AccountingService {
       // Debit: Cost of Goods Sold (COGS)
       let totalCOGS = 0;
       const Product = require('../models/Product');
-const logger = require('../utils/logger');
       for (const item of order.items) {
         const product = await Product.findById(item.product);
         if (product && product.pricing?.cost) {

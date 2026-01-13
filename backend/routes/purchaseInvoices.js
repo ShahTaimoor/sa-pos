@@ -200,7 +200,8 @@ router.post('/', [
             referenceId: invoice._id,
             referenceModel: 'PurchaseInvoice',
             performedBy: req.user._id,
-            notes: `Stock increased due to purchase invoice creation - Invoice: ${invoice.invoiceNumber || invoiceNumber}`
+            notes: `Stock increased due to purchase invoice creation - Invoice: ${invoice.invoiceNumber || invoiceNumber}`,
+            tenantId: req.tenantId
           });
           
           inventoryUpdates.push({
@@ -246,18 +247,18 @@ router.post('/', [
       if (supplier && pricing && pricing.total > 0) {
         try {
           const SupplierBalanceService = require('../services/supplierBalanceService');
-          const supplierExists = await supplierRepository.findById(supplier);
+          const supplierExists = await supplierRepository.findById(supplier, { tenantId: req.tenantId });
           
           if (supplierExists) {
             // Step 1: Add invoice total to pendingBalance (we owe this amount to supplier)
             await supplierRepository.updateById(supplier, {
               $inc: { pendingBalance: pricing.total }
-            });
+            }, { tenantId: req.tenantId });
             
             // Step 2: Record payment (this will reduce pendingBalance and handle overpayments)
             const amountPaid = payment?.amount || payment?.paidAmount || 0;
             if (amountPaid > 0) {
-              await SupplierBalanceService.recordPayment(supplier, amountPaid, invoice._id);
+              await SupplierBalanceService.recordPayment(supplier, amountPaid, invoice._id, req.tenantId);
             }
           }
         } catch (error) {
@@ -372,7 +373,7 @@ router.put('/:id', [
     let supplierData = null;
     if (req.body.supplier) {
       const Supplier = require('../models/Supplier');
-      supplierData = await supplierRepository.findById(req.body.supplier);
+      supplierData = await supplierRepository.findById(req.body.supplier, { tenantId: req.tenantId });
       if (!supplierData) {
         return res.status(400).json({ message: 'Supplier not found' });
       }
@@ -454,7 +455,8 @@ router.put('/:id', [
                 referenceId: updatedInvoice._id,
                 referenceModel: 'PurchaseInvoice',
                 performedBy: req.user._id,
-                notes: `Inventory increased due to purchase invoice ${updatedInvoice.invoiceNumber} update - quantity increased by ${quantityChange}`
+                notes: `Inventory increased due to purchase invoice ${updatedInvoice.invoiceNumber} update - quantity increased by ${quantityChange}`,
+                tenantId: req.tenantId
               });
             } else {
               // Quantity decreased - reduce inventory
@@ -467,7 +469,8 @@ router.put('/:id', [
                 referenceId: updatedInvoice._id,
                 referenceModel: 'PurchaseInvoice',
                 performedBy: req.user._id,
-                notes: `Inventory reduced due to purchase invoice ${updatedInvoice.invoiceNumber} update - quantity decreased by ${Math.abs(quantityChange)}`
+                notes: `Inventory reduced due to purchase invoice ${updatedInvoice.invoiceNumber} update - quantity decreased by ${Math.abs(quantityChange)}`,
+                tenantId: req.tenantId
               });
             }
           }
@@ -492,7 +495,8 @@ router.put('/:id', [
               referenceId: updatedInvoice._id,
               referenceModel: 'PurchaseInvoice',
               performedBy: req.user._id,
-              notes: `Inventory reduced due to purchase invoice ${updatedInvoice.invoiceNumber} update - item removed`
+              notes: `Inventory reduced due to purchase invoice ${updatedInvoice.invoiceNumber} update - item removed`,
+              tenantId: req.tenantId
             });
           }
         }
@@ -515,7 +519,7 @@ router.put('/:id', [
         
         // Step 1: Rollback old invoice's impact on supplier balance
         if (oldSupplier) {
-          const oldSupplierDoc = await supplierRepository.findById(oldSupplier);
+          const oldSupplierDoc = await supplierRepository.findById(oldSupplier, { tenantId: req.tenantId });
           if (oldSupplierDoc) {
             const oldAmountPaid = invoice.payment?.amount || invoice.payment?.paidAmount || 0;
             
@@ -532,29 +536,29 @@ router.put('/:id', [
                   pendingBalance: pendingRestored,
                   advanceBalance: -advanceToRemove
                 }
-              });
+              }, { tenantId: req.tenantId });
             }
             
             // Remove old invoice total from pendingBalance
             await supplierRepository.updateById(oldSupplier, {
               $inc: { pendingBalance: -oldTotal }
-            });
+            }, { tenantId: req.tenantId });
           }
         }
         
         // Step 2: Apply new invoice's impact on supplier balance
         if (updatedInvoice.supplier) {
-          const newSupplier = await supplierRepository.findById(updatedInvoice.supplier);
+          const newSupplier = await supplierRepository.findById(updatedInvoice.supplier, { tenantId: req.tenantId });
           if (newSupplier) {
             // Add new invoice total to pendingBalance
           await supplierRepository.updateById(updatedInvoice.supplier, {
-            $inc: { pendingBalance: updatedInvoice.pricing.total }
-          });
+              $inc: { pendingBalance: updatedInvoice.pricing.total }
+          }, { tenantId: req.tenantId });
             
             // Record new payment (handles overpayments correctly)
             const newAmountPaid = updatedInvoice.payment?.amount || updatedInvoice.payment?.paidAmount || 0;
             if (newAmountPaid > 0) {
-              await SupplierBalanceService.recordPayment(updatedInvoice.supplier, newAmountPaid, updatedInvoice._id);
+              await SupplierBalanceService.recordPayment(updatedInvoice.supplier, newAmountPaid, updatedInvoice._id, req.tenantId);
             }
           }
         }
@@ -635,7 +639,8 @@ router.delete('/:id', [
             referenceId: invoice._id,
             referenceModel: 'PurchaseInvoice',
             performedBy: req.user._id,
-            notes: `Inventory rolled back due to deletion of purchase invoice ${invoice.invoiceNumber}`
+            notes: `Inventory rolled back due to deletion of purchase invoice ${invoice.invoiceNumber}`,
+            tenantId: req.tenantId
           });
           
           inventoryRollbacks.push({
@@ -686,7 +691,7 @@ router.delete('/:id', [
     if (invoice.supplier && invoice.pricing && invoice.pricing.total > 0) {
       try {
         const Supplier = require('../models/Supplier');
-        const supplierExists = await supplierRepository.findById(invoice.supplier);
+        const supplierExists = await supplierRepository.findById(invoice.supplier, { tenantId: req.tenantId });
         
         if (supplierExists) {
           const amountPaid = invoice.payment?.amount || invoice.payment?.paidAmount || 0;
@@ -701,13 +706,13 @@ router.delete('/:id', [
                 pendingBalance: pendingRestored,
                 advanceBalance: -advanceToRemove
               }
-            });
+            }, { tenantId: req.tenantId });
           }
           
           // Remove invoice total from pendingBalance
           const updateResult = await supplierRepository.updateById(invoice.supplier, {
             $inc: { pendingBalance: -invoice.pricing.total }
-          });
+          }, { tenantId: req.tenantId });
         } else {
         }
       } catch (error) {
@@ -837,7 +842,7 @@ router.post('/export/pdf', [auth, tenantMiddleware, requirePermission('view_purc
     // Fetch supplier name if supplier filter is applied
     let supplierName = null;
     if (filters.supplier) {
-      const supplier = await supplierRepository.findById(filters.supplier, { lean: true });
+      const supplier = await supplierRepository.findById(filters.supplier, { lean: true, tenantId: req.tenantId });
       if (supplier) {
         supplierName = supplier.companyName || 
                       supplier.name || 
@@ -1234,7 +1239,7 @@ router.post('/export/pdf', [auth, tenantMiddleware, requirePermission('view_purc
 // @route   GET /api/purchase-invoices/download/:filename
 // @desc    Download exported file
 // @access  Private
-router.get('/download/:filename', [auth, requirePermission('view_purchase_invoices')], (req, res) => {
+router.get('/download/:filename', [auth, tenantMiddleware, requirePermission('view_purchase_invoices')], (req, res) => {
   try {
     const filename = req.params.filename;
     const filepath = path.join(__dirname, '../exports', filename);

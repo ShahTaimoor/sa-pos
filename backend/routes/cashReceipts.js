@@ -198,14 +198,16 @@ router.post('/', [
     } = req.body;
 
     const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     
     // Validate order exists if provided (with tenant filtering)
     if (order) {
-      const orderQuery = { _id: order };
-      if (tenantId) {
-        orderQuery.tenantId = tenantId;
-      }
-      const orderExists = await Sales.findOne(orderQuery);
+      const orderExists = await Sales.findOne({ _id: order, tenantId });
       if (!orderExists) {
         return res.status(400).json({ 
           success: false,
@@ -216,11 +218,7 @@ router.post('/', [
 
     // Validate customer exists if provided (with tenant filtering)
     if (customer) {
-      const customerQuery = { _id: customer };
-      if (tenantId) {
-        customerQuery.tenantId = tenantId;
-      }
-      const customerExists = await Customer.findOne(customerQuery);
+      const customerExists = await Customer.findOne({ _id: customer, tenantId });
       if (!customerExists) {
         return res.status(400).json({ 
           success: false,
@@ -231,11 +229,7 @@ router.post('/', [
 
     // Validate supplier exists if provided (with tenant filtering)
     if (supplier) {
-      const supplierQuery = { _id: supplier };
-      if (tenantId) {
-        supplierQuery.tenantId = tenantId;
-      }
-      const supplierExists = await Supplier.findOne(supplierQuery);
+      const supplierExists = await Supplier.findOne({ _id: supplier, tenantId });
       if (!supplierExists) {
         return res.status(400).json({ 
           success: false,
@@ -339,14 +333,15 @@ router.put('/:id', [
     }
 
     const tenantId = req.tenantId || req.user?.tenantId;
-    
-    // Build query with tenant filter
-    const query = { _id: req.params.id };
-    if (tenantId) {
-      query.tenantId = tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
     }
     
-    const cashReceipt = await CashReceipt.findOne(query);
+    // Build query with tenant filter
+    const cashReceipt = await CashReceipt.findOne({ _id: req.params.id, tenantId });
     if (!cashReceipt) {
       return res.status(404).json({ 
         success: false,
@@ -420,14 +415,15 @@ router.delete('/:id', [
 ], async (req, res) => {
   try {
     const tenantId = req.tenantId || req.user?.tenantId;
-    
-    // Build query with tenant filter
-    const query = { _id: req.params.id };
-    if (tenantId) {
-      query.tenantId = tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
     }
     
-    const cashReceipt = await CashReceipt.findOne(query);
+    // Build query with tenant filter
+    const cashReceipt = await CashReceipt.findOne({ _id: req.params.id, tenantId });
     if (!cashReceipt) {
       return res.status(404).json({ 
         success: false,
@@ -435,7 +431,7 @@ router.delete('/:id', [
       });
     }
 
-    await CashReceipt.findOneAndDelete(query);
+    await CashReceipt.findOneAndDelete({ _id: req.params.id, tenantId });
 
     res.json({
       success: true,

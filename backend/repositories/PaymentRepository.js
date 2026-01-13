@@ -54,43 +54,56 @@ class PaymentRepository extends BaseRepository {
   /**
    * Find payments by order ID
    * @param {string} orderId - Order ID
-   * @param {object} options - Query options
+   * @param {object} options - Query options including tenantId
    * @returns {Promise<Array>}
    */
   async findByOrderId(orderId, options = {}) {
+    const { tenantId } = options;
     const query = this.hasSoftDelete ? { orderId, isDeleted: false } : { orderId };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     return this.model.find(query, null, options);
   }
 
   /**
    * Find payment by payment ID (string)
    * @param {string} paymentId - Payment ID string
-   * @param {object} options - Query options
+   * @param {object} options - Query options including tenantId
    * @returns {Promise<Payment|null>}
    */
   async findByPaymentId(paymentId, options = {}) {
+    const { tenantId } = options;
     const query = this.hasSoftDelete ? { paymentId, isDeleted: false } : { paymentId };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     return this.model.findOne(query, null, options);
   }
 
   /**
    * Find payments by status
    * @param {string} status - Payment status
-   * @param {object} options - Query options
+   * @param {object} options - Query options including tenantId
    * @returns {Promise<Array>}
    */
   async findByStatus(status, options = {}) {
+    const { tenantId } = options;
     const query = this.hasSoftDelete ? { status, isDeleted: false } : { status };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     return this.model.find(query, null, options);
   }
 
   /**
    * Calculate total paid amount for an order
    * @param {string} orderId - Order ID
+   * @param {string} tenantId - Tenant ID
    * @returns {Promise<number>}
    */
-  async calculateTotalPaid(orderId) {
-    const payments = await this.findByOrderId(orderId);
+  async calculateTotalPaid(orderId, tenantId) {
+    const payments = await this.findByOrderId(orderId, { tenantId });
     return payments.reduce((sum, payment) => {
       return sum + (payment.status === 'completed' ? payment.amount : 0);
     }, 0);

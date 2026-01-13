@@ -32,11 +32,16 @@ class StockMovementService {
         toLocation,
         previousStock: providedPreviousStock,
         newStock: providedNewStock,
-        skipInventoryUpdate = false
+        skipInventoryUpdate = false,
+        tenantId
       } = movementData;
 
+      if (!tenantId) {
+        throw new Error('tenantId is required to create stock movement');
+      }
+
       // Get product details
-      const product = await ProductRepository.findById(productId);
+      const product = await ProductRepository.findById(productId, { tenantId });
       if (!product) {
         throw new Error('Product not found');
       }

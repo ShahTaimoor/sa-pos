@@ -196,16 +196,25 @@ PaymentSchema.pre('save', function(next) {
 });
 
 // Static methods
-PaymentSchema.statics.findByOrderId = function(orderId) {
-  return this.find({ orderId }).sort({ createdAt: -1 });
+PaymentSchema.statics.findByOrderId = function(orderId, tenantId) {
+  if (!tenantId) {
+    throw new Error('tenantId is required for findByOrderId');
+  }
+  return this.find({ orderId, tenantId }).sort({ createdAt: -1 });
 };
 
-PaymentSchema.statics.findByStatus = function(status) {
-  return this.find({ status }).sort({ createdAt: -1 });
+PaymentSchema.statics.findByStatus = function(status, tenantId) {
+  if (!tenantId) {
+    throw new Error('tenantId is required for findByStatus');
+  }
+  return this.find({ status, tenantId }).sort({ createdAt: -1 });
 };
 
-PaymentSchema.statics.getPaymentStats = function(startDate, endDate) {
-  const match = {};
+PaymentSchema.statics.getPaymentStats = function(startDate, endDate, tenantId) {
+  if (!tenantId) {
+    throw new Error('tenantId is required for getPaymentStats');
+  }
+  const match = { tenantId };
   if (startDate && endDate) {
     match.createdAt = { $gte: startDate, $lte: endDate };
   }

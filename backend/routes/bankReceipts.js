@@ -170,14 +170,16 @@ router.post('/', [
     } = req.body;
 
     const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
     
     // Validate order exists if provided (with tenant filtering)
     if (order) {
-      const orderQuery = { _id: order };
-      if (tenantId) {
-        orderQuery.tenantId = tenantId;
-      }
-      const orderExists = await Sales.findOne(orderQuery);
+      const orderExists = await Sales.findOne({ _id: order, tenantId });
       if (!orderExists) {
         return res.status(400).json({ 
           success: false,
@@ -188,11 +190,7 @@ router.post('/', [
 
     // Validate customer exists if provided (with tenant filtering)
     if (customer) {
-      const customerQuery = { _id: customer };
-      if (tenantId) {
-        customerQuery.tenantId = tenantId;
-      }
-      const customerExists = await Customer.findOne(customerQuery);
+      const customerExists = await Customer.findOne({ _id: customer, tenantId });
       if (!customerExists) {
         return res.status(400).json({ 
           success: false,
@@ -213,11 +211,7 @@ router.post('/', [
     }
 
     // Validate bank exists (with tenant filtering)
-    const bankQuery = { _id: bank };
-    if (tenantId) {
-      bankQuery.tenantId = tenantId;
-    }
-    const bankExists = await Bank.findOne(bankQuery);
+    const bankExists = await Bank.findOne({ _id: bank, tenantId });
     if (!bankExists) {
       return res.status(400).json({ 
         success: false,

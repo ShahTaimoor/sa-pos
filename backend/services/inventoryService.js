@@ -4,7 +4,10 @@ const Product = require('../models/Product');
 const logger = require('../utils/logger');
 
 // Update stock levels
-const updateStock = async ({ productId, type, quantity, reason, reference, referenceId, referenceModel, cost, performedBy, notes }) => {
+const updateStock = async ({ productId, type, quantity, reason, reference, referenceId, referenceModel, cost, performedBy, notes, tenantId }) => {
+  if (!tenantId) {
+    throw new Error('tenantId is required to update stock');
+  }
   try {
     const movement = {
       type,
@@ -30,14 +33,14 @@ const updateStock = async ({ productId, type, quantity, reason, reference, refer
     // If cost is provided and inventory cost was updated, sync to product pricing.cost
     if (cost !== undefined && cost !== null && (type === 'in' || type === 'return')) {
       // Get updated inventory to check if cost was set
-      const inventory = await Inventory.findOne({ product: productId });
+      const inventory = await Inventory.findOne({ product: productId, tenantId });
       if (inventory && inventory.cost && inventory.cost.average) {
         // Sync average cost to product pricing.cost
         productUpdate['pricing.cost'] = inventory.cost.average;
       }
     }
     
-    await Product.findByIdAndUpdate(productId, productUpdate);
+    await Product.findOneAndUpdate({ _id: productId, tenantId }, productUpdate);
     
     return updatedInventory;
   } catch (error) {
@@ -89,16 +92,19 @@ const processStockAdjustment = async ({ adjustments, type, reason, requestedBy, 
 };
 
 // Get inventory status for a product
-const getInventoryStatus = async (productId) => {
+const getInventoryStatus = async (productId, tenantId) => {
+  if (!tenantId) {
+    throw new Error('tenantId is required to get inventory status');
+  }
   try {
-    const inventory = await Inventory.findOne({ product: productId })
+    const inventory = await Inventory.findOne({ product: productId, tenantId })
       .populate('product', 'name description pricing')
       .populate('movements.performedBy', 'firstName lastName')
       .sort({ 'movements.date': -1 });
 
     if (!inventory) {
       // Create inventory record if it doesn't exist
-      const product = await Product.findById(productId);
+      const product = await Product.findOne({ _id: productId, tenantId });
       if (!product) {
         throw new Error('Product not found');
       }
@@ -108,6 +114,7 @@ const getInventoryStatus = async (productId) => {
         currentStock: product.inventory?.currentStock || 0,
         reorderPoint: product.inventory?.reorderPoint || 10,
         reorderQuantity: product.inventory?.reorderQuantity || 50,
+        tenantId: tenantId
       });
 
       await newInventory.save();
@@ -122,9 +129,12 @@ const getInventoryStatus = async (productId) => {
 };
 
 // Get low stock items
-const getLowStockItems = async () => {
+const getLowStockItems = async (tenantId) => {
+  if (!tenantId) {
+    throw new Error('tenantId is required to get low stock items');
+  }
   try {
-    const lowStockItems = await Inventory.getLowStockItems();
+    const lowStockItems = await Inventory.getLowStockItems(tenantId);
     return lowStockItems;
   } catch (error) {
     logger.error('Error getting low stock items:', error);
@@ -133,9 +143,12 @@ const getLowStockItems = async () => {
 };
 
 // Get inventory movement history
-const getInventoryHistory = async ({ productId, limit = 50, offset = 0, type, startDate, endDate }) => {
+const getInventoryHistory = async ({ productId, limit = 50, offset = 0, type, startDate, endDate, tenantId }) => {
+  if (!tenantId) {
+    throw new Error('tenantId is required to get inventory history');
+  }
   try {
-    const inventory = await Inventory.findOne({ product: productId });
+    const inventory = await Inventory.findOne({ product: productId, tenantId });
     
     if (!inventory) {
       return [];
@@ -221,7 +234,10 @@ const getInventorySummary = async (tenantId) => {
 };
 
 // Bulk update stock levels
-const bulkUpdateStock = async (updates) => {
+const bulkUpdateStock = async (updates, tenantId) => {
+  if (!tenantId) {
+    throw new Error('tenantId is required to bulk update stock');
+  }
   try {
     logger.info('Bulk update stock called with:', updates);
     const results = [];
@@ -229,7 +245,7 @@ const bulkUpdateStock = async (updates) => {
     for (const update of updates) {
       try {
         logger.info('Processing update for product:', update.productId, 'type:', update.type, 'quantity:', update.quantity);
-        const result = await updateStock(update);
+        const result = await updateStock({ ...update, tenantId });
         logger.info('Update successful, new stock:', result.currentStock);
         results.push({ success: true, productId: update.productId, inventory: result });
       } catch (error) {
@@ -247,9 +263,12 @@ const bulkUpdateStock = async (updates) => {
 };
 
 // Create inventory record for new product
-const createInventoryRecord = async (productId, initialStock = 0) => {
+const createInventoryRecord = async (productId, initialStock = 0, tenantId) => {
+  if (!tenantId) {
+    throw new Error('tenantId is required to create inventory record');
+  }
   try {
-    const product = await Product.findById(productId);
+    const product = await Product.findOne({ _id: productId, tenantId });
     if (!product) {
       throw new Error('Product not found');
     }
@@ -259,6 +278,7 @@ const createInventoryRecord = async (productId, initialStock = 0) => {
       currentStock: initialStock,
       reorderPoint: product.inventory?.reorderPoint || 10,
       reorderQuantity: product.inventory?.reorderQuantity || 50,
+      tenantId: tenantId,
       cost: {
         average: product.pricing?.cost || 0,
         lastPurchase: product.pricing?.cost || 0,

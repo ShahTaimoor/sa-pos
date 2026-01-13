@@ -772,12 +772,16 @@ class ProductService {
    * @param {string} productId - Product ID
    * @returns {Promise<object|null>}
    */
-  async getLastPurchasePrice(productId) {
+  async getLastPurchasePrice(productId, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get last purchase price');
+    }
     const lastPurchase = await purchaseInvoiceRepository.findLastPurchaseForProduct(
       productId,
       {
         select: 'items invoiceNumber createdAt',
-        lean: true
+        lean: true,
+        tenantId
       }
     );
 
@@ -804,14 +808,18 @@ class ProductService {
   /**
    * Get last purchase prices for multiple products
    * @param {Array<string>} productIds - Array of product IDs
+   * @param {string} tenantId - Tenant ID
    * @returns {Promise<object>}
    */
-  async getLastPurchasePrices(productIds) {
+  async getLastPurchasePrices(productIds, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get last purchase prices');
+    }
     const prices = {};
 
     // Process all products in parallel for better performance
     const pricePromises = productIds.map(async (productId) => {
-      const priceInfo = await this.getLastPurchasePrice(productId);
+      const priceInfo = await this.getLastPurchasePrice(productId, tenantId);
       if (priceInfo) {
         prices[productId] = {
           productId: productId,

@@ -189,9 +189,17 @@ router.post('/', [
       expenseAccount
     } = req.body;
 
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Tenant ID is required'
+      });
+    }
+
     // Validate order exists if provided
     if (order) {
-      const orderExists = await salesRepository.findById(order);
+      const orderExists = await salesRepository.findById(order, { tenantId });
       if (!orderExists) {
         return res.status(400).json({ 
           success: false,
@@ -202,7 +210,7 @@ router.post('/', [
 
     // Validate supplier exists if provided
     if (supplier) {
-      const supplierExists = await supplierRepository.findById(supplier);
+      const supplierExists = await supplierRepository.findById(supplier, { tenantId });
       if (!supplierExists) {
         return res.status(400).json({ 
           success: false,
@@ -213,7 +221,7 @@ router.post('/', [
 
     // Validate customer exists if provided
     if (customer) {
-      const customerExists = await customerRepository.findById(customer);
+      const customerExists = await customerRepository.findById(customer, { tenantId });
       if (!customerExists) {
         return res.status(400).json({ 
           success: false,
@@ -223,7 +231,7 @@ router.post('/', [
     }
 
     // Validate bank exists
-    const bankExists = await bankRepository.findById(bank);
+    const bankExists = await bankRepository.findById(bank, { tenantId });
     if (!bankExists) {
       return res.status(400).json({ 
         success: false,
@@ -237,8 +245,6 @@ router.post('/', [
         message: 'Bank account is inactive' 
       });
     }
-
-    const tenantId = req.tenantId || req.user?.tenantId;
     if (!tenantId) {
       return res.status(400).json({
         success: false,

@@ -64,6 +64,7 @@ router.post('/', [
         referenceNumber: `PR-${Date.now()}`,
         reason,
         supplier: supplierDoc._id,
+        tenantId: tenantId
       }, req.user);
     }
 

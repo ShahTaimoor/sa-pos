@@ -48,7 +48,10 @@ class PaymentService {
   }
 
   // Process payment
-  async processPayment(paymentData, user) {
+  async processPayment(paymentData, user, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to process payment');
+    }
     try {
       const {
         orderId,
@@ -62,7 +65,7 @@ class PaymentService {
       } = paymentData;
 
       // Validate order exists and get details
-      const order = await SalesRepository.findById(orderId);
+      const order = await SalesRepository.findById(orderId, { tenantId });
       if (!order) {
         throw new Error('Order not found');
       }
@@ -73,14 +76,14 @@ class PaymentService {
       }
 
       // Check if order is already paid
-      const totalPaid = await PaymentRepository.calculateTotalPaid(orderId);
+      const totalPaid = await PaymentRepository.calculateTotalPaid(orderId, tenantId);
 
       if (totalPaid >= order.total) {
         throw new Error('Order is already fully paid');
       }
 
       // Create payment record
-      const paymentData = {
+      const paymentRecord = {
         paymentId: this.generatePaymentId(),
         orderId,
         paymentMethod,
@@ -92,6 +95,7 @@ class PaymentService {
         },
         cardDetails: cardDetails ? this.sanitizeCardDetails(cardDetails) : undefined,
         walletDetails,
+        tenantId: tenantId,
         metadata: {
           ...metadata,
           customerId: order.customer,
@@ -104,7 +108,7 @@ class PaymentService {
         }
       };
 
-      const payment = await PaymentRepository.create(paymentData);
+      const payment = await PaymentRepository.create(paymentRecord);
 
       // Process payment through gateway
       const gatewayService = this.gateways.get(gateway);
@@ -122,6 +126,7 @@ class PaymentService {
         currency,
         status: 'pending',
         paymentMethod,
+        tenantId: tenantId,
         gateway: {
           name: gateway
         },
@@ -204,11 +209,14 @@ class PaymentService {
   }
 
   // Process refund
-  async processRefund(paymentId, refundData, user) {
+  async processRefund(paymentId, refundData, user, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to process refund');
+    }
     try {
       const { amount, reason } = refundData;
 
-      const payment = await PaymentRepository.findById(paymentId);
+      const payment = await PaymentRepository.findById(paymentId, { tenantId });
       if (!payment) {
         throw new Error('Payment not found');
       }
@@ -290,9 +298,12 @@ class PaymentService {
   }
 
   // Void transaction
-  async voidTransaction(transactionId, user, reason) {
+  async voidTransaction(transactionId, user, reason, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to void transaction');
+    }
     try {
-      const transaction = await Transaction.findOne({ transactionId });
+      const transaction = await Transaction.findOne({ transactionId, tenantId });
       if (!transaction) {
         throw new Error('Transaction not found');
       }
@@ -322,7 +333,7 @@ class PaymentService {
         await PaymentRepository.update(transaction.paymentId, { status: 'cancelled' });
       }
 
-      const updatedPayment = transaction.paymentId ? await PaymentRepository.findById(transaction.paymentId) : null;
+      const updatedPayment = transaction.paymentId ? await PaymentRepository.findById(transaction.paymentId, { tenantId }) : null;
 
       return {
         success: true,
@@ -337,7 +348,10 @@ class PaymentService {
   }
 
   // Get payment history
-  async getPaymentHistory(filters = {}) {
+  async getPaymentHistory(filters = {}, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get payment history');
+    }
     try {
       const {
         orderId,
@@ -350,7 +364,7 @@ class PaymentService {
         limit = 20
       } = filters;
 
-      const query = {};
+      const query = { tenantId };
       
       if (orderId) query.orderId = orderId;
       if (paymentId) query.paymentId = paymentId;
@@ -387,10 +401,13 @@ class PaymentService {
   }
 
   // Get payment statistics
-  async getPaymentStats(startDate, endDate) {
+  async getPaymentStats(startDate, endDate, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get payment stats');
+    }
     try {
-      const stats = await Payment.getPaymentStats(startDate, endDate);
-      const transactionStats = await Transaction.getTransactionStats(startDate, endDate);
+      const stats = await Payment.getPaymentStats(startDate, endDate, tenantId);
+      const transactionStats = await Transaction.getTransactionStats(startDate, endDate, tenantId);
       
       return {
         paymentStats: stats,

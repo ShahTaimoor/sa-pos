@@ -187,11 +187,18 @@ class ChartOfAccountsRepository extends BaseRepository {
    * @returns {Promise}
    */
   async updateBalance(accountId, updateData, options = {}) {
-    const { session } = options;
+    const { session, tenantId } = options;
+    const filter = { _id: accountId };
+    
+    // Add tenantId filter if provided
+    if (tenantId) {
+      filter.tenantId = tenantId;
+    }
+    
     return await this.Model.updateOne(
-      { _id: accountId },
+      filter,
       updateData,
-      { session, ...options }
+      { session }
     );
   }
 }

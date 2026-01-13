@@ -248,8 +248,11 @@ TransactionSchema.statics.findByStatus = function(status) {
   return this.find({ status }).sort({ createdAt: -1 });
 };
 
-TransactionSchema.statics.getTransactionStats = function(startDate, endDate) {
-  const match = {};
+TransactionSchema.statics.getTransactionStats = function(startDate, endDate, tenantId) {
+  if (!tenantId) {
+    throw new Error('tenantId is required for getTransactionStats');
+  }
+  const match = { tenantId };
   if (startDate && endDate) {
     match.createdAt = { $gte: startDate, $lte: endDate };
   }

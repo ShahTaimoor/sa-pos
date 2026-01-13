@@ -197,7 +197,8 @@ router.put('/:id', [
                 referenceId: updatedPO._id,
                 referenceModel: 'PurchaseOrder',
                 performedBy: req.user._id,
-                notes: `Inventory increased due to purchase order ${updatedPO.poNumber} update - quantity increased by ${quantityChange}`
+                notes: `Inventory increased due to purchase order ${updatedPO.poNumber} update - quantity increased by ${quantityChange}`,
+                tenantId: req.tenantId
               });
             } else {
               // Quantity decreased - reduce inventory
@@ -210,7 +211,8 @@ router.put('/:id', [
                 referenceId: updatedPO._id,
                 referenceModel: 'PurchaseOrder',
                 performedBy: req.user._id,
-                notes: `Inventory reduced due to purchase order ${updatedPO.poNumber} update - quantity decreased by ${Math.abs(quantityChange)}`
+                notes: `Inventory reduced due to purchase order ${updatedPO.poNumber} update - quantity decreased by ${Math.abs(quantityChange)}`,
+                tenantId: req.tenantId
               });
             }
           }
@@ -235,7 +237,8 @@ router.put('/:id', [
               referenceId: updatedPO._id,
               referenceModel: 'PurchaseOrder',
               performedBy: req.user._id,
-              notes: `Inventory reduced due to purchase order ${updatedPO.poNumber} update - item removed`
+              notes: `Inventory reduced due to purchase order ${updatedPO.poNumber} update - item removed`,
+              tenantId: req.tenantId
             });
           }
         }
@@ -283,7 +286,8 @@ router.put('/:id/confirm', [
           referenceId: purchaseOrder._id,
           referenceModel: 'PurchaseOrder',
           performedBy: req.user._id,
-          notes: `Stock increased due to purchase order confirmation - PO: ${purchaseOrder.poNumber}`
+          notes: `Stock increased due to purchase order confirmation - PO: ${purchaseOrder.poNumber}`,
+          tenantId: tenantId
         });
         
         inventoryUpdates.push({
@@ -314,7 +318,7 @@ router.put('/:id/confirm', [
     // Update supplier balance: move from pendingBalance to currentBalance
     if (purchaseOrder.supplier && purchaseOrder.pricing && purchaseOrder.pricing.total > 0) {
       try {
-        const supplier = await supplierRepository.findById(purchaseOrder.supplier);
+        const supplier = await supplierRepository.findById(purchaseOrder.supplier, { tenantId });
         if (supplier) {
           // Move amount from pendingBalance to currentBalance (outstanding amount we owe to supplier)
           await supplierRepository.update(purchaseOrder.supplier, {
@@ -322,7 +326,7 @@ router.put('/:id/confirm', [
               pendingBalance: -purchaseOrder.pricing.total,  // Remove from pending
               currentBalance: purchaseOrder.pricing.total    // Add to current (outstanding)
             }
-          });
+          }, { tenantId });
         }
       } catch (error) {
         logger.error('Error updating supplier balance on PO confirmation:', error);
@@ -406,7 +410,8 @@ router.put('/:id/cancel', [
             referenceId: purchaseOrder._id,
             referenceModel: 'PurchaseOrder',
             performedBy: req.user._id,
-            notes: `Stock reduced due to purchase order cancellation - PO: ${purchaseOrder.poNumber}`
+            notes: `Stock reduced due to purchase order cancellation - PO: ${purchaseOrder.poNumber}`,
+            tenantId: tenantId
           });
           
           inventoryUpdates.push({
@@ -535,7 +540,8 @@ router.delete('/:id', [
               referenceId: purchaseOrder._id,
               referenceModel: 'PurchaseOrder',
               performedBy: req.user._id,
-              notes: `Inventory rolled back due to deletion of purchase order ${purchaseOrder.poNumber}`
+              notes: `Inventory rolled back due to deletion of purchase order ${purchaseOrder.poNumber}`,
+              tenantId: tenantId
             });
           } catch (error) {
             logger.error(`Failed to restore inventory for product ${item.product}:`, error);

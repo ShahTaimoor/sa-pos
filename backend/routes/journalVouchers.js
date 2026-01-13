@@ -271,7 +271,7 @@ router.post('/', [
         await chartOfAccountsRepository.updateBalance(
           account._id,
           { $inc: { currentBalance: delta } },
-          { session }
+          { session, tenantId }
         );
       }
 

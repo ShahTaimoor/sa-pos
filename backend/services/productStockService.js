@@ -14,20 +14,24 @@ class ProductStockService {
   /**
    * Get product with stock populated from Inventory
    * @param {String} productId - Product ID
-   * @param {Object} options - Options
+   * @param {Object} options - Options including tenantId
    * @returns {Promise<Product>} Product with stock
    */
   async getProductWithStock(productId, options = {}) {
-    const { populateInventory = true } = options;
+    const { populateInventory = true, tenantId } = options;
     
-    const product = await Product.findById(productId);
+    if (!tenantId) {
+      throw new Error('tenantId is required to get product with stock');
+    }
+    
+    const product = await Product.findOne({ _id: productId, tenantId });
     if (!product) {
       return null;
     }
     
     if (populateInventory) {
       // Get stock from Inventory (source of truth)
-      const inventory = await Inventory.findOne({ product: productId });
+      const inventory = await Inventory.findOne({ product: productId, tenantId });
       
       if (inventory) {
         // Populate virtual fields via _inventory reference

@@ -151,10 +151,17 @@ class PurchaseInvoiceRepository extends BaseRepository {
    * @returns {Promise<PurchaseInvoice|null>}
    */
   async findLastPurchaseForProduct(productId, options = {}) {
-    const query = this.Model.findOne({
+    const queryFilter = {
       'items.product': productId,
       invoiceType: 'purchase'
-    })
+    };
+    
+    // Add tenantId filter if provided
+    if (options.tenantId) {
+      queryFilter.tenantId = options.tenantId;
+    }
+    
+    const query = this.Model.findOne(queryFilter)
       .sort({ createdAt: -1 });
 
     if (options.select) {
