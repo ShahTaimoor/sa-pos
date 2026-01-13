@@ -140,7 +140,11 @@ router.put('/:categoryId', [
 ], async (req, res) => {
   try {
     const { categoryId } = req.params;
-    const result = await categoryService.updateCategory(categoryId, req.body);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await categoryService.updateCategory(categoryId, req.body, tenantId);
     res.json(result);
   } catch (error) {
     logger.error('Error updating category:', error);
@@ -168,7 +172,11 @@ router.delete('/:categoryId', [
 ], async (req, res) => {
   try {
     const { categoryId } = req.params;
-    const result = await categoryService.deleteCategory(categoryId);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await categoryService.deleteCategory(categoryId, tenantId);
     res.json(result);
   } catch (error) {
     logger.error('Error deleting category:', error);
@@ -192,7 +200,11 @@ router.get('/stats', [
   sanitizeRequest,
 ], async (req, res) => {
   try {
-    const stats = await categoryService.getStats();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const stats = await categoryService.getStats(tenantId);
     res.json(stats);
   } catch (error) {
     logger.error('Error fetching category stats:', error);

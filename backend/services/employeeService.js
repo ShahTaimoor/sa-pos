@@ -82,10 +82,14 @@ class EmployeeService {
   /**
    * Get single employee by ID
    * @param {string} id - Employee ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<Employee>}
    */
-  async getEmployeeById(id) {
-    const employee = await employeeRepository.findById(id);
+  async getEmployeeById(id, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getEmployeeById');
+    }
+    const employee = await employeeRepository.findById(id, { tenantId });
     
     if (!employee) {
       throw new Error('Employee not found');
@@ -120,7 +124,105 @@ class EmployeeService {
    * @returns {Promise<boolean>}
    */
   async checkEmailExists(email, tenantId = null, excludeId = null) {
-    return await employeeRepository.emailExists(email, excludeId);
+    return await employeeRepository.emailExists(email, tenantId, excludeId);
+  }
+
+  /**
+   * Create new employee
+   * @param {object} employeeData - Employee data
+   * @param {string} userId - User ID creating the employee
+   * @param {object} options - Options including tenantId
+   * @returns {Promise<Employee>}
+   */
+  async createEmployee(employeeData, userId, options = {}) {
+    const tenantId = options.tenantId;
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for employee creation');
+    }
+
+    const dataWithUser = {
+      ...employeeData,
+      tenantId: tenantId,
+      createdBy: userId
+    };
+
+    return await employeeRepository.create(dataWithUser);
+  }
+
+  /**
+   * Update employee
+   * @param {string} id - Employee ID
+   * @param {object} updateData - Data to update
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
+   * @returns {Promise<Employee>}
+   */
+  async updateEmployee(id, updateData, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for updateEmployee');
+    }
+
+    const query = { _id: id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+
+    const employee = await employeeRepository.findOne(query);
+    if (!employee) {
+      throw new Error('Employee not found');
+    }
+
+    // Check if employeeId is being changed and if new ID already exists (within tenant)
+    if (updateData.employeeId && updateData.employeeId !== employee.employeeId) {
+      const exists = await this.checkEmployeeIdExists(updateData.employeeId, tenantId, id);
+      if (exists) {
+        throw new Error('Employee ID already exists');
+      }
+    }
+
+    // Check if email is being changed and if new email already exists (within tenant)
+    if (updateData.email && updateData.email !== employee.email) {
+      const emailExists = await this.checkEmailExists(updateData.email, tenantId, id);
+      if (emailExists) {
+        throw new Error('Email already exists');
+      }
+    }
+
+    const updatedEmployee = await employeeRepository.update(id, updateData, {
+      tenantId,
+      new: true,
+      runValidators: true
+    });
+
+    return updatedEmployee;
+  }
+
+  /**
+   * Delete employee (soft delete)
+   * @param {string} id - Employee ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
+   * @returns {Promise<{message: string, employee?: Employee}>}
+   */
+  async deleteEmployee(id, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for deleteEmployee');
+    }
+
+    const query = { _id: id };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
+
+    const employee = await employeeRepository.findOne(query);
+    if (!employee) {
+      throw new Error('Employee not found');
+    }
+
+    await employeeRepository.softDelete(id, { tenantId });
+
+    return {
+      message: 'Employee deleted successfully',
+      employee
+    };
   }
 }
 

@@ -109,10 +109,20 @@ class CategoryRepository extends BaseRepository {
 
   /**
    * Get category statistics
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getStats() {
+  async getStats(tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getStats');
+    }
+    const matchStage = { 
+      tenantId: tenantId,
+      isDeleted: { $ne: true }
+    };
+    
     const stats = await this.Model.aggregate([
+      { $match: matchStage },
       {
         $group: {
           _id: null,
@@ -137,12 +147,20 @@ class CategoryRepository extends BaseRepository {
   /**
    * Check if category name exists
    * @param {string} name - Category name to check
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @param {string} excludeId - Category ID to exclude from check
    * @returns {Promise<boolean>}
    */
-  async nameExists(name, excludeId = null) {
+  async nameExists(name, tenantId = null, excludeId = null) {
     if (!name) return false;
-    const query = { name: { $regex: `^${name}$`, $options: 'i' } };
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for nameExists');
+    }
+    const query = { 
+      name: { $regex: `^${name}$`, $options: 'i' },
+      tenantId: tenantId,
+      isDeleted: { $ne: true }
+    };
     if (excludeId) {
       query._id = { $ne: excludeId };
     }
@@ -153,10 +171,18 @@ class CategoryRepository extends BaseRepository {
   /**
    * Count subcategories
    * @param {string} categoryId - Category ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<number>}
    */
-  async countSubcategories(categoryId) {
-    return await this.Model.countDocuments({ parentCategory: categoryId });
+  async countSubcategories(categoryId, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for countSubcategories');
+    }
+    return await this.Model.countDocuments({ 
+      parentCategory: categoryId,
+      tenantId: tenantId,
+      isDeleted: { $ne: true }
+    });
   }
 }
 

@@ -39,6 +39,14 @@ const mentionSchema = new mongoose.Schema({
 }, { _id: false });
 
 const noteSchema = new mongoose.Schema({
+  // Multi-tenant support
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tenant',
+    required: true,
+    index: true
+  },
+  
   // Entity reference (polymorphic)
   entityType: {
     type: String,
@@ -125,10 +133,10 @@ const noteSchema = new mongoose.Schema({
 });
 
 // Compound index for efficient queries
-noteSchema.index({ entityType: 1, entityId: 1, status: 1 });
-noteSchema.index({ createdBy: 1, isPrivate: 1 });
-noteSchema.index({ tags: 1 });
-noteSchema.index({ createdAt: -1 });
+noteSchema.index({ tenantId: 1, entityType: 1, entityId: 1, status: 1 });
+noteSchema.index({ tenantId: 1, createdBy: 1, isPrivate: 1 });
+noteSchema.index({ tenantId: 1, tags: 1 });
+noteSchema.index({ tenantId: 1, createdAt: -1 });
 
 // Text search index
 noteSchema.index({ content: 'text', htmlContent: 'text' });

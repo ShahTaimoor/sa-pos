@@ -126,18 +126,24 @@ class CategoryService {
    * Update category
    * @param {string} id - Category ID
    * @param {object} updateData - Data to update
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<{category: Category, message: string}>}
    */
-  async updateCategory(id, updateData) {
-    // Check if name already exists (excluding current category)
+  async updateCategory(id, updateData, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for updateCategory');
+    }
+
+    // Check if name already exists (excluding current category, within tenant)
     if (updateData.name) {
-      const nameExists = await categoryRepository.nameExists(updateData.name, id);
+      const nameExists = await categoryRepository.nameExists(updateData.name, tenantId, id);
       if (nameExists) {
         throw new Error('Category name already exists');
       }
     }
 
     const category = await categoryRepository.update(id, updateData, {
+      tenantId,
       new: true,
       runValidators: true
     });
@@ -155,27 +161,32 @@ class CategoryService {
   /**
    * Delete category
    * @param {string} id - Category ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<{message: string}>}
    */
-  async deleteCategory(id) {
-    const category = await categoryRepository.findById(id);
+  async deleteCategory(id, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for deleteCategory');
+    }
+
+    const category = await categoryRepository.findById(id, { tenantId });
     if (!category) {
       throw new Error('Category not found');
     }
 
-    // Check if category has products
-    const productCount = await productRepository.count({ category: id });
+    // Check if category has products (within tenant)
+    const productCount = await productRepository.count({ category: id, tenantId });
     if (productCount > 0) {
       throw new Error(`Cannot delete category. It has ${productCount} associated products.`);
     }
 
-    // Check if category has subcategories
-    const subcategoryCount = await categoryRepository.countSubcategories(id);
+    // Check if category has subcategories (within tenant)
+    const subcategoryCount = await categoryRepository.countSubcategories(id, tenantId);
     if (subcategoryCount > 0) {
       throw new Error(`Cannot delete category. It has ${subcategoryCount} subcategories.`);
     }
 
-    await categoryRepository.softDelete(id);
+    await categoryRepository.softDelete(id, { tenantId });
 
     return {
       message: 'Category deleted successfully'
@@ -184,10 +195,14 @@ class CategoryService {
 
   /**
    * Get category statistics
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getStats() {
-    return await categoryRepository.getStats();
+  async getStats(tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getStats');
+    }
+    return await categoryRepository.getStats(tenantId);
   }
 }
 

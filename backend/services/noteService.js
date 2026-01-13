@@ -7,13 +7,21 @@ class NoteService {
    * Get notes with filters
    * @param {object} queryParams - Query parameters
    * @param {string} userId - Current user ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<{notes: Array, pagination: object}>}
    */
-  async getNotes(queryParams, userId) {
+  async getNotes(queryParams, userId, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getNotes');
+    }
+
     const { entityType, entityId, isPrivate, search, tags, limit = 50, page = 1 } = queryParams;
 
-    // Build query
-    const filter = { status: 'active' };
+    // Build query with tenantId for multi-tenant isolation
+    const filter = { 
+      status: 'active',
+      tenantId: tenantId
+    };
 
     if (entityType && entityId) {
       filter.entityType = entityType;
@@ -59,17 +67,27 @@ class NoteService {
    * Get single note by ID
    * @param {string} id - Note ID
    * @param {string} userId - Current user ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getNoteById(id, userId) {
+  async getNoteById(id, userId, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getNoteById');
+    }
+
     const populate = [
       { path: 'createdBy', select: 'name username email' },
       { path: 'mentions.userId', select: 'name username email' },
       { path: 'history.editedBy', select: 'name username email' }
     ];
 
-    const note = await NoteRepository.findById(id, populate);
+    const note = await NoteRepository.findById(id, { populate, tenantId });
     if (!note) {
+      throw new Error('Note not found');
+    }
+
+    // Verify tenant isolation
+    if (note.tenantId && note.tenantId.toString() !== tenantId.toString()) {
       throw new Error('Note not found');
     }
 
@@ -85,13 +103,19 @@ class NoteService {
    * Create note
    * @param {object} noteData - Note data
    * @param {string} userId - User ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async createNote(noteData, userId) {
+  async createNote(noteData, userId, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for createNote');
+    }
+
     const { entityType, entityId, content, htmlContent, isPrivate, tags, isPinned } = noteData;
 
-    // Create note
+    // Create note with tenantId
     const note = new Note({
+      tenantId: tenantId,
       entityType,
       entityId,
       content,
@@ -102,17 +126,20 @@ class NoteService {
       createdBy: userId
     });
 
-    // Extract mentions
-    const users = await UserRepository.findAll({}, { select: 'name username email' });
+    // Extract mentions (filter users by tenant)
+    const users = await UserRepository.findAll({ tenantId: tenantId }, { select: 'name username email' });
     note.extractMentions(users);
 
     await note.save();
 
     // Populate before returning
-    return await NoteRepository.findById(note._id, [
-      { path: 'createdBy', select: 'name username email' },
-      { path: 'mentions.userId', select: 'name username email' }
-    ]);
+    return await NoteRepository.findById(note._id, {
+      populate: [
+        { path: 'createdBy', select: 'name username email' },
+        { path: 'mentions.userId', select: 'name username email' }
+      ],
+      tenantId: tenantId
+    });
   }
 
   /**
@@ -120,11 +147,21 @@ class NoteService {
    * @param {string} id - Note ID
    * @param {object} updateData - Update data
    * @param {string} userId - User ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async updateNote(id, updateData, userId) {
-    const note = await NoteRepository.findById(id);
+  async updateNote(id, updateData, userId, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for updateNote');
+    }
+
+    const note = await NoteRepository.findById(id, { tenantId });
     if (!note) {
+      throw new Error('Note not found');
+    }
+
+    // Verify tenant isolation
+    if (note.tenantId && note.tenantId.toString() !== tenantId.toString()) {
       throw new Error('Note not found');
     }
 
@@ -143,29 +180,42 @@ class NoteService {
     if (updateData.tags !== undefined) note.tags = updateData.tags;
     if (updateData.isPinned !== undefined) note.isPinned = updateData.isPinned;
 
-    // Re-extract mentions
-    const users = await UserRepository.findAll({}, { select: 'name username email' });
+    // Re-extract mentions (filter users by tenant)
+    const users = await UserRepository.findAll({ tenantId: tenantId }, { select: 'name username email' });
     note.extractMentions(users);
 
     await note.save();
 
     // Populate before returning
-    return await NoteRepository.findById(id, [
-      { path: 'createdBy', select: 'name username email' },
-      { path: 'mentions.userId', select: 'name username email' },
-      { path: 'history.editedBy', select: 'name username email' }
-    ]);
+    return await NoteRepository.findById(id, {
+      populate: [
+        { path: 'createdBy', select: 'name username email' },
+        { path: 'mentions.userId', select: 'name username email' },
+        { path: 'history.editedBy', select: 'name username email' }
+      ],
+      tenantId: tenantId
+    });
   }
 
   /**
    * Delete note (soft delete)
    * @param {string} id - Note ID
    * @param {string} userId - User ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async deleteNote(id, userId) {
-    const note = await NoteRepository.findById(id);
+  async deleteNote(id, userId, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for deleteNote');
+    }
+
+    const note = await NoteRepository.findById(id, { tenantId });
     if (!note) {
+      throw new Error('Note not found');
+    }
+
+    // Verify tenant isolation
+    if (note.tenantId && note.tenantId.toString() !== tenantId.toString()) {
       throw new Error('Note not found');
     }
 
@@ -185,13 +235,26 @@ class NoteService {
    * Get note history
    * @param {string} id - Note ID
    * @param {string} userId - Current user ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<Array>}
    */
-  async getNoteHistory(id, userId) {
-    const note = await NoteRepository.findById(id, [
-      { path: 'history.editedBy', select: 'name username email' }
-    ]);
+  async getNoteHistory(id, userId, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getNoteHistory');
+    }
+
+    const note = await NoteRepository.findById(id, {
+      populate: [
+        { path: 'history.editedBy', select: 'name username email' }
+      ],
+      tenantId: tenantId
+    });
     if (!note) {
+      throw new Error('Note not found');
+    }
+
+    // Verify tenant isolation
+    if (note.tenantId && note.tenantId.toString() !== tenantId.toString()) {
       throw new Error('Note not found');
     }
 
@@ -206,9 +269,14 @@ class NoteService {
   /**
    * Search users for mentions
    * @param {string} searchTerm - Search term
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<Array>}
    */
-  async searchUsers(searchTerm) {
+  async searchUsers(searchTerm, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for searchUsers');
+    }
+
     if (!searchTerm || searchTerm.length < 2) {
       return [];
     }
@@ -219,6 +287,7 @@ class NoteService {
         { username: { $regex: searchTerm, $options: 'i' } },
         { email: { $regex: searchTerm, $options: 'i' } }
       ],
+      tenantId: tenantId, // Filter users by tenant
       role: { $ne: 'deleted' }
     };
 

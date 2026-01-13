@@ -523,11 +523,12 @@ router.post('/', [
         let productName = 'Unknown Product';
         let availableStock = 0;
         try {
-          const productForError = await Product.findById(item.product);
+          const tenantId = req.tenantId || req.user?.tenantId;
+          const productForError = await productRepository.findById(item.product, { tenantId });
           if (productForError) {
             productName = productForError.name;
             // Get actual stock from Inventory model (source of truth)
-            const inventoryRecord = await Inventory.findOne({ product: item.product });
+            const inventoryRecord = await Inventory.findOne({ product: item.product, tenantId });
             availableStock = Number(inventoryRecord ? inventoryRecord.currentStock : (productForError.inventory?.currentStock || 0));
           }
         } catch (productError) {
@@ -640,7 +641,8 @@ router.post('/', [
       if (customer && orderData.pricing.total > 0) {
         const customerTransactionService = require('../services/customerTransactionService');
         const Customer = require('../models/Customer');
-        const customerExists = await Customer.findById(customer).session(session);
+        const tenantId = req.tenantId || req.user?.tenantId;
+        const customerExists = await Customer.findOne({ _id: customer, tenantId }).session(session);
         
         if (customerExists) {
           const amountPaid = payment.amount || 0;
@@ -650,7 +652,7 @@ router.post('/', [
           if (isAccountPayment) {
             // Fetch product names for line items
             const productIds = orderItems.map(item => item.product);
-            const products = await Product.find({ _id: { $in: productIds } }).select('name').lean();
+            const products = await Product.find({ _id: { $in: productIds }, tenantId }).select('name').lean();
             const productMap = new Map(products.map(p => [p._id.toString(), p.name]));
             
             // Prepare line items for invoice
@@ -718,7 +720,8 @@ router.post('/', [
       const orderId = order._id;
       
       // Reload order after transaction (since it was saved in session)
-      const savedOrder = await Sales.findById(orderId);
+      const tenantId = req.tenantId || req.user?.tenantId;
+      const savedOrder = await Sales.findOne({ _id: orderId, tenantId });
       
       // Populate order for response
       await savedOrder.populate([
@@ -789,7 +792,8 @@ router.put('/:id/status', [
     if (req.body.status === 'confirmed' && oldStatus !== 'confirmed' && order.customer) {
       // Move unpaid amount from pendingBalance to currentBalance when confirming
       try {
-        const customerExists = await Customer.findById(order.customer);
+        const tenantId = req.tenantId || req.user?.tenantId;
+        const customerExists = await Customer.findOne({ _id: order.customer, tenantId });
         if (customerExists) {
           const unpaidAmount = order.pricing.total - order.payment.amountPaid;
           
@@ -825,7 +829,8 @@ router.put('/:id/status', [
       // Reverse customer balance for cancelled orders
       if (order.customer) {
         try {
-          const customerExists = await Customer.findById(order.customer);
+          const tenantId = req.tenantId || req.user?.tenantId;
+          const customerExists = await Customer.findOne({ _id: order.customer, tenantId });
           if (customerExists) {
             const unpaidAmount = order.pricing.total - order.payment.amountPaid;
             
@@ -917,7 +922,8 @@ router.put('/:id', [
     // Get customer data if customer is being updated
     let customerData = null;
     if (req.body.customer) {
-      customerData = await Customer.findById(req.body.customer);
+      const tenantId = req.tenantId || req.user?.tenantId;
+      customerData = await customerRepository.findById(req.body.customer, { tenantId });
       if (!customerData) {
         return res.status(400).json({ message: 'Customer not found' });
       }
@@ -950,8 +956,9 @@ router.put('/:id', [
     // Update items if provided and recalculate pricing
     if (req.body.items && req.body.items.length > 0) {
       // Validate products and stock availability
+      const tenantId = req.tenantId || req.user?.tenantId;
       for (const item of req.body.items) {
-        const product = await productRepository.findById(item.product);
+        const product = await productRepository.findById(item.product, { tenantId });
         if (!product) {
           return res.status(400).json({ message: `Product ${item.product} not found` });
         }
@@ -983,7 +990,7 @@ router.put('/:id', [
       const newOrderItems = [];
       
       for (const item of req.body.items) {
-        const product = await productRepository.findById(item.product);
+        const product = await productRepository.findById(item.product, { tenantId });
         const itemSubtotal = item.quantity * item.unitPrice;
         const itemDiscount = itemSubtotal * ((item.discountPercent || 0) / 100);
         const itemTaxable = itemSubtotal - itemDiscount;
@@ -1148,7 +1155,8 @@ router.put('/:id', [
     // Adjust customer balance if total changed or customer changed
     if (order.customer && (order.pricing.total !== oldTotal || oldCustomer !== order.customer)) {
       try {
-        const customer = await Customer.findById(order.customer);
+        const tenantId = req.tenantId || req.user?.tenantId;
+        const customer = await Customer.findOne({ _id: order.customer, tenantId });
         if (customer) {
           // Check if order was confirmed - balance may be in currentBalance instead of pendingBalance
           const wasConfirmed = order.status === 'confirmed' || order.status === 'processing' || order.status === 'shipped' || order.status === 'delivered';
@@ -1296,7 +1304,8 @@ router.post('/:id/payment', [
         await CustomerBalanceService.recordPayment(order.customer, amount, order._id);
         
         const Customer = require('../models/Customer');
-        const updatedCustomer = await Customer.findById(order.customer);
+        const tenantId = req.tenantId || req.user?.tenantId;
+        const updatedCustomer = await Customer.findOne({ _id: order.customer, tenantId });
       } catch (error) {
         logger.error('Error updating customer balance on payment:', error);
         // Don't fail the payment if customer update fails
@@ -1365,7 +1374,8 @@ router.delete('/:id', [
       try {
         const CustomerBalanceService = require('../services/customerBalanceService');
         const Customer = require('../models/Customer');
-        const customerExists = await Customer.findById(order.customer);
+        const tenantId = req.tenantId || req.user?.tenantId;
+        const customerExists = await Customer.findOne({ _id: order.customer, tenantId });
         
         if (customerExists) {
           const amountPaid = order.payment?.amountPaid || 0;

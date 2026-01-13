@@ -4,6 +4,7 @@ const { auth, requirePermission } = require('../middleware/auth');
 const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { handleValidationErrors, sanitizeRequest } = require('../middleware/validation');
 const employeeService = require('../services/employeeService');
+const employeeRepository = require('../repositories/EmployeeRepository');
 const Employee = require('../models/Employee');
 const logger = require('../utils/logger');
 
@@ -141,7 +142,7 @@ router.post('/', [
       }
     }
     
-    const employee = await employeeRepository.create(employeeData);
+    const employee = await employeeService.createEmployee(employeeData, req.user._id, { tenantId });
 
     res.status(201).json({
       success: true,
@@ -184,7 +185,7 @@ router.put('/:id', [
       ...req.body,
       tenantId: tenantId
     };
-    const updatedEmployee = await employeeService.updateEmployee(req.params.id, updateData);
+    const updatedEmployee = await employeeService.updateEmployee(req.params.id, req.body, tenantId);
 
     res.json({
       success: true,
@@ -212,12 +213,17 @@ router.put('/:id', [
 // @access  Private
 router.delete('/:id', [
   auth,
+  tenantMiddleware, // CRITICAL: Enforce tenant isolation
   requirePermission('manage_users'),
   param('id').isMongoId().withMessage('Invalid employee ID'),
   handleValidationErrors, // Use as middleware
 ], async (req, res) => {
   try {
-    const result = await employeeService.deleteEmployee(req.params.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await employeeService.deleteEmployee(req.params.id, tenantId);
 
     res.json({
       success: true,
@@ -238,7 +244,14 @@ router.delete('/:id', [
 // @access  Private
 router.get('/departments/list', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const departments = await Employee.distinct('department', { department: { $ne: null, $ne: '' } });
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const departments = await Employee.distinct('department', { 
+      tenantId: tenantId,
+      department: { $ne: null, $ne: '' } 
+    });
     res.json({
       success: true,
       data: { departments: departments.sort() }
@@ -254,7 +267,14 @@ router.get('/departments/list', [auth, tenantMiddleware], async (req, res) => {
 // @access  Private
 router.get('/positions/list', [auth, tenantMiddleware], async (req, res) => {
   try {
-    const positions = await Employee.distinct('position', { position: { $ne: null, $ne: '' } });
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const positions = await Employee.distinct('position', { 
+      tenantId: tenantId,
+      position: { $ne: null, $ne: '' } 
+    });
     res.json({
       success: true,
       data: { positions: positions.sort() }
