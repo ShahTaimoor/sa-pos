@@ -6,14 +6,18 @@ class CostingService {
    * Calculate cost using FIFO method
    * @param {string} productId - Product ID
    * @param {number} quantity - Quantity to calculate cost for
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<{unitCost: number, totalCost: number, batches: Array}>}
    */
-  async calculateFIFOCost(productId, quantity) {
-    const inventory = await Inventory.findOne({ product: productId });
+  async calculateFIFOCost(productId, quantity, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate FIFO cost');
+    }
+    const inventory = await Inventory.findOne({ product: productId, tenantId });
     
     if (!inventory || !inventory.cost?.fifo || inventory.cost.fifo.length === 0) {
       // Fallback to average or standard cost
-      const product = await Product.findById(productId);
+      const product = await Product.findOne({ _id: productId, tenantId });
       const fallbackCost = inventory?.cost?.average || product?.pricing?.cost || 0;
       return {
         unitCost: fallbackCost,
@@ -74,14 +78,18 @@ class CostingService {
    * Calculate cost using LIFO method
    * @param {string} productId - Product ID
    * @param {number} quantity - Quantity to calculate cost for
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<{unitCost: number, totalCost: number, batches: Array}>}
    */
-  async calculateLIFOCost(productId, quantity) {
-    const inventory = await Inventory.findOne({ product: productId });
+  async calculateLIFOCost(productId, quantity, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate LIFO cost');
+    }
+    const inventory = await Inventory.findOne({ product: productId, tenantId });
     
     if (!inventory || !inventory.cost?.fifo || inventory.cost.fifo.length === 0) {
       // Fallback to average or standard cost
-      const product = await Product.findById(productId);
+      const product = await Product.findOne({ _id: productId, tenantId });
       const fallbackCost = inventory?.cost?.average || product?.pricing?.cost || 0;
       return {
         unitCost: fallbackCost,
@@ -142,11 +150,15 @@ class CostingService {
    * Calculate cost using Average Cost method
    * @param {string} productId - Product ID
    * @param {number} quantity - Quantity to calculate cost for
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<{unitCost: number, totalCost: number}>}
    */
-  async calculateAverageCost(productId, quantity) {
-    const inventory = await Inventory.findOne({ product: productId });
-    const product = await Product.findById(productId);
+  async calculateAverageCost(productId, quantity, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate average cost');
+    }
+    const inventory = await Inventory.findOne({ product: productId, tenantId });
+    const product = await Product.findOne({ _id: productId, tenantId });
     
     const avgCost = inventory?.cost?.average || product?.pricing?.cost || 0;
     
@@ -161,10 +173,14 @@ class CostingService {
    * Calculate cost based on product's costing method
    * @param {string} productId - Product ID
    * @param {number} quantity - Quantity to calculate cost for
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<{unitCost: number, totalCost: number, batches: Array}>}
    */
-  async calculateCost(productId, quantity) {
-    const product = await Product.findById(productId);
+  async calculateCost(productId, quantity, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to calculate cost');
+    }
+    const product = await Product.findOne({ _id: productId, tenantId });
     
     if (!product) {
       throw new Error('Product not found');
@@ -174,11 +190,11 @@ class CostingService {
 
     switch (costingMethod) {
       case 'fifo':
-        return await this.calculateFIFOCost(productId, quantity);
+        return await this.calculateFIFOCost(productId, quantity, tenantId);
       case 'lifo':
-        return await this.calculateLIFOCost(productId, quantity);
+        return await this.calculateLIFOCost(productId, quantity, tenantId);
       case 'average':
-        return await this.calculateAverageCost(productId, quantity);
+        return await this.calculateAverageCost(productId, quantity, tenantId);
       case 'standard':
       default:
         // Use product.pricing.cost directly
@@ -195,10 +211,14 @@ class CostingService {
    * @param {string} productId - Product ID
    * @param {number} newQuantity - New quantity received
    * @param {number} newCost - Cost per unit of new stock
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<number>} Updated average cost
    */
-  async updateAverageCost(productId, newQuantity, newCost) {
-    const inventory = await Inventory.findOne({ product: productId });
+  async updateAverageCost(productId, newQuantity, newCost, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to update average cost');
+    }
+    const inventory = await Inventory.findOne({ product: productId, tenantId });
     
     if (!inventory) {
       throw new Error('Inventory record not found');
@@ -231,12 +251,16 @@ class CostingService {
    * @param {string} productId - Product ID
    * @param {number} quantity - Quantity received
    * @param {number} cost - Cost per unit
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @param {Date} date - Purchase date
    * @param {string} purchaseOrderId - Purchase order ID (optional)
    * @returns {Promise<void>}
    */
-  async addFIFOBatch(productId, quantity, cost, date = new Date(), purchaseOrderId = null) {
-    const inventory = await Inventory.findOne({ product: productId });
+  async addFIFOBatch(productId, quantity, cost, tenantId, date = new Date(), purchaseOrderId = null) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to add FIFO batch');
+    }
+    const inventory = await Inventory.findOne({ product: productId, tenantId });
     
     if (!inventory) {
       throw new Error('Inventory record not found');
@@ -259,7 +283,7 @@ class CostingService {
     });
 
     // Update average cost
-    await this.updateAverageCost(productId, quantity, cost);
+    await this.updateAverageCost(productId, quantity, cost, tenantId);
     
     await inventory.save();
   }
@@ -268,10 +292,14 @@ class CostingService {
    * Consume FIFO batches when stock is sold
    * @param {string} productId - Product ID
    * @param {number} quantity - Quantity to consume
+   * @param {string} tenantId - Tenant ID (required for tenant isolation)
    * @returns {Promise<{totalCost: number, batches: Array}>}
    */
-  async consumeFIFOBatches(productId, quantity) {
-    const inventory = await Inventory.findOne({ product: productId });
+  async consumeFIFOBatches(productId, quantity, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to consume FIFO batches');
+    }
+    const inventory = await Inventory.findOne({ product: productId, tenantId });
     
     if (!inventory || !inventory.cost?.fifo) {
       throw new Error('FIFO batches not found');

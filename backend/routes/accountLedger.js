@@ -1163,13 +1163,12 @@ router.get('/summary', [
 
     const tenantId = req.tenantId;
     const result = await accountLedgerService.getLedgerSummary({
-      tenantId,
       startDate,
       endDate,
       search,
       customerId,
       supplierId
-    });
+    }, tenantId);
 
     res.json(result);
   } catch (error) {
@@ -1207,11 +1206,10 @@ router.get('/customer-transactions', [
 
     const tenantId = req.tenantId;
     const result = await accountLedgerService.getCustomerDetailedTransactions({
-      tenantId,
       customerId,
       startDate,
       endDate
-    });
+    }, tenantId);
 
     res.json(result);
   } catch (error) {
@@ -1249,11 +1247,10 @@ router.get('/supplier-transactions/:supplierId', [
 
     const tenantId = req.tenantId;
     const result = await accountLedgerService.getSupplierDetailedTransactions({
-      tenantId,
       supplierId,
       startDate,
       endDate
-    });
+    }, tenantId);
 
     res.json(result);
   } catch (error) {

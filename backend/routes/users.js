@@ -140,7 +140,11 @@ router.patch('/:id/reset-password', auth, tenantMiddleware, requirePermission('m
 // @access  Private (Admin only)
 router.get('/:id/activity', auth, tenantMiddleware, requirePermission('manage_users'), async (req, res) => {
   try {
-    const activity = await userService.getUserActivity(req.params.id);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    const activity = await userService.getUserActivity(req.params.id, tenantId);
     
     res.json({
       success: true,
@@ -161,7 +165,11 @@ router.get('/:id/activity', auth, tenantMiddleware, requirePermission('manage_us
 router.patch('/update-role-permissions', auth, tenantMiddleware, requirePermission('manage_users'), async (req, res) => {
   try {
     const { role, permissions } = req.body;
-    const result = await userService.updateRolePermissions(role, permissions);
+    const tenantId = req.tenantId;
+    if (!tenantId) {
+      return res.status(403).json({ message: 'Tenant ID is required' });
+    }
+    const result = await userService.updateRolePermissions(role, permissions, tenantId);
     
     res.json({
       success: true,

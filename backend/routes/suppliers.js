@@ -98,7 +98,7 @@ const saveSupplierWithLedger = async (supplierData, userId, tenantId) => {
     await session.commitTransaction();
     session.endSession();
 
-    supplier = await supplierService.getSupplierByIdWithLedger(supplier._id, { tenantId: tenantId });
+    supplier = await supplierService.getSupplierByIdWithLedger(supplier._id, tenantId, { tenantId: tenantId });
     return supplier;
   } catch (error) {
     await session.abortTransaction();
@@ -149,7 +149,7 @@ const updateSupplierWithLedger = async (supplierId, updateData, userId, tenantId
     await session.commitTransaction();
     session.endSession();
 
-    return supplierService.getSupplierByIdWithLedger(supplier._id, { tenantId: tenantId });
+    return supplierService.getSupplierByIdWithLedger(supplier._id, tenantId, { tenantId: tenantId });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -573,7 +573,7 @@ router.get('/check-contact-name/:contactName', [auth, tenantMiddleware], async (
       query._id = { $ne: excludeId };
     }
     
-    const exists = await supplierService.supplierExists(query);
+    const exists = await supplierService.supplierExists(query, tenantId);
     
     res.json({ 
       exists,

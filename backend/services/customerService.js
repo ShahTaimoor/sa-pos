@@ -3,6 +3,7 @@ const ledgerAccountService = require('./ledgerAccountService');
 const mongoose = require('mongoose');
 const { retryMongoTransaction, isDuplicateKeyError } = require('../utils/retry');
 const Customer = require('../models/Customer');
+const logger = require('../utils/logger');
 
 // Helper function to parse opening balance
 const parseOpeningBalance = (value) => {
@@ -349,7 +350,7 @@ class CustomerService {
       maxDelay: 3000
     });
 
-    const customer = await this.getCustomerByIdWithLedger(customerId);
+    const customer = await this.getCustomerByIdWithLedger(customerId, finalTenantId);
 
     if (!customer) {
       throw new Error('Customer created but could not be retrieved');
@@ -423,9 +424,12 @@ class CustomerService {
     const parsedOpeningBalance = parseOpeningBalance(openingBalance);
 
     // Wrap the transaction operation with retry logic for WriteConflict errors
-    const updatedCustomerId = await retryMongoTransaction(async () => {
+    const updatedCustomer = await retryMongoTransaction(async () => {
       return await runWithOptionalTransaction(async (session) => {
-        const customer = await customerRepository.findById(id, { session });
+        const customer = await customerRepository.findById(id, { 
+          tenantId: finalTenantId,
+          session 
+        });
 
         if (!customer) {
           return null;
@@ -458,7 +462,7 @@ class CustomerService {
     }
 
     // Get updated customer for audit log and return
-    const finalCustomer = await this.getCustomerByIdWithLedger(updatedCustomer._id);
+    const finalCustomer = await this.getCustomerByIdWithLedger(updatedCustomer._id, finalTenantId);
     const oldCustomer = currentCustomer.toObject();
 
     if (!finalCustomer) {
@@ -505,9 +509,9 @@ class CustomerService {
 
       // Check for pending orders
       const Sales = require('../models/Sales');
-const logger = require('../utils/logger');
       const pendingOrders = await Sales.countDocuments({
         customer: id,
+        tenantId: tenantId,
         status: { $in: ['pending', 'confirmed', 'processing'] }
       });
       
@@ -555,11 +559,15 @@ const logger = require('../utils/logger');
    * Restore soft-deleted customer
    * @param {string} id - Customer ID
    * @param {string} userId - User ID restoring the customer
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<{customer: Customer, message: string}>}
    */
-  async restoreCustomer(id, userId) {
+  async restoreCustomer(id, userId, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to restore customer');
+    }
     const customer = await customerRepository.Model.findOneAndUpdate(
-      { _id: id, isDeleted: true },
+      { _id: id, isDeleted: true, tenantId: tenantId },
       {
         $set: {
           isDeleted: false,
@@ -593,10 +601,14 @@ const logger = require('../utils/logger');
   /**
    * Get deleted customers
    * @param {object} queryParams - Query parameters
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getDeletedCustomers(queryParams = {}) {
-    const filter = { isDeleted: true };
+  async getDeletedCustomers(queryParams = {}, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get deleted customers');
+    }
+    const filter = { isDeleted: true, tenantId: tenantId };
     
     if (queryParams.search) {
       filter.$or = [
@@ -807,10 +819,15 @@ const logger = require('../utils/logger');
   /**
    * Get customer by ID with populated ledger account
    * @param {string} customerId - Customer ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<Customer>}
    */
-  async getCustomerByIdWithLedger(customerId) {
+  async getCustomerByIdWithLedger(customerId, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get customer with ledger');
+    }
     const customer = await customerRepository.findById(customerId, {
+      tenantId: tenantId,
       populate: [{ path: 'ledgerAccount', select: 'accountCode accountName' }]
     });
 

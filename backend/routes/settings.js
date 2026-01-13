@@ -10,7 +10,11 @@ const logger = require('../utils/logger');
 // @access  Private
 router.get('/company', auth, tenantMiddleware, async (req, res) => {
   try {
-    const settings = await settingsService.getCompanySettings();
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const settings = await settingsService.getCompanySettings(tenantId);
     res.json({
       success: true,
       data: settings
@@ -46,7 +50,11 @@ router.put('/company', auth, tenantMiddleware, async (req, res) => {
       defaultTaxRate
     } = req.body;
 
-    const settings = await settingsService.updateCompanySettings(req.body);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const settings = await settingsService.updateCompanySettings(req.body, tenantId);
 
     res.json({
       success: true,
@@ -74,7 +82,11 @@ router.put('/company', auth, tenantMiddleware, async (req, res) => {
 // @access  Private
 router.get('/preferences', auth, tenantMiddleware, async (req, res) => {
   try {
-    const preferences = await settingsService.getUserPreferences(req.user.id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const preferences = await settingsService.getUserPreferences(req.user.id, tenantId);
     
     res.json({
       success: true,
@@ -101,7 +113,11 @@ router.get('/preferences', auth, tenantMiddleware, async (req, res) => {
 // @access  Private
 router.put('/preferences', auth, tenantMiddleware, async (req, res) => {
   try {
-    const preferences = await settingsService.updateUserPreferences(req.user.id, req.body);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const preferences = await settingsService.updateUserPreferences(req.user.id, req.body, tenantId);
 
     res.json({
       success: true,

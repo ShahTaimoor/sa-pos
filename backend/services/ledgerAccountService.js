@@ -60,7 +60,7 @@ const createLedgerAccount = async ({
       // Duplicate key error - account already exists, fetch and return it
       logger.info('Duplicate accountCode, fetching existing account:', accountCode);
       const existingAccount = await ChartOfAccountsRepository.findOne(
-        { accountCode },
+        { accountCode, tenantId: tenantId },
         { session }
       );
       if (existingAccount) {
@@ -69,12 +69,12 @@ const createLedgerAccount = async ({
       // If not found, try upsert approach (using model directly for upsert)
       const updateOptions = session ? { session } : {};
       await ChartOfAccounts.updateOne(
-        { accountCode },
+        { accountCode, tenantId: tenantId },
         { $setOnInsert: accountData },
         { upsert: true, ...updateOptions }
       );
       return await ChartOfAccountsRepository.findOne(
-        { accountCode },
+        { accountCode, tenantId: tenantId },
         { session }
       );
     }

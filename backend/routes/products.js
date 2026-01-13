@@ -1257,8 +1257,13 @@ router.post('/:id/calculate-cost', [
     
     const { id } = req.params;
     const { quantity } = req.body;
+    const tenantId = req.tenantId || req.user?.tenantId;
     
-    const costInfo = await costingService.calculateCost(id, quantity);
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    
+    const costInfo = await costingService.calculateCost(id, quantity, tenantId);
     
     res.json({
       success: true,

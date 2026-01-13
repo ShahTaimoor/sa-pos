@@ -323,7 +323,10 @@ router.delete(
         });
       }
 
-      const result = await warehouseService.deleteWarehouse(req.params.id);
+      if (!tenantId) {
+        return res.status(400).json({ message: 'Tenant ID is required' });
+      }
+      const result = await warehouseService.deleteWarehouse(req.params.id, tenantId);
 
       res.json({
         success: true,

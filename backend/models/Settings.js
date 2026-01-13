@@ -70,26 +70,33 @@ const settingsSchema = new mongoose.Schema({
     max: 100
   },
   
-  // Singleton pattern - only one settings document should exist
-  _id: {
-    type: String,
-    default: 'company_settings'
+  // Tenant ID for multi-tenant isolation
+  tenantId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Tenant',
+    required: true,
+    index: true
   }
 }, {
-  timestamps: true,
-  _id: false // Disable auto _id generation since we're providing our own
+  timestamps: true
 });
 
-// Ensure only one settings document exists
-settingsSchema.statics.getSettings = async function() {
-  let settings = await this.findById('company_settings');
+// Unique index on tenantId to ensure one settings document per tenant
+settingsSchema.index({ tenantId: 1 }, { unique: true });
+
+// Get settings for a tenant (tenant-specific)
+settingsSchema.statics.getSettings = async function(tenantId) {
+  if (!tenantId) {
+    throw new Error('tenantId is required to get settings');
+  }
+  let settings = await this.findOne({ tenantId: tenantId });
   if (!settings) {
     try {
-      settings = await this.create({ _id: 'company_settings' });
+      settings = await this.create({ tenantId: tenantId });
     } catch (err) {
       if (err.code === 11000) {
         // Duplicate key - settings already exists, fetch it
-        settings = await this.findById('company_settings');
+        settings = await this.findOne({ tenantId: tenantId });
       } else {
         throw err;
       }
@@ -98,8 +105,11 @@ settingsSchema.statics.getSettings = async function() {
   return settings;
 };
 
-settingsSchema.statics.updateSettings = async function(updates) {
-  const settings = await this.getSettings();
+settingsSchema.statics.updateSettings = async function(updates, tenantId) {
+  if (!tenantId) {
+    throw new Error('tenantId is required to update settings');
+  }
+  const settings = await this.getSettings(tenantId);
   Object.assign(settings, updates);
   await settings.save();
   return settings;

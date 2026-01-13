@@ -155,12 +155,17 @@ class UserService {
   /**
    * Get user activity data
    * @param {string} id - User ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getUserActivity(id) {
-    const user = await userRepository.findById(id, [
-      { path: 'permissionHistory.changedBy', select: 'firstName lastName email' }
-    ]);
+  async getUserActivity(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get user activity');
+    }
+    const user = await userRepository.findById(id, {
+      tenantId: tenantId,
+      populate: [{ path: 'permissionHistory.changedBy', select: 'firstName lastName email' }]
+    });
     
     if (!user) {
       throw new Error('User not found');
@@ -184,16 +189,20 @@ class UserService {
    * Update permissions for all users with a specific role
    * @param {string} role - Role to update
    * @param {Array} permissions - New permissions
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async updateRolePermissions(role, permissions) {
+  async updateRolePermissions(role, permissions, tenantId) {
     if (!role || !permissions) {
       throw new Error('Role and permissions are required');
+    }
+    if (!tenantId) {
+      throw new Error('tenantId is required to update role permissions');
     }
 
     // Use BaseRepository's updateMany method
     const result = await userRepository.updateMany(
-      { role: role },
+      { role: role, tenantId: tenantId },
       { $set: { permissions: permissions } }
     );
 

@@ -16,12 +16,16 @@ router.post('/open', [
   body('notesOpen').optional().isString(),
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const session = await tillService.openTill({
       openingAmount: req.body.openingAmount,
       storeId: req.body.storeId,
       deviceId: req.body.deviceId,
       notesOpen: req.body.notesOpen
-    }, req.user._id);
+    }, req.user._id, tenantId);
     
     res.json({ success: true, data: session });
   } catch (err) {
@@ -47,11 +51,15 @@ router.post('/close', [
   body('notesClose').optional().isString(),
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const session = await tillService.closeTill({
       closingDeclaredAmount: req.body.closingDeclaredAmount,
       expectedAmount: req.body.expectedAmount,
       notesClose: req.body.notesClose
-    }, req.user._id);
+    }, req.user._id, tenantId);
     
     res.json({ success: true, data: session });
   } catch (err) {
@@ -69,8 +77,12 @@ router.get('/variance', [
   query('limit').optional().isInt({ min: 1, max: 100 })
 ], async (req, res) => {
   try {
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
     const limit = parseInt(req.query.limit || '20');
-    const sessions = await tillService.getSessionsByUser(req.user._id, { limit });
+    const sessions = await tillService.getSessionsByUser(req.user._id, tenantId, { limit });
     res.json({ success: true, data: sessions });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });

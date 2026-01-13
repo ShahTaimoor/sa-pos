@@ -113,21 +113,25 @@ class BankService {
     if (updateData.notes !== undefined) processedData.notes = updateData.notes ? updateData.notes.trim() : null;
     processedData.updatedBy = userId;
 
-    return await BankRepository.update(id, processedData);
+    return await BankRepository.update(id, processedData, { tenantId });
   }
 
   /**
    * Check if bank is used in transactions
    * @param {string} bankId - Bank ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async checkBankUsage(bankId) {
+  async checkBankUsage(bankId, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to check bank usage');
+    }
     const BankPayment = require('../models/BankPayment');
     const BankReceipt = require('../models/BankReceipt');
     
     const [paymentCount, receiptCount] = await Promise.all([
-      BankPayment.countDocuments({ bank: bankId }),
-      BankReceipt.countDocuments({ bank: bankId })
+      BankPayment.countDocuments({ bank: bankId, tenantId: tenantId }),
+      BankReceipt.countDocuments({ bank: bankId, tenantId: tenantId })
     ]);
 
     return {
@@ -156,12 +160,15 @@ class BankService {
     }
 
     // Check if bank is being used in any transactions
-    const usage = await this.checkBankUsage(id);
+    if (!tenantId) {
+      throw new Error('tenantId is required to delete bank');
+    }
+    const usage = await this.checkBankUsage(id, tenantId);
     if (usage.isUsed) {
       throw new Error(`Cannot delete bank account. It is being used in ${usage.totalCount} transaction(s). Consider deactivating it instead.`);
     }
 
-    await BankRepository.softDelete(id);
+    await BankRepository.softDelete(id, { tenantId });
     return { message: 'Bank account deleted successfully' };
   }
 }

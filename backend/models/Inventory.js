@@ -360,11 +360,17 @@ InventorySchema.statics.updateStock = async function(productId, movement) {
       const CostingService = require('../services/costingService');
       const costingService = new CostingService();
       
+      // Get tenantId from the updated inventory record
+      const tenantId = updated?.tenantId || filter.tenantId;
+      if (!tenantId) {
+        throw new Error('tenantId is required to update average cost');
+      }
+      
       // Update average cost (this will update inventory.cost.average and save)
-      const newAverageCost = await costingService.updateAverageCost(productId, movement.quantity, movement.cost);
+      const newAverageCost = await costingService.updateAverageCost(productId, movement.quantity, movement.cost, tenantId);
       
       // Reload inventory to get updated cost and set lastPurchase
-      const inventoryWithCost = await this.findOne({ product: productId });
+      const inventoryWithCost = await this.findOne({ product: productId, tenantId });
       
       if (inventoryWithCost) {
         // Update last purchase cost
@@ -376,7 +382,7 @@ InventorySchema.statics.updateStock = async function(productId, movement) {
         
         // Sync cost to Product model
         const Product = require('../models/Product');
-        const product = await Product.findById(productId);
+        const product = await Product.findOne({ _id: productId, tenantId });
         if (product) {
           // Update product pricing.cost with average cost from inventory
           if (!product.pricing) {

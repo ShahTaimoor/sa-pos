@@ -23,7 +23,7 @@ class ClosingEntriesService {
       throw new Error('Tenant ID is required for generateClosingEntries');
     }
     try {
-      const period = await AccountingPeriod.findById(periodId);
+      const period = await AccountingPeriod.findOne({ _id: periodId, tenantId: tenantId });
       if (!period) {
         throw new Error('Accounting period not found');
       }
@@ -125,7 +125,8 @@ class ClosingEntriesService {
         }
         
         const retainedEarningsAccount = await ChartOfAccountsRepository.findOne({
-          accountCode: retainedEarningsCode
+          accountCode: retainedEarningsCode,
+          tenantId: tenantId
         });
         
         if (!retainedEarningsAccount) {
@@ -254,7 +255,7 @@ class ClosingEntriesService {
       throw new Error('Tenant ID is required for areClosingEntriesRequired');
     }
     try {
-      const period = await AccountingPeriod.findById(periodId);
+      const period = await AccountingPeriod.findOne({ _id: periodId, tenantId: tenantId });
       if (!period) {
         throw new Error('Accounting period not found');
       }

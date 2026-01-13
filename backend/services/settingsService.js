@@ -4,33 +4,45 @@ const UserRepository = require('../repositories/UserRepository');
 class SettingsService {
   /**
    * Get company settings
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getCompanySettings() {
-    return await SettingsRepository.getSettings();
+  async getCompanySettings(tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get company settings');
+    }
+    return await SettingsRepository.getSettings(tenantId);
   }
 
   /**
    * Update company settings
    * @param {object} updateData - Update data
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async updateCompanySettings(updateData) {
+  async updateCompanySettings(updateData, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to update company settings');
+    }
     // Validation
     if (!updateData.companyName || !updateData.contactNumber || !updateData.address) {
       throw new Error('Company name, contact number, and address are required');
     }
 
-    return await SettingsRepository.updateSettings(updateData);
+    return await SettingsRepository.updateSettings(updateData, tenantId);
   }
 
   /**
    * Get user preferences
    * @param {string} userId - User ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async getUserPreferences(userId) {
-    const user = await UserRepository.findById(userId, { select: 'preferences' });
+  async getUserPreferences(userId, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get user preferences');
+    }
+    const user = await UserRepository.findById(userId, { tenantId, select: 'preferences' });
     if (!user) {
       throw new Error('User not found');
     }
@@ -41,9 +53,13 @@ class SettingsService {
    * Update user preferences
    * @param {string} userId - User ID
    * @param {object} preferences - Preferences data
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async updateUserPreferences(userId, preferences) {
+  async updateUserPreferences(userId, preferences, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to update user preferences');
+    }
     const { theme, language, timezone } = preferences;
 
     const updates = {};
@@ -51,7 +67,7 @@ class SettingsService {
     if (language) updates['preferences.language'] = language;
     if (timezone) updates['preferences.timezone'] = timezone;
 
-    const user = await UserRepository.update(userId, updates);
+    const user = await UserRepository.update(userId, updates, { tenantId });
     if (!user) {
       throw new Error('User not found');
     }

@@ -251,23 +251,33 @@ class SupplierService {
 
   /**
    * Check if supplier exists by query
-   * @param {object} query - Query object
+   * @param {object} query - Query object (should include tenantId)
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<boolean>}
    */
-  async supplierExists(query) {
-    const supplier = await supplierRepository.findOne(query);
+  async supplierExists(query, tenantId = null) {
+    if (!tenantId && !query.tenantId) {
+      throw new Error('tenantId is required for supplierExists');
+    }
+    // Ensure tenantId is in query
+    const finalQuery = { ...query, tenantId: tenantId || query.tenantId };
+    const supplier = await supplierRepository.findOne(finalQuery);
     return !!supplier;
   }
 
   /**
    * Get supplier by ID with populated ledger account
    * @param {string} supplierId - Supplier ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @param {object} options - Query options (e.g., session)
    * @returns {Promise<Supplier>}
    */
-  async getSupplierByIdWithLedger(supplierId, options = {}) {
+  async getSupplierByIdWithLedger(supplierId, tenantId, options = {}) {
+    if (!tenantId) {
+      throw new Error('tenantId is required for getSupplierByIdWithLedger');
+    }
     const populate = [{ path: 'ledgerAccount', select: 'accountCode accountName' }];
-    const supplier = await supplierRepository.findById(supplierId, { ...options, populate });
+    const supplier = await supplierRepository.findById(supplierId, { ...options, tenantId, populate });
 
     if (!supplier) {
       throw new Error('Supplier not found');

@@ -9,11 +9,13 @@ class ChartOfAccountsService {
   async getAccounts(queryParams) {
     const { accountType, accountCategory, isActive, search, allowDirectPosting, tenantId, includeDeleted } = queryParams;
 
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getAccounts');
+    }
+
     const filter = {};
     // Always filter by tenantId for multi-tenant isolation
-    if (tenantId) {
-      filter.tenantId = tenantId;
-    }
+    filter.tenantId = tenantId;
     // STEP 6: Always exclude deleted accounts unless explicitly requested
     if (includeDeleted !== 'true') {
       filter.isDeleted = false;
@@ -183,7 +185,7 @@ class ChartOfAccountsService {
 
     updateFields.updatedBy = userId;
 
-    const updatedAccount = await chartOfAccountsRepository.update(id, updateFields);
+    const updatedAccount = await chartOfAccountsRepository.update(id, updateFields, { tenantId });
     
     // STEP 3: Validate parent/child rules after update
     const reloadedAccount = await chartOfAccountsRepository.findOne({ _id: id, tenantId: tenantId });

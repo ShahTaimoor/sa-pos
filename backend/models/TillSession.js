@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 
 const tillSessionSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  tenantId: { type: mongoose.Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
   storeId: { type: String, index: true },
   deviceId: { type: String },
   openedAt: { type: Date, required: true },

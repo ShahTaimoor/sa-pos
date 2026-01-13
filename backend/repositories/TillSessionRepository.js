@@ -9,11 +9,15 @@ class TillSessionRepository extends BaseRepository {
   /**
    * Find open session for a user
    * @param {string} userId - User ID
-   * @param {object} options - Query options
+   * @param {object} options - Query options including tenantId
    * @returns {Promise<TillSession|null>}
    */
   async findOpenSessionByUser(userId, options = {}) {
+    const { tenantId } = options;
     const query = { user: userId, status: 'open' };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     if (this.hasSoftDelete) query.isDeleted = false;
     return this.model.findOne(query, null, options);
   }
@@ -21,12 +25,15 @@ class TillSessionRepository extends BaseRepository {
   /**
    * Find sessions by user
    * @param {string} userId - User ID
-   * @param {object} options - Query options
+   * @param {object} options - Query options including tenantId
    * @returns {Promise<Array>}
    */
   async findSessionsByUser(userId, options = {}) {
-    const { limit = 20, sort = { createdAt: -1 }, populate = [] } = options;
+    const { limit = 20, sort = { createdAt: -1 }, populate = [], tenantId } = options;
     const query = this.hasSoftDelete ? { user: userId, isDeleted: false } : { user: userId };
+    if (tenantId) {
+      query.tenantId = tenantId;
+    }
     
     let queryBuilder = this.model.find(query);
     

@@ -99,12 +99,15 @@ class WarehouseService {
    * @returns {Promise<object>}
    */
   async updateWarehouse(id, updateData, userId, options = {}) {
-    const warehouse = await WarehouseRepository.findById(id);
+    const tenantId = options.tenantId;
+    if (!tenantId) {
+      throw new Error('tenantId is required to update warehouse');
+    }
+    
+    const warehouse = await WarehouseRepository.findById(id, { tenantId });
     if (!warehouse) {
       throw new Error('Warehouse not found');
     }
-
-    const tenantId = options.tenantId || warehouse.tenantId;
 
     // Check if code is being changed and if it already exists (within tenant)
     if (updateData.code && updateData.code !== warehouse.code && tenantId) {
@@ -122,27 +125,35 @@ class WarehouseService {
       updatedBy: userId
     };
 
-    return await WarehouseRepository.update(id, processedData);
+    return await WarehouseRepository.update(id, processedData, { tenantId });
   }
 
   /**
    * Delete warehouse
    * @param {string} id - Warehouse ID
+   * @param {string} tenantId - Tenant ID (required for multi-tenant isolation)
    * @returns {Promise<object>}
    */
-  async deleteWarehouse(id) {
-    const warehouse = await WarehouseRepository.findById(id);
+  async deleteWarehouse(id, tenantId) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to delete warehouse');
+    }
+    
+    const warehouse = await WarehouseRepository.findById(id, { tenantId });
     if (!warehouse) {
       throw new Error('Warehouse not found');
     }
 
     // Check if warehouse has inventory
-    const inventoryCount = await InventoryRepository.count({ 'location.warehouse': id });
+    const inventoryCount = await InventoryRepository.count({ 
+      'location.warehouse': id,
+      tenantId: tenantId
+    });
     if (inventoryCount > 0) {
       throw new Error(`Cannot delete warehouse. It has ${inventoryCount} inventory item(s). Please transfer or remove inventory first.`);
     }
 
-    await WarehouseRepository.softDelete(id);
+    await WarehouseRepository.softDelete(id, { tenantId });
     return { message: 'Warehouse deleted successfully' };
   }
 }

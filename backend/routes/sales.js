@@ -1095,7 +1095,8 @@ router.put('/:id', [
                 referenceId: order._id,
                 referenceModel: 'SalesOrder',
                 performedBy: req.user._id,
-                notes: `Inventory reduced due to order ${order.orderNumber} update - quantity increased by ${quantityChange}`
+                notes: `Inventory reduced due to order ${order.orderNumber} update - quantity increased by ${quantityChange}`,
+                tenantId: tenantId
               });
             } else {
               // Quantity decreased - restore inventory
@@ -1108,7 +1109,8 @@ router.put('/:id', [
                 referenceId: order._id,
                 referenceModel: 'SalesOrder',
                 performedBy: req.user._id,
-                notes: `Inventory restored due to order ${order.orderNumber} update - quantity decreased by ${Math.abs(quantityChange)}`
+                notes: `Inventory restored due to order ${order.orderNumber} update - quantity decreased by ${Math.abs(quantityChange)}`,
+                tenantId: tenantId
               });
             }
           }

@@ -176,7 +176,13 @@ class CityService {
     if (dataToUpdate.country !== undefined) dataToUpdate.country = dataToUpdate.country.trim();
     if (dataToUpdate.description !== undefined) dataToUpdate.description = dataToUpdate.description ? dataToUpdate.description.trim() : undefined;
 
+    // Use tenantId from options or fallback to city's tenantId
+    const finalTenantId = tenantId || city.tenantId;
+    if (!finalTenantId) {
+      throw new Error('tenantId is required to update city');
+    }
     const updatedCity = await cityRepository.update(id, dataToUpdate, {
+      tenantId: finalTenantId,
       new: true,
       runValidators: true
     });
@@ -226,7 +232,7 @@ class CityService {
       throw new Error('Cannot delete city. It is being used by customers or suppliers. Deactivate it instead.');
     }
 
-    await cityRepository.softDelete(id);
+    await cityRepository.softDelete(id, { tenantId: finalTenantId });
 
     return {
       message: 'City deleted successfully'

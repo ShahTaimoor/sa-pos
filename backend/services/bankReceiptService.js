@@ -10,6 +10,9 @@ class BankReceiptService {
    * @returns {Promise<object>}
    */
   async getBankReceipts(queryParams, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get bank receipts');
+    }
     const page = parseInt(queryParams.page) || 1;
     const limit = parseInt(queryParams.limit) || 50;
 
@@ -19,9 +22,7 @@ class BankReceiptService {
     const filter = {};
     
     // Add tenant filter for multi-tenant isolation
-    if (tenantId) {
-      filter.tenantId = tenantId;
-    }
+    filter.tenantId = tenantId;
 
     // Date range filter
     if (fromDate || toDate) {
@@ -69,10 +70,14 @@ class BankReceiptService {
   /**
    * Get single bank receipt by ID
    * @param {string} id - Bank receipt ID
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<object>}
    */
-  async getBankReceiptById(id) {
-    const bankReceipt = await BankReceiptRepository.findById(id, [
+  async getBankReceiptById(id, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get bank receipt by ID');
+    }
+    const bankReceipt = await BankReceiptRepository.findById(id, { tenantId }, [
       { path: 'bank', select: 'accountName accountNumber bankName' },
       { path: 'order', model: 'Sales', select: 'orderNumber' },
       { path: 'customer', select: 'name businessName' },
@@ -95,6 +100,9 @@ class BankReceiptService {
    * @returns {Promise<object>}
    */
   async getSummary(fromDate, toDate, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get bank receipt summary');
+    }
     const startOfDay = new Date(fromDate);
     startOfDay.setHours(0, 0, 0, 0);
     
@@ -112,11 +120,11 @@ class BankReceiptService {
    * @returns {Promise<boolean>}
    */
   async customerExists(customerId, tenantId = null) {
-    // Build query with tenant filter
-    const query = { _id: customerId };
-    if (tenantId) {
-      query.tenantId = tenantId;
+    if (!tenantId) {
+      throw new Error('tenantId is required to check if customer exists');
     }
+    // Build query with tenant filter
+    const query = { _id: customerId, tenantId: tenantId };
     
     const customer = await CustomerRepository.findOne(query);
     return !!customer;
@@ -129,11 +137,11 @@ class BankReceiptService {
    * @returns {Promise<boolean>}
    */
   async supplierExists(supplierId, tenantId = null) {
-    // Build query with tenant filter
-    const query = { _id: supplierId };
-    if (tenantId) {
-      query.tenantId = tenantId;
+    if (!tenantId) {
+      throw new Error('tenantId is required to check if supplier exists');
     }
+    // Build query with tenant filter
+    const query = { _id: supplierId, tenantId: tenantId };
     
     const supplier = await SupplierRepository.findOne(query);
     return !!supplier;

@@ -465,7 +465,11 @@ router.get('/summary/date-range', [
 
     const { fromDate, toDate } = req.query;
 
-    const summary = await cashReceiptService.getSummary(fromDate, toDate);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const summary = await cashReceiptService.getSummary(fromDate, toDate, tenantId);
 
     res.json({
       success: true,

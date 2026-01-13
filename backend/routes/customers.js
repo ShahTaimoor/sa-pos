@@ -685,7 +685,11 @@ router.post('/:id/restore', [
   requirePermission('delete_customers')
 ], async (req, res) => {
   try {
-    const result = await customerService.restoreCustomer(req.params.id, req.user._id);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await customerService.restoreCustomer(req.params.id, req.user._id, tenantId);
     res.json({ success: true, message: result.message, customer: result.customer });
   } catch (error) {
     logger.error('Restore customer error:', { error: error });
@@ -701,7 +705,11 @@ router.get('/deleted', [
   requirePermission('view_customers')
 ], async (req, res) => {
   try {
-    const result = await customerService.getDeletedCustomers(req.query);
+    const tenantId = req.tenantId || req.user?.tenantId;
+    if (!tenantId) {
+      return res.status(400).json({ message: 'Tenant ID is required' });
+    }
+    const result = await customerService.getDeletedCustomers(req.query, tenantId);
     res.json({ success: true, ...result });
   } catch (error) {
     logger.error('Get deleted customers error:', { error: error });

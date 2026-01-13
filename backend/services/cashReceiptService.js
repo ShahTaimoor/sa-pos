@@ -9,6 +9,9 @@ class CashReceiptService {
    * @returns {Promise<object>}
    */
   async getCashReceipts(queryParams, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get cash receipts');
+    }
     const page = parseInt(queryParams.page) || 1;
     const limit = parseInt(queryParams.limit) || 50;
 
@@ -18,9 +21,7 @@ class CashReceiptService {
     const filter = {};
     
     // Add tenant filter for multi-tenant isolation
-    if (tenantId) {
-      filter.tenantId = tenantId;
-    }
+    filter.tenantId = tenantId;
 
     // Date range filter
     if (fromDate || toDate) {
@@ -72,11 +73,11 @@ class CashReceiptService {
    * @returns {Promise<object>}
    */
   async getCashReceiptById(id, tenantId = null) {
-    // Build query with tenant filter
-    const query = { _id: id };
-    if (tenantId) {
-      query.tenantId = tenantId;
+    if (!tenantId) {
+      throw new Error('tenantId is required to get cash receipt by ID');
     }
+    // Build query with tenant filter
+    const query = { _id: id, tenantId: tenantId };
     
     const cashReceipt = await CashReceiptRepository.findOne(query, [
       { path: 'order', model: 'Sales', select: 'orderNumber' },
@@ -96,9 +97,13 @@ class CashReceiptService {
    * Get cash receipt summary
    * @param {Date} fromDate - Start date
    * @param {Date} toDate - End date
+   * @param {string} tenantId - Tenant ID for multi-tenant isolation
    * @returns {Promise<object>}
    */
-  async getSummary(fromDate, toDate) {
+  async getSummary(fromDate, toDate, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('tenantId is required to get cash receipt summary');
+    }
     const startOfDay = new Date(fromDate);
     startOfDay.setHours(0, 0, 0, 0);
     
@@ -106,7 +111,7 @@ class CashReceiptService {
     endOfDay.setDate(endOfDay.getDate() + 1);
     endOfDay.setHours(0, 0, 0, 0);
 
-    return await CashReceiptRepository.getSummary(startOfDay, endOfDay);
+    return await CashReceiptRepository.getSummary(startOfDay, endOfDay, tenantId);
   }
 
   /**
@@ -116,11 +121,11 @@ class CashReceiptService {
    * @returns {Promise<Array>}
    */
   async getCustomersByIds(customerIds, tenantId = null) {
-    // Build filter with tenant
-    const filter = { _id: { $in: customerIds } };
-    if (tenantId) {
-      filter.tenantId = tenantId;
+    if (!tenantId) {
+      throw new Error('tenantId is required to get customers by IDs');
     }
+    // Build filter with tenant
+    const filter = { _id: { $in: customerIds }, tenantId: tenantId };
     
     return await CustomerRepository.findAll(filter, { 
       select: 'name businessName',

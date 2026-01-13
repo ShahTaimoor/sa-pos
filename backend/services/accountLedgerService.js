@@ -216,9 +216,13 @@ class AccountLedgerService {
    * Get Account Ledger Summary for Customers and Suppliers
    * Separates customers (receivables) and suppliers (payables) with correct accounting formulas
    * @param {object} queryParams - Query parameters (startDate, endDate, search)
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<object>}
    */
-  async getLedgerSummary(queryParams = {}) {
+  async getLedgerSummary(queryParams = {}, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getLedgerSummary');
+    }
     try {
       const { startDate, endDate, search, customerId, supplierId } = queryParams;
       
@@ -242,7 +246,7 @@ class AccountLedgerService {
     }
 
     // Get all active customers (or specific customer if customerId is provided)
-    const customerFilter = { status: 'active', isDeleted: { $ne: true } };
+    const customerFilter = { status: 'active', isDeleted: { $ne: true }, tenantId: tenantId };
     if (customerId) {
       customerFilter._id = customerId;
     }
@@ -252,7 +256,7 @@ class AccountLedgerService {
     );
 
     // Get all active suppliers (or specific supplier if supplierId is provided)
-    const supplierFilter = { status: 'active', isDeleted: { $ne: true } };
+    const supplierFilter = { status: 'active', isDeleted: { $ne: true }, tenantId: tenantId };
     if (supplierId) {
       supplierFilter._id = supplierId;
     }
@@ -290,6 +294,7 @@ class AccountLedgerService {
           // Get sales before start date
           const openingSales = await Sales.find({
             customer: customerId,
+            tenantId: tenantId,
             createdAt: { $lt: start },
             isDeleted: { $ne: true }
           }).lean();
@@ -301,6 +306,7 @@ class AccountLedgerService {
           // Get receipts before start date (receipts use 'date' field, not 'createdAt')
           const openingCashReceipts = await cashReceiptRepository.findAll({
             customer: customerId,
+            tenantId: tenantId,
             date: { $lt: start }
           }, { lean: true });
           
@@ -310,6 +316,7 @@ class AccountLedgerService {
           
           const openingBankReceipts = await bankReceiptRepository.findAll({
             customer: customerId,
+            tenantId: tenantId,
             date: { $lt: start }
           }, { lean: true });
           
@@ -325,6 +332,7 @@ class AccountLedgerService {
         // Sales (Debit - increases receivables) - uses createdAt
         const periodSales = await Sales.find({
           customer: customerId,
+          tenantId: tenantId,
           ...salesDateFilter,
           isDeleted: { $ne: true }
         }).lean();
@@ -336,6 +344,7 @@ class AccountLedgerService {
         // Cash Receipts (Credit - decreases receivables) - uses date field
         const periodCashReceipts = await cashReceiptRepository.findAll({
           customer: customerId,
+          tenantId: tenantId,
           ...receiptDateFilter
         }, { lean: true });
         
@@ -346,6 +355,7 @@ class AccountLedgerService {
         // Bank Receipts (Credit - decreases receivables) - uses date field
         const periodBankReceipts = await bankReceiptRepository.findAll({
           customer: customerId,
+          tenantId: tenantId,
           ...receiptDateFilter
         }, { lean: true });
         
@@ -433,6 +443,7 @@ class AccountLedgerService {
           // Get purchases before start date
           const openingPurchases = await PurchaseOrder.find({
             supplier: supplierId,
+            tenantId: tenantId,
             createdAt: { $lt: start },
             isDeleted: { $ne: true }
           }).lean();
@@ -444,6 +455,7 @@ class AccountLedgerService {
           // Get payments before start date (payments use 'date' field, not 'createdAt')
           const openingCashPayments = await cashPaymentRepository.findAll({
             supplier: supplierId,
+            tenantId: tenantId,
             date: { $lt: start }
           }, { lean: true });
           
@@ -453,6 +465,7 @@ class AccountLedgerService {
           
           const openingBankPayments = await bankPaymentRepository.findAll({
             supplier: supplierId,
+            tenantId: tenantId,
             date: { $lt: start }
           }, { lean: true });
           
@@ -468,6 +481,7 @@ class AccountLedgerService {
         // Purchases (Credit - increases payables) - uses createdAt
         const periodPurchases = await PurchaseOrder.find({
           supplier: supplierId,
+          tenantId: tenantId,
           ...salesDateFilter,
           isDeleted: { $ne: true }
         }).lean();
@@ -479,6 +493,7 @@ class AccountLedgerService {
         // Cash Payments (Debit - decreases payables) - uses date field
         const periodCashPayments = await cashPaymentRepository.findAll({
           supplier: supplierId,
+          tenantId: tenantId,
           ...receiptDateFilter
         }, { lean: true });
         
@@ -489,6 +504,7 @@ class AccountLedgerService {
         // Bank Payments (Debit - decreases payables) - uses date field
         const periodBankPayments = await bankPaymentRepository.findAll({
           supplier: supplierId,
+          tenantId: tenantId,
           ...receiptDateFilter
         }, { lean: true });
         
@@ -593,9 +609,13 @@ class AccountLedgerService {
   /**
    * Get detailed transaction entries for a customer (for ledger view)
    * @param {object} queryParams - Query parameters (customerId, startDate, endDate)
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<object>}
    */
-  async getCustomerDetailedTransactions(queryParams = {}) {
+  async getCustomerDetailedTransactions(queryParams = {}, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getCustomerDetailedTransactions');
+    }
     try {
       const { customerId, startDate, endDate } = queryParams;
       
@@ -614,7 +634,7 @@ class AccountLedgerService {
       const { start, end } = this.clampDateRange(startDate, endDate);
       
       // Get customer info
-      const customer = await customerRepository.findById(customerId, { lean: true });
+      const customer = await customerRepository.findById(customerId, { tenantId, lean: true });
       if (!customer) {
         return {
           success: true,
@@ -639,6 +659,7 @@ class AccountLedgerService {
       if (start) {
         const openingSales = await Sales.find({
           customer: customerId,
+          tenantId: tenantId,
           createdAt: { $lt: start },
           isDeleted: { $ne: true }
         }).lean();
@@ -649,6 +670,7 @@ class AccountLedgerService {
         
         const openingCashReceipts = await cashReceiptRepository.findAll({
           customer: customerId,
+          tenantId: tenantId,
           date: { $lt: start }
         }, { lean: true });
         
@@ -658,6 +680,7 @@ class AccountLedgerService {
         
         const openingBankReceipts = await bankReceiptRepository.findAll({
           customer: customerId,
+          tenantId: tenantId,
           date: { $lt: start }
         }, { lean: true });
         
@@ -688,6 +711,7 @@ class AccountLedgerService {
       // Get Sales (Debit) - collect without calculating balance
       const periodSales = await Sales.find({
         customer: customerId,
+        tenantId: tenantId,
         ...salesDateFilter,
         isDeleted: { $ne: true }
       }).sort({ createdAt: 1 }).lean();
@@ -709,6 +733,7 @@ class AccountLedgerService {
       // Get Cash Receipts (Credit) - collect without calculating balance
       const periodCashReceipts = await cashReceiptRepository.findAll({
         customer: customerId,
+        tenantId: tenantId,
         ...receiptDateFilter
       }, { 
         lean: true 
@@ -731,6 +756,7 @@ class AccountLedgerService {
       // Get Bank Receipts (Credit) - collect without calculating balance
       const periodBankReceipts = await bankReceiptRepository.findAll({
         customer: customerId,
+        tenantId: tenantId,
         ...receiptDateFilter
       }, { 
         lean: true 
@@ -754,6 +780,7 @@ class AccountLedgerService {
       // Get Cash Payments (if any - for refunds/returns) - collect without calculating balance
       const periodCashPayments = await cashPaymentRepository.findAll({
         customer: customerId,
+        tenantId: tenantId,
         ...receiptDateFilter
       }, { 
         lean: true 
@@ -776,6 +803,7 @@ class AccountLedgerService {
       // Get Bank Payments (if any - for refunds/returns) - collect without calculating balance
       const periodBankPayments = await bankPaymentRepository.findAll({
         customer: customerId,
+        tenantId: tenantId,
         ...receiptDateFilter
       }, { 
         lean: true 
@@ -841,9 +869,13 @@ class AccountLedgerService {
   /**
    * Get detailed transaction entries for a supplier (for ledger view)
    * @param {object} queryParams - Query parameters (supplierId, startDate, endDate)
+   * @param {string} tenantId - Tenant ID (required)
    * @returns {Promise<object>}
    */
-  async getSupplierDetailedTransactions(queryParams = {}) {
+  async getSupplierDetailedTransactions(queryParams = {}, tenantId = null) {
+    if (!tenantId) {
+      throw new Error('Tenant ID is required for getSupplierDetailedTransactions');
+    }
     try {
       const { supplierId, startDate, endDate } = queryParams;
       
@@ -862,7 +894,7 @@ class AccountLedgerService {
       const { start, end } = this.clampDateRange(startDate, endDate);
       
       // Get supplier info
-      const supplier = await supplierRepository.findById(supplierId, { lean: true });
+      const supplier = await supplierRepository.findById(supplierId, { tenantId, lean: true });
       if (!supplier) {
         return {
           success: true,
@@ -886,6 +918,7 @@ class AccountLedgerService {
       if (start) {
         const openingPurchases = await PurchaseOrder.find({
           supplier: supplierId,
+          tenantId: tenantId,
           createdAt: { $lt: start },
           isDeleted: { $ne: true }
         }).lean();
@@ -896,6 +929,7 @@ class AccountLedgerService {
         
         const openingCashPayments = await cashPaymentRepository.findAll({
           supplier: supplierId,
+          tenantId: tenantId,
           date: { $lt: start }
         }, { lean: true });
         
@@ -905,6 +939,7 @@ class AccountLedgerService {
         
         const openingBankPayments = await bankPaymentRepository.findAll({
           supplier: supplierId,
+          tenantId: tenantId,
           date: { $lt: start }
         }, { lean: true });
         
@@ -915,6 +950,7 @@ class AccountLedgerService {
         // Get opening cash receipts from supplier (refunds/returns)
         const openingCashReceipts = await cashReceiptRepository.findAll({
           supplier: supplierId,
+          tenantId: tenantId,
           date: { $lt: start }
         }, { lean: true });
         
@@ -925,6 +961,7 @@ class AccountLedgerService {
         // Get opening bank receipts from supplier (refunds/returns)
         const openingBankReceipts = await bankReceiptRepository.findAll({
           supplier: supplierId,
+          tenantId: tenantId,
           date: { $lt: start }
         }, { lean: true });
         
@@ -956,6 +993,7 @@ class AccountLedgerService {
       // Get Purchase Orders (Credit - increases payables) - collect without calculating balance
       const periodPurchases = await PurchaseOrder.find({
         supplier: supplierId,
+        tenantId: tenantId,
         ...salesDateFilter,
         isDeleted: { $ne: true }
       }).sort({ createdAt: 1 }).lean();
@@ -977,6 +1015,7 @@ class AccountLedgerService {
       // Get Cash Payments (Debit - decreases payables) - collect without calculating balance
       const periodCashPayments = await cashPaymentRepository.findAll({
         supplier: supplierId,
+        tenantId: tenantId,
         ...receiptDateFilter
       }, { 
         lean: true 
@@ -999,6 +1038,7 @@ class AccountLedgerService {
       // Get Bank Payments (Debit - decreases payables) - collect without calculating balance
       const periodBankPayments = await bankPaymentRepository.findAll({
         supplier: supplierId,
+        tenantId: tenantId,
         ...receiptDateFilter
       }, { 
         lean: true 
@@ -1022,6 +1062,7 @@ class AccountLedgerService {
       // Get Cash Receipts from Supplier (Credit - decreases payables, like refunds/returns) - collect without calculating balance
       const periodCashReceipts = await cashReceiptRepository.findAll({
         supplier: supplierId,
+        tenantId: tenantId,
         ...receiptDateFilter
       }, { 
         lean: true 
@@ -1044,6 +1085,7 @@ class AccountLedgerService {
       // Get Bank Receipts from Supplier (Credit - decreases payables, like refunds/returns) - collect without calculating balance
       const periodBankReceipts = await bankReceiptRepository.findAll({
         supplier: supplierId,
+        tenantId: tenantId,
         ...receiptDateFilter
       }, { 
         lean: true 
