@@ -1,5 +1,6 @@
 const express = require('express');
 const { auth, requirePermission } = require('../middleware/auth');
+const { tenantMiddleware } = require('../middleware/tenantMiddleware');
 const { query } = require('express-validator');
 const exportService = require('../services/exportService');
 const accountLedgerService = require('../services/accountLedgerService');
@@ -25,6 +26,7 @@ const router = express.Router();
  */
 router.get('/', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_reports'),
   query('startDate').optional().isISO8601().withMessage('Invalid start date'),
   query('endDate').optional().isISO8601().withMessage('Invalid end date'),
@@ -49,6 +51,7 @@ router.get('/', [
       page = 1
     } = req.query;
 
+    const tenantId = req.tenantId;
     // Get account ledger data from service
     const result = await accountLedgerService.getAccountLedger({
       startDate,
@@ -230,6 +233,7 @@ router.get('/', [
  */
 router.get('/accounts', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_reports'),
   query('startDate').optional().isISO8601().withMessage('Invalid start date'),
   query('endDate').optional().isISO8601().withMessage('Invalid end date')
@@ -249,13 +253,7 @@ router.get('/accounts', [
     }
 
     // Get all accounts
-    const tenantId = req.tenantId || req.user?.tenantId;
-    if (!tenantId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tenant ID is required'
-      });
-    }
+    const tenantId = req.tenantId;
     
     const accounts = await chartOfAccountsRepository.findAll({ 
       tenantId: tenantId,
@@ -310,7 +308,7 @@ router.get('/accounts', [
     });
 
     // Get all customers and create customer accounts
-    const customers = await customerRepository.findAll({ status: 'active' }, { lean: true });
+    const customers = await customerRepository.findAll({ status: 'active' }, { tenantId: tenantId, lean: true });
     const customerAccounts = customers.map(customer => {
       const displayName = customer.businessName || 
                          `${customer.firstName || ''} ${customer.lastName || ''}`.trim() ||
@@ -351,7 +349,7 @@ router.get('/accounts', [
     });
 
     // Get all suppliers and create supplier accounts
-    const suppliers = await supplierRepository.findAll({ status: 'active' }, { lean: true });
+    const suppliers = await supplierRepository.findAll({ status: 'active' }, { tenantId: tenantId, lean: true });
     const supplierAccounts = suppliers.map(supplier => {
       const displayName = supplier.companyName || 
                          supplier.contactPerson?.name ||
@@ -434,6 +432,7 @@ router.get('/accounts', [
  */
 router.get('/all-entries', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_reports'),
   query('startDate').optional().isISO8601().withMessage('Invalid start date'),
   query('endDate').optional().isISO8601().withMessage('Invalid end date'),
@@ -450,6 +449,9 @@ router.get('/all-entries', [
     if (start) dateFilter.$gte = start;
     if (end) dateFilter.$lte = end;
 
+    // Resolve tenantId first for all queries
+    const tenantId = req.tenantId;
+    
     // Check if accountCode is for a customer or supplier account
     // Also check if customerId/supplierId is passed directly in query (from frontend)
     let customerId = queryCustomerId ? (typeof queryCustomerId === 'string' ? queryCustomerId : queryCustomerId.toString()) : null;
@@ -465,7 +467,7 @@ router.get('/all-entries', [
         // First try to find by MongoDB ObjectId if customerCode looks like an ObjectId
         if (customerCode.length === 24 && /^[0-9a-fA-F]{24}$/.test(customerCode)) {
           try {
-            customer = await customerRepository.findById(customerCode, { lean: true });
+            customer = await customerRepository.findById(customerCode, { tenantId: tenantId, lean: true });
           } catch (e) {
             // Not a valid ObjectId, continue with other methods
           }
@@ -478,8 +480,9 @@ router.get('/all-entries', [
               { customerCode: customerCode },
               { ledgerAccountCode: accountCode },
               { _id: customerCode }
-            ]
-          }, { lean: true });
+            ],
+            tenantId: tenantId
+          }, { tenantId: tenantId, lean: true });
         }
         
         // If still not found, try to find by matching account name pattern
@@ -491,8 +494,9 @@ router.get('/all-entries', [
               { displayName: { $regex: new RegExp(`^${nameMatch}$`, 'i') } },
               { firstName: { $regex: new RegExp(`^${nameMatch}$`, 'i') } },
               { lastName: { $regex: new RegExp(`^${nameMatch}$`, 'i') } }
-            ]
-          }, { lean: true });
+            ],
+            tenantId: tenantId
+          }, { tenantId: tenantId, lean: true });
         }
         
         if (customer) {
@@ -508,22 +512,16 @@ router.get('/all-entries', [
             { supplierCode: supplierCode },
             { ledgerAccountCode: accountCode },
             { _id: supplierCode }
-          ]
-        }, { lean: true });
+          ],
+          tenantId: tenantId
+        }, { tenantId: tenantId, lean: true });
         if (supplier) {
           supplierId = supplier._id;
         }
       }
     }
 
-    // Resolve cash/bank codes dynamically
-    const tenantId = req.tenantId || req.user?.tenantId;
-    if (!tenantId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tenant ID is required'
-      });
-    }
+    // Resolve cash/bank codes dynamically (tenantId already defined above)
     const { cashCode, bankCode } = await chartOfAccountsRepository.resolveCashBankCodes(tenantId);
 
     // Get all entries from different sources
@@ -531,11 +529,13 @@ router.get('/all-entries', [
 
     // 1. Get Cash Receipts
     const cashReceiptFilter = Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {};
+    cashReceiptFilter.tenantId = tenantId; // Add tenantId for isolation
     // Add customer filter if customer account is selected
     if (customerId) {
       cashReceiptFilter.customer = customerId;
     }
     const cashReceipts = await cashReceiptRepository.findAll(cashReceiptFilter, {
+      tenantId: tenantId,
       populate: [
         { path: 'customer', select: 'firstName lastName businessName displayName' },
         { path: 'createdBy', select: 'firstName lastName' }
@@ -569,6 +569,7 @@ router.get('/all-entries', [
 
     // 2. Get Cash Payments
     const cashPayments = await cashPaymentRepository.findAll(cashReceiptFilter, {
+      tenantId: tenantId,
       populate: [
         { path: 'supplier', select: 'name' },
         { path: 'createdBy', select: 'firstName lastName' }
@@ -596,11 +597,13 @@ router.get('/all-entries', [
 
     // 3. Get Bank Receipts
     const bankReceiptFilter = Object.keys(dateFilter).length > 0 ? { createdAt: dateFilter } : {};
+    bankReceiptFilter.tenantId = tenantId; // Add tenantId for isolation
     // Add customer filter if customer account is selected
     if (customerId) {
       bankReceiptFilter.customer = customerId;
     }
     const bankReceipts = await bankReceiptRepository.findAll(bankReceiptFilter, {
+      tenantId: tenantId,
       populate: [
         { path: 'customer', select: 'firstName lastName businessName displayName' },
         { path: 'createdBy', select: 'firstName lastName' }
@@ -634,6 +637,7 @@ router.get('/all-entries', [
 
     // 4. Get Bank Payments
     const bankPayments = await bankPaymentRepository.findAll(cashReceiptFilter, {
+      tenantId: tenantId,
       populate: [
         { path: 'supplier', select: 'name' },
         { path: 'createdBy', select: 'firstName lastName' }
@@ -676,6 +680,7 @@ const logger = require('../utils/logger');
         
         const salesFilter = {
           customer: customerObjectId,
+          tenantId: tenantId,
           isDeleted: { $ne: true }
         };
         if (Object.keys(dateFilter).length > 0) {
@@ -741,6 +746,7 @@ const logger = require('../utils/logger');
     }
     
     const transactions = await transactionRepository.findAll(transactionFilter, {
+      tenantId: tenantId,
       populate: [
         { path: 'customer.id', select: 'firstName lastName businessName' },
         { path: 'supplier', select: 'companyName contactPerson' },
@@ -845,7 +851,8 @@ const logger = require('../utils/logger');
     
     if (customerId) {
       // For customer accounts, use customer's opening balance
-      const customer = await customerRepository.findById(customerId, { lean: true });
+      const tenantId = req.tenantId;
+      const customer = await customerRepository.findById(customerId, { tenantId: tenantId, lean: true });
       if (customer) {
         openingBalance = customer.openingBalance || customer.advanceBalance || 0;
         accountInfo = {
@@ -860,6 +867,7 @@ const logger = require('../utils/logger');
           // Get sales before start date
           const openingSales = await Sales.find({
             customer: customerId,
+            tenantId: tenantId,
             createdAt: { $lt: start },
             isDeleted: { $ne: true }
           }).lean();
@@ -871,8 +879,9 @@ const logger = require('../utils/logger');
           // Get receipts before start date
           const openingReceipts = await cashReceiptRepository.findAll({
             customer: customerId,
+            tenantId: tenantId,
             createdAt: { $lt: start }
-          }, { lean: true });
+          }, { tenantId: tenantId, lean: true });
           
           const openingReceiptsTotal = openingReceipts.reduce((sum, receipt) => {
             return sum + (receipt.amount || 0);
@@ -881,8 +890,9 @@ const logger = require('../utils/logger');
           // Get bank receipts before start date
           const openingBankReceipts = await bankReceiptRepository.findAll({
             customer: customerId,
+            tenantId: tenantId,
             createdAt: { $lt: start }
-          }, { lean: true });
+          }, { tenantId: tenantId, lean: true });
           
           const openingBankReceiptsTotal = openingBankReceipts.reduce((sum, receipt) => {
             return sum + (receipt.amount || 0);
@@ -894,7 +904,8 @@ const logger = require('../utils/logger');
       }
     } else if (supplierId) {
       // For supplier accounts, use supplier's opening balance
-      const supplier = await supplierRepository.findById(supplierId, { lean: true });
+      const tenantId = req.tenantId;
+      const supplier = await supplierRepository.findById(supplierId, { tenantId: tenantId, lean: true });
       if (supplier) {
         openingBalance = supplier.openingBalance || 0;
         accountInfo = {
@@ -1134,6 +1145,7 @@ const logger = require('../utils/logger');
  */
 router.get('/summary', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_reports'),
   query('startDate').optional().isISO8601().withMessage('Invalid start date'),
   query('endDate').optional().isISO8601().withMessage('Invalid end date'),
@@ -1143,7 +1155,9 @@ router.get('/summary', [
   try {
     const { startDate, endDate, search, customerId, supplierId } = req.query;
 
+    const tenantId = req.tenantId;
     const result = await accountLedgerService.getLedgerSummary({
+      tenantId,
       startDate,
       endDate,
       search,
@@ -1169,6 +1183,7 @@ router.get('/summary', [
  */
 router.get('/customer-transactions', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_reports'),
   query('startDate').optional().isISO8601().withMessage('Invalid start date'),
   query('endDate').optional().isISO8601().withMessage('Invalid end date'),
@@ -1184,7 +1199,9 @@ router.get('/customer-transactions', [
       });
     }
 
+    const tenantId = req.tenantId;
     const result = await accountLedgerService.getCustomerDetailedTransactions({
+      tenantId,
       customerId,
       startDate,
       endDate
@@ -1208,6 +1225,7 @@ router.get('/customer-transactions', [
  */
 router.get('/supplier-transactions/:supplierId', [
   auth,
+  tenantMiddleware, // Enforce tenant isolation
   requirePermission('view_reports'),
   query('startDate').optional().isISO8601().withMessage('Invalid start date'),
   query('endDate').optional().isISO8601().withMessage('Invalid end date')
@@ -1223,7 +1241,9 @@ router.get('/supplier-transactions/:supplierId', [
       });
     }
 
+    const tenantId = req.tenantId;
     const result = await accountLedgerService.getSupplierDetailedTransactions({
+      tenantId,
       supplierId,
       startDate,
       endDate
